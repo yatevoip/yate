@@ -211,12 +211,6 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 	    bool amrOctet = m_codecs.getBoolValue("amr_octet",false);
 	    int defmap = -1;
 	    String payload(lookup(var,s_payloads));
-	    if (amrOctet) {
-		if (payload == YSTRING("amr"))
-		    payload = "amr-o";
-		else if (payload == YSTRING("amr/16000"))
-		    payload = "amr-o/16000";
-	    }
 
 	    const ObjList* l = sdp.lines().find(c);
 	    while (l && (l = l->skipNext())) {
@@ -262,6 +256,12 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 			    }
 			}
 			payload = pload;
+			if (amrOctet) {
+			    if (payload == YSTRING("amr"))
+				payload = "amr-o";
+			    else if (payload == YSTRING("amr/16000"))
+				payload = "amr-o/16000";
+			}
 		    }
 		}
 		else if (line.startSkip("fmtp:",false)) {
