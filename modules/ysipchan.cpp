@@ -6313,6 +6313,8 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 	m_domain = line->domain(m_domain);
     }
     String display = msg.getValue(YSTRING("callername"),(line ? line->getFullName().c_str() : (const char*)0));
+    m_dialog.setCSeq(plugin.ep()->engine()->getSequence()->getNextCSeq() - 1);
+    m->setSequence(m_dialog.getSequence());
     m->complete(plugin.ep()->engine(),
 	callerId ? (callerId->null() ? "anonymous" : callerId->c_str()) : (const char*)0,
 	m_domain,
@@ -6339,7 +6341,6 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     SocketAddr::appendTo(m_address,m_host,m_port);
     filterDebug(m_address);
     m_dialog = *m;
-    m_dialog.setCSeq(m->getCSeq());
     m_dialog.remoteCSeq = msg.getIntValue("remote_cseq",-1);
     if (s_privacy)
 	copyPrivacy(*m,msg);
