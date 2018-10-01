@@ -988,7 +988,12 @@ bool ExtModReceiver::received(Message &msg, int id)
 {
     if (m_dead || m_quit)
 	return false;
-    lock();
+    if (!lock(m_timeout > 0 ? ((long)m_timeout * 1000) : -1)) {
+	Alarm("extmodule","performance",DebugWarn,
+	    "Failed to lock to queue message (%p) '%s' for %d msec [%p]",
+	    &msg,msg.c_str(),m_timeout,this);
+	return false;
+    }
     // check if we are no longer running
     bool ok = (m_pid > 0) && !m_dead && m_in && m_in->valid() && m_out && m_out->valid();
     if (ok && !m_reenter) {
