@@ -84,7 +84,7 @@ private:
   * Class MyAcct
   * A MySQL database account
   */
-class MyAcct : public String, public Mutex
+class MyAcct : public RefObject, public Mutex
 {
     friend class MyConn;
 public:
@@ -96,6 +96,8 @@ public:
     void dropDb();
     inline bool ok() const
 	{ return 0 != m_connections.skipNull(); }
+    inline const char* c_str() const
+	{ return m_name; }
 
     void appendQuery(DbQuery* query);
 
@@ -123,7 +125,11 @@ public:
 	{ return m_retryTime && m_connections.count() < (unsigned int)m_poolSize; }
     inline int poolSize()
 	{ return m_poolSize; }
+    virtual const String& toString() const
+	{ return m_name; }
+
 private:
+    String m_name;
     unsigned int m_timeout;
     // interval at which connection initialization should be tried
     unsigned int m_retryTime;
@@ -427,8 +433,8 @@ int MyConn::queryDbInternal(DbQuery* query)
   * MyAcct
   */
 MyAcct::MyAcct(const NamedList* sect)
-    : String(*sect),
-      Mutex(true,"MySQL::acct"),
+    : Mutex(true,"MySQL::acct"),
+      m_name(*sect),
       m_poolSize(sect->getIntValue("poolsize",1,1)),
       m_queueSem(m_poolSize,"MySQL::queue"),
       m_queueMutex(false,"MySQL::queue"),
@@ -668,13 +674,21 @@ void DbThread::cleanup()
 }
 
 
-static MyAcct* findDb(const String& account)
+static inline MyAcct* findDb(const String& account)
 {
     if (account.null())
 	return 0;
     ObjList* l = s_conns.find(account);
     return l ? static_cast<MyAcct*>(l->get()) : 0;
 }
+
+static inline bool findDb(RefPointer<MyAcct>& acct, const String& account)
+{
+    Lock lck(s_acctMutex);
+    acct = findDb(account);
+    return acct != 0;
+}
+
 
 /**
   * MyHandler
@@ -684,12 +698,9 @@ bool MyHandler::received(Message& msg)
     const String* str = msg.getParam("account");
     if (TelEngine::null(str))
 	return false;
-    Lock lock(s_acctMutex);
-    MyAcct* db = findDb(*str);
-    if (!(db && db->ok()))
+    RefPointer<MyAcct> db;
+    if (!(findDb(db,*str) && db->ok()))
 	return false;
-    Lock lo(db);
-    lock.drop();
 
     str = msg.getParam("query");
     if (!TelEngine::null(str)) {
@@ -707,6 +718,7 @@ bool MyHandler::received(Message& msg)
 	    db->appendQuery(new DbQuery(*str,0));
     }
     msg.setParam("dbtype","mysqldb");
+    db = 0;
     return true;
 }
 
