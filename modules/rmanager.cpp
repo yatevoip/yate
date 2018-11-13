@@ -484,8 +484,11 @@ void Connection::run()
     }
     else {
 	m_auth = cfg().getValue("password") ? User : Admin;
-	if (Admin == m_auth)
+	if (Admin == m_auth) {
 	    m_debug = cfg().getBoolValue("debug",false);
+	    if (m_debug)
+		Debugger::enableOutput(true);
+	}
 	m_output = cfg().getBoolValue("output",m_debug);
     }
     m_histLen = cfg().getIntValue("maxhistory",DEF_HISTORY);
