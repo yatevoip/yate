@@ -4,7 +4,7 @@
 # This file is part of the YATE Project http://YATE.null.ro
 #
 # Yet Another Telephony Engine - a fully featured software PBX and IVR
-# Copyright (C) 2010-2014 Null Team
+# Copyright (C) 2010-2018 Null Team
 #
 # This software is distributed under multiple licenses;
 # see the COPYING file in the main directory for licensing
@@ -18,14 +18,34 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 
-# Use: yatemon.sh [-p pid]
+# Use: yatemon.sh [-n name|-p pid]
 # Displays a history of Yate's memory and thread CPU usage
 # You will need a very wide console
 
-pid=`pidof yate 2>/dev/null`
+case "X$1" in
+    X-p)
+	pid="$2"
+	;;
+    X-n)
+	pid=`pidof "$2" 2>/dev/null`
+	;;
+    *)
+	pid=`pidof yate 2>/dev/null`
+	;;
+esac
 
-if [ "X$1" = "X-p" ]; then
-    pid="$2"
+if echo "$pid" | grep -q '^[0-9]\+ [0-9]\+$'; then
+    p1="${pid%% *}"
+    p2="${pid##* }"
+    if [ "X"`ps -p "$p1" -o ppid= | sed 's/ //g'` = "X1" ]; then
+	if [ "X"`ps -p "$p2" -o ppid= | sed 's/ //g'` != "X1" ]; then
+	    pid="$p2"
+	fi
+    else
+	if [ "X"`ps -p "$p2" -o ppid= | sed 's/ //g'` = "X1" ]; then
+	    pid="$p1"
+	fi
+    fi
 fi
 
 if ! kill -0 "$pid" 2> /dev/null; then
