@@ -48,7 +48,14 @@ namespace { // anonymous
 #define DEF_HISTORY 10
 #define MAX_HISTORY 50
 
+enum Level {
+    None = 0,
+    User,
+    Admin
+};
+
 typedef struct {
+    Level level;
     const char* name;
     const char* args;
     const char** more;
@@ -106,34 +113,35 @@ static const char* s_rnow[] =
 static const CommandInfo s_cmdInfo[] =
 {
     // Unauthenticated commands
-    { "quit", 0, 0, "Disconnect this control session from Yate" },
-    { "echo", "[on|off]", s_bools, "Show or turn remote echo on or off" },
-    { "help", "[command]", 0, "Provide help on all or given command" },
-    { "auth", "password", 0, "Authenticate so you can access privileged commands" },
+    { None, "quit", 0, 0, "Disconnect this control session from Yate" },
+    { None, "echo", "[on|off]", s_bools, "Show or turn remote echo on or off" },
+    { None, "help", "[command]", 0, "Provide help on all or given command" },
+    { None, "auth", "password", 0, "Authenticate so you can access privileged commands" },
 
     // User commands
-    { "status", "[overview] [modulename]", s_oview, "Shows status of all or selected modules or channels" },
-    { "uptime", 0, 0, "Show information on how long Yate has run" },
-    { "machine", "[on|off]", s_bools, "Show or turn machine output mode on or off" },
-    { "output", "[on|off]", s_bools, "Show or turn local output on or off" },
-    { "color", "[on|off]", s_bools, "Show status or turn local colorization on or off" },
+    { User, "status", "[overview] [modulename]", s_oview, "Shows status of all or selected modules or channels" },
+    { User, "uptime", 0, 0, "Show information on how long Yate has run" },
+    { User, "machine", "[on|off]", s_bools, "Show or turn machine output mode on or off" },
+    { User, "output", "[on|off]", s_bools, "Show or turn local output on or off" },
+    { User, "color", "[on|off]", s_bools, "Show status or turn local colorization on or off" },
 
     // Admin commands
-    { "debug", "[module] [level|objects|on|off]", s_level, "Show or change debugging level globally or per module" },
+    { Admin, "debug", "[module] [level|objects|on|off]", s_level, "Show or change debugging level globally or per module" },
 #ifdef HAVE_MALLINFO
-    { "meminfo", 0, 0, "Displays memory allocation statistics" },
+    { Admin, "meminfo", 0, 0, "Displays memory allocation statistics" },
 #endif
 #ifdef HAVE_COREDUMPER
-    { "coredump", "[filename]", 0, "Dumps memory image of running Yate to a file" },
+    { Admin, "coredump", "[filename]", 0, "Dumps memory image of running Yate to a file" },
 #endif
-    { "drop", "{chan|*|all} [reason]", s_dall, "Drops one or all active calls" },
-    { "call", "chan target", 0, "Execute an outgoing call" },
-    { "control", "chan [operation] [param=val] [param=...]", 0, "Apply arbitrary control operations to a channel or entity" },
-    { "reload", "[plugin]", 0, "Reloads module configuration files" },
-    { "restart", "[now]", s_rnow, "Restarts the engine if executing supervised" },
-    { "stop", "[exitcode]", 0, "Stops the engine with optionally provided exit code" },
-    { "alias", "[name [command...]]", 0, "Create an alias for a longer command" },
-    { 0, 0, 0, 0 }
+    { Admin, "drop", "{chan|*|all} [reason]", s_dall, "Drops one or all active calls" },
+    { Admin, "call", "chan target", 0, "Execute an outgoing call" },
+    { Admin, "control", "chan [operation] [param=val] [param=...]", 0, "Apply arbitrary control operations to a channel or entity" },
+    { Admin, "reload", "[plugin]", 0, "Reloads module configuration files" },
+    { Admin, "restart", "[now]", s_rnow, "Restarts the engine if executing supervised" },
+    { Admin, "stop", "[exitcode]", 0, "Stops the engine with optionally provided exit code" },
+    { Admin, "alias", "[name [command...]]", 0, "Create an alias for a longer command" },
+
+    { None, 0, 0, 0, 0 }
 };
 
 static void completeWord(String& str, const String& word, const char* partial = 0)
@@ -196,11 +204,6 @@ private:
 class Connection : public GenObject, public Thread
 {
 public:
-    enum Level {
-	None = 0,
-	User,
-	Admin
-    };
     Connection(Socket* sock, const char* addr, RManagerListener* listener);
     ~Connection();
 
@@ -228,11 +231,14 @@ public:
 	{ return m_address; }
     inline const NamedList& cfg() const
 	{ return m_listener->cfg(); }
+    bool userCommand(const String& line) const;
     void checkTimer(u_int64_t time);
 private:
     void disconnect();
     NamedList m_aliases;
     Level m_auth;
+    ObjList* m_userPrefix;
+    Regexp m_userRegexp;
     bool m_debug;
     bool m_output;
     bool m_colorize;
@@ -425,8 +431,8 @@ Connection* RManagerListener::checkCreate(Socket* sock, const char* addr)
 
 Connection::Connection(Socket* sock, const char* addr, RManagerListener* listener)
     : Thread("RManager Connection"),
-      m_aliases(""),
-      m_auth(None), m_debug(false), m_output(false), m_colorize(false), m_machine(false),
+      m_aliases(""), m_auth(None), m_userPrefix(0),
+      m_debug(false), m_output(false), m_colorize(false), m_machine(false),
       m_offset(-1), m_header(0), m_finish(-1), m_threshold(DebugAll),
       m_socket(sock), m_subOpt(0), m_subLen(0),
       m_lastch(0), m_escmode(0), m_echoing(false), m_beeping(false), m_processing(0),
@@ -455,6 +461,7 @@ Connection::~Connection()
     m_socket = 0;
     yield();
     delete tmp;
+    TelEngine::destruct(m_userPrefix);
 }
 
 void Connection::disconnect()
@@ -491,6 +498,8 @@ void Connection::run()
 	}
 	m_output = cfg().getBoolValue("output",m_debug);
     }
+    m_userPrefix = cfg()["user_prefix"].split(',',false);
+    m_userRegexp = cfg().getValue("user_regexp");
     m_histLen = cfg().getIntValue("maxhistory",DEF_HISTORY);
     if (m_histLen > MAX_HISTORY)
 	m_histLen = MAX_HISTORY;
@@ -1089,6 +1098,7 @@ void Connection::putConnInfo(NamedList& msg) const
 	msg.setParam("cmd_width",String(m_width));
 	msg.setParam("cmd_height",String(m_height));
     }
+    msg.setParam("cmd_admin",String::boolText(Admin <= m_auth));
 }
 
 // perform auto-completion of partial line
@@ -1111,6 +1121,8 @@ bool Connection::autoComplete()
 	const CommandInfo* info = s_cmdInfo;
 	bool help = (partLine == "help");
 	for (; info->name; info++) {
+	    if ((info->level > m_auth) && !userCommand(info->name))
+		continue;
 	    if (help)
 		m.retValue().append(info->name,"\t");
 	    else if (partLine == info->name) {
@@ -1138,6 +1150,8 @@ bool Connection::autoComplete()
 	    m.addParam("complete","command");
 	    const CommandInfo* info = s_cmdInfo;
 	    for (; info->name; info++) {
+		if ((info->level > m_auth) && !userCommand(info->name))
+		    continue;
 		String cmd = info->name;
 		if (cmd.startsWith(partWord))
 		    m.retValue().append(cmd,"\t");
@@ -1154,6 +1168,8 @@ bool Connection::autoComplete()
 	    if (help)
 		m.addParam("complete","command");
 	    for (; info->name; info++) {
+		if ((info->level > m_auth) && !userCommand(info->name))
+		    continue;
 		if (help) {
 		    String arg = info->name;
 		    if (arg.startsWith(partWord))
@@ -1208,7 +1224,7 @@ bool Connection::autoComplete()
 	completeWords(m.retValue(),s_level,partWord);
 	break;
     }
-    if (m_auth >= Admin) {
+    if ((m_auth >= Admin) || userCommand(partLine)) {
 	putConnInfo(m);
 	Engine::dispatch(m);
     }
@@ -1228,7 +1244,7 @@ bool Connection::autoComplete()
     String maxMatch;
     ObjList* l = m.retValue().split('\t');
     for (ObjList* p = l; p; p = p->next()) {
-    	String* s = static_cast<String*>(p->get());
+	String* s = static_cast<String*>(p->get());
 	if (!s)
 	    continue;
 	if (first) {
@@ -1309,6 +1325,8 @@ bool Connection::processCommand(const char *line, bool saveLine)
 	    Message m("engine.help");
 	    const CommandInfo* info = s_cmdInfo;
 	    for (; info->name; info++) {
+		if ((info->level > m_auth) && !userCommand(info->name))
+		    continue;
 		if (str == info->name) {
 		    str = "  ";
 		    str << info->name;
@@ -1332,6 +1350,8 @@ bool Connection::processCommand(const char *line, bool saveLine)
 	    m.retValue() = "Available commands:\r\n";
 	    const CommandInfo* info = s_cmdInfo;
 	    for (; info->name; info++) {
+		if ((info->level > m_auth) && !userCommand(info->name))
+		    continue;
 		m.retValue() << "  " << info->name;
 		if (info->args)
 		    m.retValue() << " " << info->args;
@@ -1448,7 +1468,7 @@ bool Connection::processCommand(const char *line, bool saveLine)
 	writeStr(str);
 	return false;
     }
-    if (m_auth < Admin) {
+    if ((m_auth < Admin) && !userCommand(str)) {
 	writeStr(m_machine ? "%%=*:fail=noauth\r\n" : "Not authenticated!\r\n");
 	return false;
     }
@@ -1882,6 +1902,22 @@ void Connection::writeStr(const char *str, int len)
 	// Destroy the thread, will kill the connection
 	cancel();
     }
+}
+
+// check if a command is allowed for non-admin users
+bool Connection::userCommand(const String& line) const
+{
+    if (line.null() || (m_auth < User))
+	return false;
+    if (m_userRegexp.matches(line))
+	return true;
+    if (m_userPrefix) {
+	for (ObjList* o = m_userPrefix->skipNull(); o; o = o->skipNext()) {
+	    if (line.startsWith(o->get()->toString()))
+		return true;
+	}
+    }
+    return false;
 }
 
 void Connection::checkTimer(u_int64_t time)

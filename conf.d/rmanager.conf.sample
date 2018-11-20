@@ -86,3 +86,9 @@
 ;  for the line entered in rmanager and \1 ... \9 for individual components
 ; Example:
 ;  alias:cgu=control \1/ISUP unblock force=yes circuits=\2
+
+; Comma separated list of prefixes of extra commands allowed in user mode
+;user_prefix=
+
+; Regular expression for allowing extra commands in user mode
+;user_regexp=
