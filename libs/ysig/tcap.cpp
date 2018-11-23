@@ -515,8 +515,10 @@ SS7TCAPMessage* SS7TCAP::dequeue()
 
 void SS7TCAP::allocTransactionID(String& str)
 {
+    m_transactionsMtx.lock();
     u_int32_t tmp = m_idsPool;
     m_idsPool++;
+    m_transactionsMtx.unlock();
     unsigned char buff[sizeof(tmp)];
     int len = sizeof(tmp);
     for (int index = len - 1; index >= 0; index--) {
