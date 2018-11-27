@@ -1,0 +1,29 @@
+[general]
+; General settings for wiresniff module.
+
+; remote_host: ipaddr: IPv4 or IPv6 address where to send the packets.  
+; If empty the module won't process the messages
+;remote_host=
+
+; remote_port: Remote port assigned to the remote_host. 
+; Mandatory to be set if remote_host is set
+;remote_port=
+
+; local_host: ipaddr: Address of local interface, 
+; IPv4 default address is '0.0.0.0' and IPv6 default address is '::'
+;local_host= 
+
+; local_port: int: Local UDP port assigned to local_host
+; Default value for local port is 0
+;local_port= 
+
+; filter: regexp: Default filter to apply to message sniffer at initialization
+; If empty it will match all messages
+; Example for a filter matching all chan.Anything messages and engine.halt:
+; filter=^\(chan\.\|engine\.halt$\)
+;filter
+
+
+
+
+

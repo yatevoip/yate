@@ -29,10 +29,12 @@ SLIBS:= $(YLIB) libyate.so \
 	libyatesig.so.@PACKAGE_VERSION@ libyatesig.so \
 	libyateasn.so.@PACKAGE_VERSION@ libyateasn.so \
 	libyateradio.so.@PACKAGE_VERSION@ libyateradio.so \
+	libyatemapcamel.so.@PACKAGE_VERSION@ libyatemapcamel.so \
 	libyatemgcp.so.@PACKAGE_VERSION@ libyatemgcp.so \
-	libyatejabber.so.@PACKAGE_VERSION@ libyatejabber.so
+	libyatejabber.so.@PACKAGE_VERSION@ libyatejabber.so \
+	libyatecodecutils.so.@PACKAGE_VERSION@ libyatecodecutils.so
 ILIBS:= yscript yasn yradio
-INCS := yateclass.h yatemime.h yatengine.h yatephone.h yatecbase.h yatexml.h yatemath.h
+INCS := yateclass.h yatemime.h yatengine.h yatephone.h yatecbase.h yatexml.h yatemath.h yatewiresniff.h
 GENS := yateversn.h
 LIBS :=
 MAN8 := yate.8 yate-config.8

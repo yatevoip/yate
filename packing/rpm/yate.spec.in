@@ -12,6 +12,8 @@
 # to disable the GUI clients run rpmbuild --define 'nogui 1'
 # to disable only Zaptel support run rpmbuild --define 'nozap 1'
 # to disable only TDMV support run rpmbuild --define 'notdm 1'
+# to disable kernel GTP-U acceleration run rpmbuild --define 'nokgtpu 1'
+# to disable cell algorithms run rpmbuild --define 'nocellalgo 1'
 
 %{!?systemd:%define systemd %(test -x /usr/bin/systemd && echo 1 || echo 0)}
 %{!?_unitdir:%define _unitdir /usr/lib/systemd/system}
@@ -31,6 +33,8 @@
 %{?nogui:%define no_gui 1}
 %{?nozap:%define no_zaptel 1}
 %{?notdm:%define no_tdmapi 1}
+%{?nokgtpu:%define no_kgtpu 1}
+%{?nocellalgo:%define no_cellalgo 1}
 
 %{!?debuginfo:%define debuginfo %{nil}}
 %if "%{debuginfo}"
@@ -79,6 +83,7 @@ Source:		http://yate.null.ro/tarballs/@PACKAGE_TARNAME@@PACKAGE_VERSION_MAJOR@/@
 Group:		Applications/Communication
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root
 URL:		http://yate.null.ro/
+Provides:	%{name}-commercial
 %{?extra_prov:Provides: %{?extra_prov}}
 %{?extra_reqs:Requires: %{?extra_reqs}}
 BuildRequires:	gcc-c++
@@ -108,6 +113,8 @@ for small to large scale projects.
 %{_libdir}/libyateasn.so.*
 %{_libdir}/libyateradio.so.*
 %{_libdir}/libyatemgcp.so.*
+%{_libdir}/libyatemapcamel.so.*
+%{_libdir}/libyatecodecutils.so.*
 %{_bindir}/yate
 %{_mandir}/*/yate.*
 %if "%{systemd}" != "0"
@@ -136,6 +143,7 @@ for small to large scale projects.
 %{_libdir}/yate/analyzer.yate
 %{_libdir}/yate/rmanager.yate
 %{_libdir}/yate/msgsniff.yate
+%{_libdir}/yate/wiresniff.yate
 %{_libdir}/yate/mux.yate
 %{_libdir}/yate/pbx.yate
 %{_libdir}/yate/dumbchan.yate
@@ -181,8 +189,11 @@ for small to large scale projects.
 %{_libdir}/yate/server/ccongestion.yate
 %{_libdir}/yate/server/monitoring.yate
 %{_libdir}/yate/server/ysnmpagent.yate
+%{_libdir}/yate/server/ysmpp.yate
 %{_libdir}/yate/server/cache.yate
+%{_libdir}/yate/server/ydiameter.yate
 %{_libdir}/yate/server/eventlogs.yate
+%{_libdir}/yate/server/xml_tcp.yate
 %{_libdir}/yate/client/osschan.yate
 %{_libdir}/yate/client/jabberclient.yate
 %{_libdir}/yate/jabber/jabberserver.yate
@@ -190,7 +201,14 @@ for small to large scale projects.
 %{_libdir}/yate/sig/isupmangler.yate
 %{_libdir}/yate/sig/ss7_lnp_ansi.yate
 %{_libdir}/yate/sig/camel_map.yate
+%{_libdir}/yate/sig/camelmap.yate
+%{_libdir}/yate/sig/camel_bcsm.yate
+%{_libdir}/yate/sig/camel_bcsm_proxy.yate
+%{_libdir}/yate/sig/ussd_map.yate
 %{_libdir}/yate/sip/sip_cnam_lnp.yate
+%{_libdir}/yate/mobile/gtp.yate
+%{_libdir}/yate/mobile/ys1ap.yate
+%{_libdir}/yate/mobile/gsmfeatures.yate
 %{_libdir}/yate/radio/dummyradio.yate
 %{_libdir}/yate/radio/radiotest.yate
 %dir %{_sysconfdir}/yate
@@ -238,8 +256,11 @@ for small to large scale projects.
 %config(noreplace) %{_sysconfdir}/yate/cpuload.conf
 %config(noreplace) %{_sysconfdir}/yate/ccongestion.conf
 %config(noreplace) %{_sysconfdir}/yate/monitoring.conf
+%config(noreplace) %{_sysconfdir}/yate/wiresniff.conf
 %config(noreplace) %{_sysconfdir}/yate/ysnmpagent.conf
+%config(noreplace) %{_sysconfdir}/yate/ysmpp.conf
 %config(noreplace) %{_sysconfdir}/yate/cache.conf
+%config(noreplace) %{_sysconfdir}/yate/ydiameter.conf
 %config(noreplace) %{_sysconfdir}/yate/eventlogs.conf
 %config(noreplace) %{_sysconfdir}/yate/users.conf
 %config(noreplace) %{_sysconfdir}/yate/presence.conf
@@ -250,7 +271,11 @@ for small to large scale projects.
 %config(noreplace) %{_sysconfdir}/yate/isupmangler.conf
 %config(noreplace) %{_sysconfdir}/yate/ss7_lnp_ansi.conf
 %config(noreplace) %{_sysconfdir}/yate/camel_map.conf
+%config(noreplace) %{_sysconfdir}/yate/camel_bcsm.conf
+%config(noreplace) %{_sysconfdir}/yate/camel_bcsm_proxy.conf
+%config(noreplace) %{_sysconfdir}/yate/ussd_map.conf
 %config(noreplace) %{_sysconfdir}/yate/sip_cnam_lnp.conf
+%config(noreplace) %{_sysconfdir}/yate/xml_tcp.conf
 %config(noreplace) %{_sysconfdir}/yate/dummyradio.conf
 
 %config %{_sysconfdir}/logrotate.d/yate
@@ -300,16 +325,19 @@ Requires:	%{name} = %{version}-%{release}
 %description amr
 GSM-AMR and GSM-EFR audio codecs for Yate. AMR is a multi-rate codec that provides moderate
 to high compression rate and good voice quality. EFR is just a different payload stucture
-for 12.2 kbit/s AMR-NB.
+for 12.2 kbit/s AMR-NB. AMR-WB provides wideband (16 kHz) audio with bitrates between 7 and
+24 kbit/s.
 
 %files amr
 %{_libdir}/yate/amrnbcodec.yate
+%{_libdir}/yate/amrwbcodec.yate
 %{_libdir}/yate/efrcodec.yate
 %config(noreplace) %{_sysconfdir}/yate/amrnbcodec.conf
+%config(noreplace) %{_sysconfdir}/yate/amrwbcodec.conf
 
 %define conf_amr %{nil}
 %else
-%define conf_amr --without-amrnb
+%define conf_amr --without-amrnb --without-amrwb
 %endif
 
 
@@ -627,6 +655,30 @@ The devel package must still be installed separately.
 %defattr(-,root,root)
 
 
+%if "%{no_cellalgo}" != "1"
+
+%package ltenas
+Summary:	Yate LTE NAS session support
+Group:		Applications/Communication
+Requires:	%{name} = %{version}-%{release}
+
+%description ltenas
+This package provides support for LTE NAS integrity check and ciphering.
+
+%files ltenas
+%{_libdir}/yate/mobile/nassession.yate
+
+%define conf_cellalgo %{nil}
+%else
+%define conf_cellalgo --without-cellalgo
+%endif
+
+%if "%{no_kgtpu}" == "1"
+%define conf_gtpu --disable-gtpuacc
+%else
+%define conf_gtpu %{nil}
+%endif
+
 # disable unpackaged files check if we know we are going to skip some
 %if "%{no_pstn}" == "1"
 %define _unpackaged_files_terminate_build 0
@@ -689,7 +741,7 @@ chmod +x %{local_find_requires} %{local_find_provides}
 	--libdir=%{_libdir} --mandir=%{_mandir} --with-archlib=%{_lib} \
 	--without-spandsp --without-coredumper \
 	%{conf_sctp} %{conf_h323} %{conf_amr} %{conf_pstn} %{conf_usb} %{conf_gui} \
-	%{?extra_conf}
+	%{conf_gtpu} %{conf_cellalgo} %{?extra_conf}
 make %{stripped} %{?extra_make}
 %{?extra_step}
 
@@ -717,8 +769,14 @@ rm -rf %{buildroot}
 
 
 %changelog
+* Thu Aug 10 2017 Paul Chitescu <paulc@voip.null.ro>
+- Added AMR-WB codec to the yate-amr package
+
 * Fri Nov 25 2016 Paul Chitescu <paulc@voip.null.ro>
 - Added package for the AMR codec
+
+* Mon Jan 25 2016 Marian Podgoreanu <marian@voip.null.ro>
+- Added separate package for nassession
 
 * Thu Nov 26 2015 Paul Chitescu <paulc@voip.null.ro>
 - More tweaking to suppress unwanted dependencies in newer RPM
@@ -728,6 +786,13 @@ rm -rf %{buildroot}
 
 * Wed Apr 01 2015 Paul Chitescu <paulc@voip.null.ro>
 - Package the new dynamic libyateasn.so
+
+* Wed Apr 01 2015 Marian Podgoreanu <marian@voip.null.ro>
+- Added codec utils dynamic library
+
+* Tue Nov 11 2014 Ioana Stanciu <oana@voip.null.ro>
+- Added MAP & CAMEL codec library and new camelmap module
+- Added xml_tcp module
 
 * Tue Apr 29 2014 Paul Chitescu <paulc@voip.null.ro>
 - Added SQLite module and subpackage
