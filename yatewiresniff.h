@@ -1,5 +1,5 @@
 /**
- * wiresniff.h
+ * yatewiresniff.h
  * This file is part of the YATE Project http://YATE.null.ro
  *
  * Definition of the tags related to wiresniff module.

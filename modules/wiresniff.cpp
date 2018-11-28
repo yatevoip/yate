@@ -21,7 +21,7 @@
 
 
 #include <yatengine.h>
-#include <wiresniff.h>
+#include <yatewiresniff.h>
 #include <stdio.h>
 #include <string.h>
 
