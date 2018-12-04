@@ -37,11 +37,6 @@ OPENSSL_LIB := @OPENSSL_LIB@
 HAVE_ZLIB := @HAVE_ZLIB@
 ZLIB_INC := @ZLIB_INC@
 ZLIB_LIB := @ZLIB_LIB@
-HAVE_CELLALGO := @HAVE_CELLALGO@
-HAVE_128EIA1 := @HAVE_128EIA1@
-CELLALGO_INC := @CELLALGO_INC@
-CELLALGO_LIB := @CELLALGO_LIB@
-CELLALGO_DEF := @CELLALGO_DEF@
 HAVE_LIBUSB := @HAVE_LIBUSB@
 LIBUSB_INC := @LIBUSB_INC@
 LIBUSB_LIB := @LIBUSB_LIB@
@@ -60,8 +55,7 @@ INCFILES := @top_srcdir@/yateclass.h @top_srcdir@/yatengine.h @top_srcdir@/yatep
 JUSTSIG := server/ysigchan.yate server/analog.yate \
 	server/ciscosm.yate server/sigtransport.yate \
 	sig/isupmangler.yate sig/ss7_lnp_ansi.yate \
-	sig/camel_map.yate sig/camel_bcsm.yate sig/camel_bcsm_proxy.yate \
-	sig/ussd_map.yate sig/camelmap.yate
+	sig/camel_map.yate
 
 SUBDIRS :=
 MKDEPS  := ../config.status
@@ -96,14 +90,11 @@ PROGS := cdrbuild.yate cdrcombine.yate cdrfile.yate regexroute.yate \
 	server/cache.yate \
 	server/eventlogs.yate \
 	client/jabberclient.yate \
-	callgen.yate analyzer.yate rmanager.yate msgsniff.yate wiresniff.yate\
-	radio/dummyradio.yate radio/radiotest.yate \
-	server/ysmpp.yate server/ydiameter.yate \
-	mobile/gsmfeatures.yate \
-	server/xml_tcp.yate
+	callgen.yate analyzer.yate rmanager.yate msgsniff.yate wiresniff.yate \
+	radio/dummyradio.yate radio/radiotest.yate
 
 LIBS :=
-DIRS := client server jabber qt4 sip sig radio mobile
+DIRS := client server jabber qt4 sip sig radio
 
 ifneq ($(HAVE_PGSQL),no)
 PROGS := $(PROGS) server/pgsqldb.yate
@@ -119,13 +110,6 @@ endif
 
 ifneq (@HAVE_RESOLV@,no)
 PROGS := $(PROGS) enumroute.yate
-endif
-
-ifneq (@HAVE_IPV6@,no)
-PROGS := $(PROGS) mobile/ys1ap.yate
-ifneq (@HAVE_TUN@,no)
-PROGS := $(PROGS) mobile/gtp.yate
-endif
 endif
 
 ifneq (@HAVE_SOUNDCARD@,no)
@@ -199,10 +183,6 @@ PROGS := $(PROGS) amrnbcodec.yate
 PROGS := $(PROGS) efrcodec.yate
 endif
 
-ifneq (@HAVE_AMRWB@,no)
-PROGS := $(PROGS) amrwbcodec.yate
-endif
-
 ifneq ($(HAVE_OPENSSL),no)
 PROGS := $(PROGS) openssl.yate
 endif
@@ -224,11 +204,6 @@ ifneq (@HAVE_LIBUSB@,no)
 PROGS := $(PROGS) radio/ybladerf.yate
 endif
 
-ifeq (@HAVE_CELLALGO@,yes)
-ifeq (@HAVE_128EIA1@,yes)
-PROGS := $(PROGS) mobile/nassession.yate
-endif
-endif
 
 LOCALFLAGS =
 LOCALLIBS =
@@ -336,9 +311,6 @@ sig/%.yate: @srcdir@/sig/%.cpp $(MKDEPS) $(INCFILES)
 sip/%.yate: @srcdir@/sip/%.cpp $(MKDEPS) $(INCFILES)
 	mkdir -p sip && $(MODCOMP) -o $@ $(LOCALFLAGS) $(EXTERNFLAGS) $< $(LOCALLIBS) $(YATELIBS) $(EXTERNLIBS)
 
-mobile/%.yate: @srcdir@/mobile/%.cpp $(MKDEPS) $(INCFILES)
-	mkdir -p mobile && $(MODCOMP) -o $@ $(LOCALFLAGS) $(EXTERNFLAGS) $< $(LOCALLIBS) $(YATELIBS) $(EXTERNLIBS)
-
 %.yate: @srcdir@/%.cpp $(MKDEPS) $(INCFILES)
 	$(MODCOMP) -o $@ $(LOCALFLAGS) $(EXTERNFLAGS) $< $(LOCALLIBS) $(YATELIBS) $(EXTERNLIBS)
 
@@ -356,14 +328,6 @@ sig/ss7_lnp_ansi.yate: LOCALLIBS = -lyatesig -lyateasn
 sig/camel_map.yate: ../libs/yasn/libyasn.a
 sig/camel_map.yate: LOCALFLAGS = -I@top_srcdir@/libs/ysig -I@top_srcdir@/libs/yasn
 sig/camel_map.yate: LOCALLIBS = -lyatesig -lyateasn
-
-sig/camelmap.yate: ../libyatemapcamel.so
-sig/camelmap.yate: LOCALFLAGS = -I@top_srcdir@/libs/ysig -I@top_srcdir@/libs/yasn  -I@top_srcdir@/libs/ymapcamel
-sig/camelmap.yate: LOCALLIBS = -lyatemapcamel -lyatesig -lyateasn
-
-sig/camel_bcsm_proxy.yate sig/ussd_map.yate: ../libs/ytcapxml/libyatetcapxml.a
-sig/camel_bcsm_proxy.yate sig/ussd_map.yate: LOCALFLAGS = -I../libs/ytcapxml
-sig/camel_bcsm_proxy.yate sig/ussd_map.yate: LOCALLIBS = -L../libs/ytcapxml -lyatetcapxml
 
 server/analogdetect.yate: ../libs/ymodem/libyatemodem.a
 server/analogdetect.yate: LOCALFLAGS = -I@top_srcdir@/libs/ymodem
@@ -429,9 +393,6 @@ speexcodec.yate: EXTERNLIBS = @SPEEX_LIB@
 amrnbcodec.yate efrcodec.yate: EXTERNFLAGS = @AMRNB_INC@
 amrnbcodec.yate efrcodec.yate: EXTERNLIBS = @AMRNB_LIB@
 
-amrwbcodec.yate: EXTERNFLAGS = @AMRWB_INC@
-amrwbcodec.yate: EXTERNLIBS = @AMRWB_LIB@
-
 faxchan.yate: EXTERNFLAGS = $(SPANDSP_INC)
 faxchan.yate: EXTERNLIBS = $(SPANDSP_LIB)
 
@@ -462,30 +423,6 @@ zlibcompress.yate: EXTERNLIBS = $(ZLIB_LIB)
 server/ysnmpagent.yate: ../libyateasn.so ../libs/ysnmp/libysnmp.a
 server/ysnmpagent.yate: LOCALFLAGS = -I@top_srcdir@/libs/yasn -I@top_srcdir@/libs/ysnmp
 server/ysnmpagent.yate: LOCALLIBS = -L../libs/ysnmp -lysnmp -lyateasn
-
-server/ysmpp.yate: ../libs/ysmpp/libyatesmpp.a ../libs/ycodecutils/libyatecodecutils.a
-server/ysmpp.yate: LOCALFLAGS = -I@top_srcdir@/libs/ysmpp -I@top_srcdir@/libs/ycodecutils
-server/ysmpp.yate: LOCALLIBS = -L../libs/ysmpp -lyatesmpp -L../libs/ycodecutils -lyatecodecutils
-
-server/ydiameter.yate: ../libs/ydiameter/libyatediameter.a
-server/ydiameter.yate: LOCALFLAGS = -I@top_srcdir@/libs/ydiameter
-server/ydiameter.yate: LOCALLIBS = -L../libs/ydiameter -lyatediameter
-
-mobile/gtp.yate: ../libs/ygtp/libyategtp.a
-mobile/gtp.yate: LOCALFLAGS = -I@top_srcdir@/libs/ygtp
-mobile/gtp.yate: LOCALLIBS = -L../libs/ygtp -lyategtp
-
-mobile/ys1ap.yate: ../libyateasn.so
-mobile/ys1ap.yate: LOCALFLAGS = -I../libs/yasn
-mobile/ys1ap.yate: LOCALLIBS = -lyateasn
-
-mobile/gsmfeatures.yate: ../libyateradio.so ../libyatecodecutils.so
-mobile/gsmfeatures.yate: LOCALFLAGS = -I@top_srcdir@/libs/yradio -I@top_srcdir@/libs/ycodecutils
-mobile/gsmfeatures.yate: LOCALLIBS = -lyateradio -L../libs/ycodecutils -lyatecodecutils
-
-mobile/nassession.yate: ../libyatescript.so ../libyateradio.so
-mobile/nassession.yate: LOCALFLAGS = -I@top_srcdir@/libs/yscript -I@top_srcdir@/libs/yradio $(CELLALGO_DEF) $(CELLALGO_INC)
-mobile/nassession.yate: LOCALLIBS = -lyatescript -lyateradio $(CELLALGO_LIB)
 
 radio/ybladerf.yate radio/dummyradio.yate radio/radiotest.yate: ../libyateradio.so
 radio/ybladerf.yate radio/dummyradio.yate radio/radiotest.yate: LOCALFLAGS = -I@top_srcdir@/libs/yradio
@@ -540,21 +477,3 @@ radio/ybladerf.yate: EXTERNLIBS = $(LIBUSB_LIB)
 
 ../libyateradio.so ../libs/yradio/libyateradio.a: @top_srcdir@/libs/yradio/yateradio.h
 	$(MAKE) -C ../libs/yradio
-
-../libs/ytcapxml/libyatetcapxml.a: @top_srcdir@/libs/ytcapxml/yatetcapxml.h
-	$(MAKE) -C ../libs/ytcapxml
-
-../libs/ysmpp/libyatesmpp.a: @top_srcdir@/libs/ysmpp/yatesmpp.h
-	$(MAKE) -C ../libs/ysmpp
-
-../libs/ydiameter/libyatediameter.a: @top_srcdir@/libs/ydiameter/yatediameter.h
-	$(MAKE) -C ../libs/ydiameter
-
-../libs/ygtp/libyategtp.a: @top_srcdir@/libs/ygtp/yategtp.h
-	$(MAKE) -C ../libs/ygtp
-
-../libyatemapcamel.so ../libs/ysig/libyatemapcamel.a: @top_srcdir@/libs/ymapcamel/yatemapcamel.h
-	$(MAKE) -C ../libs/ymapcamel
-
-../libs/ycodecutils/libyatecodecutils.a: @top_srcdir@/libs/ycodecutils/yatecodecutils.h
-	$(MAKE) -C ../libs/ycodecutils
