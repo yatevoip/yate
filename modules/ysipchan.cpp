@@ -1859,12 +1859,13 @@ static void copyPrivacy(SIPMessage& sip, const NamedList& msg)
     bool privname = (privacy.find("name") >= 0);
     bool privuri = (privacy.find("uri") >= 0);
     bool privid = (privacy.find("id") >= 0);
+    bool nopriv = !privacy.toBoolean(true);
     String rfc3323;
     // allow for a simple "privacy=yes" or similar
     if (privacy.toBoolean(false) || (privacy == YSTRING("full")))
 	privname = privuri = true;
     // "privacy=no" is translated to RFC 3323 "none"
-    else if (!privacy.toBoolean(true))
+    else if (nopriv)
 	rfc3323 = "none";
     if (anonip)
 	sip.setHeader("Anonymity","ipaddr");
@@ -1900,7 +1901,7 @@ static void copyPrivacy(SIPMessage& sip, const NamedList& msg)
 	    hl->setParam("id-type",str);
 	sip.addHeader(hl);
     }
-    if (privid) {
+    if (privid || nopriv) {
 	const char* caller = msg.getValue(YSTRING("asserted_caller"),msg.getValue(YSTRING("caller")));
 	if (caller) {
 	    const char* domain = msg.getValue(YSTRING("asserted_domain"),msg.getValue(YSTRING("domain")));
@@ -1916,22 +1917,24 @@ static void copyPrivacy(SIPMessage& sip, const NamedList& msg)
 		    tmp = desc + " " + tmp;
 		}
 		sip.addHeader(new MimeHeaderLine("P-Asserted-Identity",tmp));
-		MimeHeaderLine* hl = const_cast<MimeHeaderLine*>(sip.getHeader("From"));
-		if (hl) {
-		    URI uri(*hl);
-		    if (uri.getHost() &&
-			(uri.getProtocol() == YSTRING("sip") || uri.getProtocol() == YSTRING("sips"))) {
-			String tmp = "<" + uri.getProtocol() + ":Anonymous@";
-			if (uri.getPort())
-			    SocketAddr::appendTo(tmp,uri.getHost(),uri.getPort());
+		if (privid) {
+		    MimeHeaderLine* hl = const_cast<MimeHeaderLine*>(sip.getHeader("From"));
+		    if (hl) {
+			URI uri(*hl);
+			if (uri.getHost() &&
+			    (uri.getProtocol() == YSTRING("sip") || uri.getProtocol() == YSTRING("sips"))) {
+			    String tmp = "<" + uri.getProtocol() + ":Anonymous@";
+			    if (uri.getPort())
+				SocketAddr::appendTo(tmp,uri.getHost(),uri.getPort());
+			    else
+				SocketAddr::appendAddr(tmp,uri.getHost());
+			    *hl = tmp + uri.getExtra() + ">";
+			}
+			else if (domain)
+			    *hl = "<sip:Anonymous@" + String(domain) + ">";
 			else
-			    SocketAddr::appendAddr(tmp,uri.getHost());
-			*hl = tmp + uri.getExtra() + ">";
+			    *hl = "<sip:Anonymous@anonymous.invalid>";
 		    }
-		    else if (domain)
-			*hl = "<sip:Anonymous@" + String(domain) + ">";
-		    else
-			*hl = "<sip:Anonymous@anonymous.invalid>";
 		}
 	    }
 	}
