@@ -534,6 +534,8 @@ public:
 	    params().addParam(new ExpFunction("rmdir"));
 	    params().addParam(new ExpFunction("getFileTime"));
 	    params().addParam(new ExpFunction("setFileTime"));
+	    params().addParam(new ExpFunction("getContent"));
+	    params().addParam(new ExpFunction("setContent"));
 	}
     static void initialize(ScriptContext* context);
 protected:
@@ -2727,6 +2729,7 @@ bool JsFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 		op = popValue(stack,context);
 		if (op && op->isInteger())
 		    mode = op->number();
+		TelEngine::destruct(op);
 		// fall through
 	    case 1:
 		op = popValue(stack,context);
@@ -2775,6 +2778,85 @@ bool JsFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 	TelEngine::destruct(fTime);
 	TelEngine::destruct(fName);
 	ExpEvaluator::pushOne(stack,new ExpOperation(ok));
+    }
+    else if (oper.name() == YSTRING("getContent")) {
+	// str = File.getContent(name[,binary[,maxlen]])
+	bool binary = false;
+	int maxRead = 65536;
+	ExpOperation* op = 0;
+	switch (oper.number()) {
+	    case 3:
+		op = popValue(stack,context);
+		if (op)
+		    maxRead = op->toInteger(maxRead,0,0,262144);
+		TelEngine::destruct(op);
+		// fall through
+	    case 2:
+		op = popValue(stack,context);
+		binary = op && op->toBoolean();
+		TelEngine::destruct(op);
+		// fall through
+	    case 1:
+		op = popValue(stack,context);
+		break;
+	    default:
+		return false;
+	}
+	ExpOperation* ret = 0;
+	if (op) {
+	    File f;
+	    if (f.openPath(*op,false,true,false,false,binary)) {
+		DataBlock buf(0,maxRead);
+		int rd = f.readData(buf.data(),buf.length());
+		if (rd >= 0) {
+		    buf.truncate(rd);
+		    ret = new ExpOperation("");
+		    if (binary)
+			ret->hexify(buf.data(),buf.length());
+		    else
+			ret->assign((const char*)buf.data(),buf.length());
+		}
+	    }
+	}
+	TelEngine::destruct(op);
+	if (!ret)
+	    ret = JsParser::nullClone();
+	ExpEvaluator::pushOne(stack,ret);
+    }
+    else if (oper.name() == YSTRING("setContent")) {
+	// len = File.setContent(name,content[,binary])
+	bool binary = false;
+	ExpOperation* op = 0;
+	ExpOperation* cont = 0;
+	switch (oper.number()) {
+	    case 3:
+		op = popValue(stack,context);
+		binary = op && op->toBoolean();
+		TelEngine::destruct(op);
+		// fall through
+	    case 2:
+		cont = popValue(stack,context);
+		op = popValue(stack,context);
+		break;
+	    default:
+		return false;
+	}
+	int64_t wr = -1;
+	if (op && cont) {
+	    File f;
+	    if (f.openPath(*op,true,false,true,false,binary)) {
+		if (binary) {
+		    DataBlock buf;
+			if (buf.unHexify(cont->c_str(),cont->length()))
+			    wr = static_cast<Stream&>(f).writeData(buf);
+		}
+		else
+		    wr = static_cast<Stream&>(f).writeData(*cont);
+	    }
+	}
+	TelEngine::destruct(op);
+	TelEngine::destruct(cont);
+	ExpEvaluator::pushOne(stack,new ExpOperation(wr));
     }
     else
 	return JsObject::runNative(stack,oper,context);
