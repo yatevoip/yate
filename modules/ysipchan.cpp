@@ -1772,6 +1772,21 @@ static void copyPrivacy(NamedList& msg, const SIPMessage& sip)
     const MimeHeaderLine* hl = sip.getHeader("Remote-Party-ID");
     const MimeHeaderLine* ai = sip.getHeader("P-Asserted-Identity");
     const MimeHeaderLine* pr = sip.getHeader("Privacy");
+    if (ai) {
+	URI uri(*ai);
+	const char* tmp = uri.getDescription();
+	if (tmp)
+	    msg.setParam("asserted_callername",tmp);
+	tmp = uri.getUser();
+	if (tmp)
+	    msg.setParam("asserted_caller",tmp);
+	tmp = uri.getHost();
+	if (tmp)
+	    msg.setParam("asserted_domain",tmp);
+	tmp = uri.getExtra();
+	if (tmp)
+	    msg.setParam("asserted_params",tmp);
+    }
     if (!(anonip || hl || ai || pr))
 	return;
     const NamedString* p = hl ? hl->getParam("screen") : 0;
@@ -1833,18 +1848,6 @@ static void copyPrivacy(NamedList& msg, const SIPMessage& sip)
 	if (!TelEngine::null(str))
 	    msg.setParam("remote_id_type",*str);
     }
-    if (ai) {
-	URI uri(*ai);
-	const char* tmp = uri.getDescription();
-	if (tmp)
-	    msg.setParam("asserted_callername",tmp);
-	tmp = uri.getUser();
-	if (tmp)
-	    msg.setParam("asserted_caller",tmp);
-	tmp = uri.getHost();
-	if (tmp)
-	    msg.setParam("asserted_domain",tmp);
-    }
 }
 
 // Copy privacy related information from Yate message to SIP message
@@ -1905,11 +1908,12 @@ static void copyPrivacy(SIPMessage& sip, const NamedList& msg)
 	const char* caller = msg.getValue(YSTRING("asserted_caller"),msg.getValue(YSTRING("caller")));
 	if (caller) {
 	    const char* domain = msg.getValue(YSTRING("asserted_domain"),msg.getValue(YSTRING("domain")));
+	    const char* extra = msg.getValue(YSTRING("asserted_params"));
 	    String tmp;
 	    if (domain)
-		tmp << "<sip:" << caller << "@" << domain << ">";
+		tmp << "<sip:" << caller << "@" << domain << extra << ">";
 	    else if (isE164(caller))
-		tmp << "<tel:" << caller << ">";
+		tmp << "<tel:" << caller << extra << ">";
 	    if (tmp) {
 		String desc = msg.getValue(YSTRING("asserted_callername"),msg.getValue(YSTRING("callername")));
 		if (desc) {
