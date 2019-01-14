@@ -3774,6 +3774,34 @@ public:
 	unsigned int* wDay = 0);
 
     /**
+     * Convert system time to 32bit NTP (seconds since 1900)
+     * @param sec Time in seconds
+     * @param over Optional destination for overflow value. Must be reset before calling this method
+     * @param rfc2030 Use time extension as specified in RFC 2030 Section 3
+     * @return NTP time value in seconds
+     */
+    static uint32_t toNtp(uint32_t sec, uint32_t* over = 0, bool rfc2030 = true);
+
+    /**
+     * Convert this time to 32bit NTP (seconds since 1900)
+     * @param over Optional destination for overflow value. Must be reset before calling this method
+     * @param rfc2030 Use time extension as specified in RFC 2030 Section 3
+     * @return NTP time value in seconds
+     */
+    inline uint32_t toNtp(uint32_t* over = 0, bool rfc2030 = true)
+	{ return toNtp(sec(),over,rfc2030); }
+
+    /**
+     * Convert 32bit NTP (seconds since 1900) to system time
+     * @param val NTP time in seconds
+     * @param under Optional destination for underflow value (given time is before EPOCH).
+     *   Must be reset before calling this method
+     * @param rfc2030 Handle time extension as specified in RFC 2030 Section 3
+     * @return System time value in seconds. 0 if underflow
+     */
+    static uint32_t fromNtp(uint32_t val, uint32_t* under = 0, bool rfc2030 = true);
+
+    /**
      * Check if an year is a leap one
      * @param year The year to check
      * @return True if the given year is a leap one

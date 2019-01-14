@@ -112,6 +112,12 @@ namespace TelEngine {
 #define REFOBJECT_MUTEX_COUNT 47
 #endif
 
+// Number of seconds from 1900 to 1970
+#define SECONDS_1900_TO_1970 2208988800u // 0x83AA7E80
+// UNIX time of NTP time 07 Feb. 2036 6h 28m 16s
+// NTP time will overflow at this UNIX time
+#define UNIX_NTP_MAX 2085978496u         // 0x7C558180
+
 static int s_debug = DebugDef;
 static int s_indent = 0;
 static bool s_debugging = true;
@@ -831,6 +837,34 @@ bool Time::toDateTime(unsigned int epochTimeSec, int& year, unsigned int& month,
     DDebug(DebugAll,"Time::toDateTime(%u,%d,%u,%u,%u,%u,%u)",
 	epochTimeSec,year,month,day,hour,minute,sec);
     return true;
+}
+
+uint32_t Time::toNtp(uint32_t sec, uint32_t* over, bool rfc2030)
+{
+    if (sec < UNIX_NTP_MAX)
+	return sec + SECONDS_1900_TO_1970;
+    if (rfc2030) {
+	sec -= UNIX_NTP_MAX;
+	if (sec <= 0x7fffffff)
+	    return sec;
+	if (over)
+	    *over = sec - 0x7fffffff;
+	return 0x7fffffff;
+    }
+    if (over)
+	*over = (uint32_t)(((uint64_t)sec + SECONDS_1900_TO_1970) - 0xffffffff);
+    return 0xffffffff;
+}
+
+uint32_t Time::fromNtp(uint32_t val, uint32_t* under, bool rfc2030)
+{
+    if (rfc2030 && val <= 0x7fffffff)
+	return val + UNIX_NTP_MAX;
+    if (val >= SECONDS_1900_TO_1970)
+	return val - SECONDS_1900_TO_1970;
+    if (under)
+	*under = SECONDS_1900_TO_1970 - val;
+    return 0;
 }
 
 int Time::timeZone()
