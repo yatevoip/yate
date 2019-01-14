@@ -387,7 +387,7 @@ static Mutex s_paramMutex(true,"ChannelParams");
 
 Channel::Channel(Driver* driver, const char* id, bool outgoing)
     : CallEndpoint(id),
-      m_parameters(""), m_driver(driver), m_outgoing(outgoing),
+      m_parameters(""), m_chanParams(0), m_driver(driver), m_outgoing(outgoing),
       m_timeout(0), m_maxcall(0), m_maxPDD(0), m_dtmfTime(0),
       m_toutAns(0), m_dtmfSeq(0), m_answered(false)
 {
@@ -396,7 +396,7 @@ Channel::Channel(Driver* driver, const char* id, bool outgoing)
 
 Channel::Channel(Driver& driver, const char* id, bool outgoing)
     : CallEndpoint(id),
-      m_parameters(""), m_driver(&driver), m_outgoing(outgoing),
+      m_parameters(""), m_chanParams(0), m_driver(&driver), m_outgoing(outgoing),
       m_timeout(0), m_maxcall(0), m_maxPDD(0), m_dtmfTime(0),
       m_toutAns(0), m_dtmfSeq(0), m_answered(false)
 {
@@ -409,6 +409,7 @@ Channel::~Channel()
     Debugger debug(DebugAll,"Channel::~Channel()"," '%s' [%p]",id().c_str(),this);
 #endif
     cleanup();
+    TelEngine::destruct(m_chanParams);
 }
 
 void* Channel::getObject(const String& name) const
@@ -641,6 +642,7 @@ void Channel::complete(Message& msg, bool minimal) const
 {
     static const String s_hangup("chan.hangup");
 
+    copyChanParams(msg);
     msg.setParam("id",id());
     if (m_driver)
 	msg.setParam("module",m_driver->name());
@@ -812,6 +814,7 @@ bool Channel::msgControl(Message& msg)
 {
     setMaxcall(msg);
     setMaxPDD(msg);
+    setChanParams(msg);
     for (ObjList* o = m_data.skipNull(); o; o = o->skipNext()) {
 	DataEndpoint* dep = static_cast<DataEndpoint*>(o->get());
 	if (dep->control(msg))
@@ -876,6 +879,7 @@ bool Channel::callPrerouted(Message& msg, bool handled)
     String* str = msg.getParam(YSTRING("billid"));
     if (str)
 	m_billid = *str;
+    setChanParams(msg,true);
     return true;
 }
 
@@ -884,6 +888,7 @@ bool Channel::callRouted(Message& msg)
     status("routed");
     if (m_billid.null())
 	m_billid = msg.getValue(YSTRING("billid"));
+    setChanParams(msg,true);
     return true;
 }
 
@@ -894,6 +899,7 @@ void Channel::callAccept(Message& msg)
     if (defTout <= 0)
 	defTout = -1;
     setMaxcall(msg,defTout);
+    setChanParams(msg,true);
     if (m_billid.null())
 	m_billid = msg.getValue(YSTRING("billid"));
     m_targetid = msg.getValue(YSTRING("targetid"));
@@ -937,6 +943,7 @@ void Channel::callRejected(const char* error, const char* reason, const Message*
 	    parameters().copyParams(*msg,*cp);
 	    s_paramMutex.unlock();
 	}
+	setChanParams(*msg,true);
     }
     status("rejected");
 }

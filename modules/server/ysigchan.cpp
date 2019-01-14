@@ -2169,6 +2169,7 @@ bool SigDriver::msgExecute(Message& msg, String& dest)
     SigChannel* sigCh = new SigChannel(msg.getValue("caller"),dest);
     sigCh->initChan();
     unlock();
+    sigCh->setChanParams(msg);
     bool ok = sigCh->startCall(msg,*trunk);
     if (ok) {
 	if (sigCh->connect(peer,msg.getValue("reason"))) {

@@ -2492,8 +2492,10 @@ YIAXConnection::YIAXConnection(IAXTransaction* tr, Message* msg, NamedList* para
     Debug(this,DebugAll,"%s call. Transaction (%p) callno=%u [%p]",
 	isOutgoing() ? "Outgoing" : "Incoming",tr,tr->localCallNo(),this);
     setMaxcall(msg);
-    if (msg)
+    if (msg) {
 	setMaxPDD(*msg);
+	setChanParams(*msg);
+    }
     if (tr)
 	m_address << tr->remoteAddr().host() << ":" << tr->remoteAddr().port();
     if (msg)

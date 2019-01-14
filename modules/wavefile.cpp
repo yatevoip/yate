@@ -1134,6 +1134,7 @@ bool WaveFileDriver::msgExecute(Message& msg, String& dest)
 	    dest.matchString(2).c_str());
 	WaveChan *c = new WaveChan(dest.matchString(2),meth,maxlen,msg,msg.getParam("callto"));
 	c->initChan();
+	c->setChanParams(msg);
 	if (meth)
 	    c->attachSource(msg.getValue("source"));
 	else

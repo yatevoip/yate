@@ -922,6 +922,7 @@ YJGConnection::YJGConnection(Message& msg, const char* caller, const char* calle
     // Set timeout and maxcall
     setMaxcall(msg);
     setMaxPDD(msg);
+    setChanParams(msg);
     if (!available) {
 	u_int64_t timeNow = Time::now();
 	// Save maxcall for later, set presence retrieval timeout instead

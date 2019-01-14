@@ -1111,6 +1111,7 @@ bool ToneGenDriver::msgExecute(Message& msg, String& dest)
     if (ch) {
 	ToneChan *tc = new ToneChan(dest,msg["lang"]);
 	tc->initChan();
+	tc->setChanParams(msg);
 	tc->attachConsumer(msg.getValue("consumer"));
 	if (ch->connect(tc,msg.getValue("reason"))) {
 	    tc->callConnect(msg);

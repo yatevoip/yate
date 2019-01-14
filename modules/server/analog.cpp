@@ -1330,6 +1330,8 @@ AnalogChannel::AnalogChannel(ModuleLine* line, Message* msg, RecordTrigger recor
     m_privacy(false),
     m_callsetup(AnalogLine::NoCallSetup)
 {
+    if (msg)
+	setChanParams(*msg);
     m_line->userdata(this);
     if (m_line->moduleGroup()) {
 	m_line->moduleGroup()->setEndpoint(this,true);

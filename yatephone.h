@@ -1659,6 +1659,7 @@ class YATE_API Channel : public CallEndpoint, public DebugEnabler, public Messag
     YNOCOPY(Channel); // no automatic copies please
 private:
     NamedList m_parameters;
+    NamedList* m_chanParams;     // Channel parameters to be set in all messages
     Driver* m_driver;
     bool m_outgoing;
     u_int64_t m_timeout;
@@ -2027,6 +2028,32 @@ public:
      */
     inline const NamedList& parameters() const
 	{ return m_parameters; }
+
+    /**
+     * Set channel parameters
+     * @param list List of parameters
+     * @param in True if set for incoming channel (called for (pre)routed/rejected,accepted)
+     */
+    inline void setChanParams(const NamedList& list, bool in = false) {
+	    const String& pref = in ? list[YSTRING("ichanparams-prefix")] : list[YSTRING("chanparams-prefix")];
+	    if (!pref)
+		return;
+	    Lock lck(paramMutex());
+	    if (!m_chanParams)
+		m_chanParams = new NamedList("");
+	    m_chanParams->copySubParams(list,pref,true,true);
+	}
+
+    /**
+     * Copy channel parameters
+     * @param list Destination list
+     */
+    inline void copyChanParams(NamedList& list) const {
+	    if (!m_chanParams)
+		return;
+	    Lock lck(paramMutex());
+	    list.copyParams(*m_chanParams);
+	}
 
     /**
      * Notification for dispatched messages

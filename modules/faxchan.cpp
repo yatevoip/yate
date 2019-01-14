@@ -646,6 +646,8 @@ FaxChan::FaxChan(bool outgoing, const char *file, bool sender, Message& msg)
     m_caller = msg.getBoolValue("faxcaller",!outgoing);
     m_ecm = msg.getBoolValue("faxecm",true);
     m_address = file;
+    if (outgoing)
+	setChanParams(msg);
     Message* s = message("chan.startup",msg);
     if (outgoing)
 	s->copyParams(msg,"caller,callername,called,billid,callto,username");

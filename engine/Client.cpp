@@ -3312,6 +3312,7 @@ ClientChannel::ClientChannel(const Message& msg, const String& peerid)
 {
     Debug(this,DebugCall,"Created incoming from=%s peer=%s [%p]",
 	m_party.c_str(),peerid.c_str(),this);
+    setChanParams(msg);
     const char* acc = msg.getValue(YSTRING("in_line"));
     if (TelEngine::null(acc))
 	acc = msg.getValue(YSTRING("account"),msg.getValue(YSTRING("line")));
@@ -3350,6 +3351,7 @@ ClientChannel::ClientChannel(const String& target, const NamedList& params,
 {
     Debug(this,DebugCall,"Created outgoing to=%s [%p]",
 	m_party.c_str(),this);
+    setChanParams(params);
     m_partyName = params.getValue(YSTRING("calledname"));
     if (m_slave)
 	m_master = masterChan;

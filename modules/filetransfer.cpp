@@ -939,6 +939,7 @@ bool FileDriver::msgExecute(Message& msg, String& dest)
 
 	// Build channel
 	FileChan* c = new FileChan(src,cons,msg.getBoolValue("autoclose"));
+	c->setChanParams(msg);
 	c->initChan();
 	ok = ch->connect(c,msg.getValue("reason"));
 	if (ok) {

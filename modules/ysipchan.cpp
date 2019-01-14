@@ -6225,6 +6225,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 {
     Debug(this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,'%s') [%p]",
 	&msg,uri.c_str(),this);
+    setChanParams(msg);
     m_autoChangeParty = msg.getBoolValue(YSTRING("oautochangeparty"),
 	plugin.ep()->engine()->autoChangeParty());
     m_line = msg.getValue(YSTRING("line"));
