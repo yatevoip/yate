@@ -104,6 +104,32 @@ const char* lookup(int value, const TokenDict* tokens, const char* defvalue)
     return defvalue;
 }
 
+int64_t lookup(const char* str, const TokenDict64* tokens, int64_t defvalue, int base)
+{
+    if (!str)
+	return defvalue;
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (!::strcmp(str,tokens->token))
+		return tokens->value;
+    }
+    char* eptr = 0;
+    int64_t val = ::strtoll(str,&eptr,base);
+    if (!eptr || *eptr)
+	return defvalue;
+    return val;
+}
+
+const char* lookup(int64_t value, const TokenDict64* tokens, const char* defvalue)
+{
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (value == tokens->value)
+		return tokens->token;
+    }
+    return defvalue;
+}
+
 #define MAX_MATCH 9
 
 class StringMatchPrivate

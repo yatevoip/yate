@@ -692,6 +692,23 @@ struct TokenDict {
     int value;
 };
 
+/**
+ * A structure to build (mainly static) Token-to-ID translation tables.
+ * Value is 64bit integer.
+ * A table of such structures must end with an entry with a null token
+ */
+struct TokenDict64 {
+    /**
+     * Token to match
+     */
+    const char* token;
+
+    /**
+     * Value the token translates to
+     */
+    int64_t value;
+};
+
 class String;
 class DataBlock;
 class Mutex;
@@ -2958,6 +2975,24 @@ YATE_API int lookup(const char* str, const TokenDict* tokens, int defvalue = 0, 
  * @param defvalue Value to return if lookup fails
  */
 YATE_API const char* lookup(int value, const TokenDict* tokens, const char* defvalue = 0);
+
+/**
+ * Utility function to look up a string in a 64bit token table,
+ * interpret as number if it fails
+ * @param str String to look up
+ * @param tokens Pointer to the token table
+ * @param defvalue Value to return if lookup and conversion fail
+ * @param base Default base to use to convert to number
+ */
+YATE_API int64_t lookup(const char* str, const TokenDict64* tokens, int64_t defvalue = 0, int base = 0);
+
+/**
+ * Utility function to look up a 64bit number in a token table
+ * @param value Value to search for
+ * @param tokens Pointer to the token table
+ * @param defvalue Value to return if lookup fails
+ */
+YATE_API const char* lookup(int64_t value, const TokenDict64* tokens, const char* defvalue = 0);
 
 class NamedList;
 
