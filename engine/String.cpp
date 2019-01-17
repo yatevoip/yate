@@ -2083,4 +2083,56 @@ const String& GenObject::toString() const
     return String::empty();
 }
 
+unsigned int String::encodeFlags(const TokenDict* tokens)
+{
+    unsigned int flags = 0;
+    ObjList* list = split(',',false);
+    for (ObjList* o = list->skipNull(); o; o = o->skipNext()) {
+	flags |= (unsigned int)(lookup(*static_cast<String*>(o->get()),tokens));
+    }
+    TelEngine::destruct(list);
+    return flags;
+}
+
+uint64_t String::encodeFlags(const TokenDict64* tokens)
+{
+    uint64_t flags = 0;
+    ObjList* list = split(',',false);
+    for (ObjList* o = list->skipNull(); o; o = o->skipNext()) {
+	flags |= (uint64_t)(lookup(*static_cast<String*>(o->get()),tokens));
+    }
+    TelEngine::destruct(list);
+    return flags;
+}
+
+const String& String::decodeFlags(unsigned int flags, const TokenDict* tokens, bool unknownflag)
+{
+    if (tokens) {
+	for(; tokens->token && flags; tokens++) {
+	    if ((tokens->value & flags) == (unsigned int)tokens->value) {
+		append(tokens->token,",");
+		flags &= ~tokens->value;
+	    }
+	}
+    }
+    if (flags && unknownflag)
+	append(String(flags),",");
+    return *this;
+}
+
+const String& String::decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag)
+{
+    if (tokens) {
+	for (; tokens->token && flags; tokens++) {
+	    if ((tokens->value & flags) == (uint64_t)tokens->value ) {
+		append(tokens->token,",");
+		flags &= ~tokens->value;
+	    }
+	}
+    }
+    if (flags && unknownflag)
+	append(String(flags),",");
+    return *this;
+}
+
 /* vi: set ts=8 sw=4 sts=4 noet: */

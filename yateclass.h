@@ -2077,7 +2077,7 @@ public:
     inline int lenUtf8(uint32_t maxChar = 0x10ffff, bool overlong = false) const
 	{ return lenUtf8(m_string,maxChar,overlong); }
 
-
+	
     /**
      * Fix an UTF-8 encoded string by replacing invalid sequences
      * @param replace String to replace invalid sequences, use U+FFFD if null
@@ -2087,6 +2087,37 @@ public:
      */
     int fixUtf8(const char* replace = 0, uint32_t maxChar = 0x10ffff, bool overlong = false);
 
+     /**
+     * Encode flags from dictionary values
+     * @param tokens The dictionary containing the flags
+     * @return Encoded flags
+     */
+    unsigned int encodeFlags(const TokenDict* tokens);
+
+     /**
+     * Encode flags from dictionary values
+     * @param tokens The dictionary containing the flags
+     * @return Encoded flags
+     */
+    uint64_t encodeFlags(const TokenDict64* tokens);
+
+     /**
+     * Decodoe flags from dictionary values
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownflag True (default) to add unknown flags
+     * @return Decoded flags
+     */
+    const String& decodeFlags(unsigned int flags, const TokenDict* tokens, bool unknownflag = true);
+
+     /**
+     * Decode flags from dictionary values
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownflag True (default) to add unknown flags
+     * @return Decoded flags
+     */
+     const String& decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag = true);
     /**
      * Check if a string starts with UTF-8 Byte Order Mark
      * @param str String to check for BOM
