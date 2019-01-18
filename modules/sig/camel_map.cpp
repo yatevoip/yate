@@ -477,7 +477,7 @@ static const TokenDict s_tagTypes[] = {
     {"application",  AsnTag::Application},
     {"context",      AsnTag::Context},
     {"private",      AsnTag::Private},
-    {"",    -1},
+    {0,0}
 };
 
 struct Parameter {
@@ -3168,7 +3168,7 @@ static const Parameter s_SSCSI[] = {
 static const TokenDict s_matchType[] = {
     {"inhibiting", 0x00},
     {"enabling",   0x01},
-    {0,0xff},
+    {0,0},
 };
 
 static const Parameter s_destinationNumber[] = {
@@ -3193,7 +3193,7 @@ static const TokenDict s_callTypeCriteria[] = {
 // TS 100 974 v7.15.0 page 307
     {"forwarded",        0x00},
     {"notForwarded",     0x01},
-    {0,0xff},
+    {0,0},
 };
 
 static const Parameter s_causeValue[]={
@@ -3429,13 +3429,13 @@ static const TokenDict s_networkAccessMode[] = {
     {"bothMSCAndSGSN",    0x00},
     {"onlyMSC",           0x01},
     {"onlySGSN",          0x02},
-    {0,0xff},
+    {0,0},
 };
 
 static const TokenDict s_lsaOnlyAccessIndicator[] = {
     {"accessOutsideLSAsAllowed",     0x00},
     {"accessOutsideLSAsRestricted",  0x01},
-    {0,0xff},
+    {0,0},
 };
 
 static const Parameter s_LSADataSeq[] = {
@@ -3475,7 +3475,7 @@ static const TokenDict s_notificationToMSUser[] = {
 static const TokenDict s_GMLCRestriction[] = {
     {"gmlc-List",       0x00},
     {"home-Country",    0x01},
-    {0,0xff},
+    {0,0},
 };
 
 static const Parameter s_LCSClientExternalIDSeq[] = {
@@ -3503,7 +3503,7 @@ static const TokenDict s_LCSClientInternalIDEnum[] = {
     {"o-andM-VPLMN",                 0x02},
     {"anonymousLocation",            0x03},
     {"targetMSsubscribedService",    0x04},
-    {0,0xff},
+    {0,0},
 };
 
 
@@ -5364,7 +5364,7 @@ static TokenDict s_eventTypeBCSM[] = {
     {"tAnswer",                   15},
     {"tDisconnect",               17},
     {"tAbandon",                  18},
-    {"", 0}
+    {0, 0}
 };
 
 static TokenDict s_naCICSelectionType[] = {
@@ -5373,7 +5373,7 @@ static TokenDict s_naCICSelectionType[] = {
     {"subscribed-and-dialed",             0x02},
     {"subscribed-dialing-undeterminded",  0x03},
     {"dialed-CIC-not-subscribed",         0x04},
-    {"", 0}
+    {0, 0}
 };
 
 static const Parameter s_naCarrierInformationSeq[] = {
@@ -5426,13 +5426,13 @@ static const TokenDict s_monitorMode[] = {
     {"interrupted",       0x00},
     {"notifyAndContinue", 0x01},
     {"transparent",       0x02},
-    {"", 0},
+    {0, 0},
 };
 
 static const TokenDict s_legType[] = {
     {"leg1",  0x01},
     {"leg2",  0x02},
-    {"", 0},
+    {0, 0},
 };
 
 static const Parameter s_legID[] = {
@@ -5516,7 +5516,7 @@ static const Parameter s_eventSpecificInformationBCSM[] = {
 static const TokenDict s_messageType[] = {
     {"request",       0x00},
     {"notification",  0x01},
-    {"", 0},
+    {0, 0},
 };
 
 static const Parameter s_miscCallInfoSeq[] = {
@@ -5585,7 +5585,7 @@ static const Parameter s_assistRequestInstructionsArgs[] = {
 static const TokenDict s_bothwayThroughConnectionInd[] = {
     {"bothwayPathRequired",       0x00},
     {"bothwayPathNotRequired",    0x01},
-    {"", 0},
+    {0, 0},
 };
 
 static const Parameter s_serviceInteractionIndicatorsTwo[] = {
@@ -5622,7 +5622,7 @@ static const Parameter s_connectToResourceArgs[] = {
 
 static const TokenDict s_timerID[] = {
     {"tssf",       0x00},
-    {"",           0x01},
+    {0,0},
 };
 
 static const Parameter s_resetTimerArgs[] = {
@@ -5713,7 +5713,7 @@ static const TokenDict s_requestedInformationType[] = {
     {"callStopTime",                 0x01},
     {"callConnectedElapsedTime",     0x02},
     {"releaseCause",                 0x1e},
-    {"",                             0xff},
+    {0,0}
 };
 
 static const Parameter s_requestedInformationValue[] = {
@@ -5861,7 +5861,7 @@ static const TokenDict s_errorTreatment[] = {
     {"stdErrorAndInfo",       0x00},
     {"help",                  0x01},
     {"repeatPrompt",          0x02},
-    {"",                      0xff},
+    {0,0}
 };
 
 static const Parameter s_collectedInfoSeq[] = {
@@ -6468,7 +6468,7 @@ static const TokenDict s_problemEnum[] = {
     {"unknownOperation",         0x00},
     {"tooLate",                  0x01},
     {"operationNotCancellable",  0x02},
-    {"",  0xff},
+    {0,0}
 };
 
 static const Parameter s_cancelFailedErr[] = {
@@ -6480,7 +6480,7 @@ static const Parameter s_cancelFailedErr[] = {
 static const TokenDict s_requestedInfoEnum[] = {
     {"unknownRequestedInfo",       0x01},
     {"requestedInfoNotAvailable",  0x02},
-    {"",  0xff},
+    {0,0}
 };
 
 static const Parameter s_requestedInfoErr[] = {
@@ -6494,7 +6494,7 @@ static const TokenDict s_systemFailureEnum[] = {
     {"basicCallProcessingException",  0x02},
     {"resourceStatusFailure",         0x03},
     {"endUserFailure",                0x04},
-    {"",  0xff},
+    {0,0}
 };
 
 static const Parameter s_systemFailureCamelErr[] = {
@@ -6507,7 +6507,7 @@ static const TokenDict s_taskRefusedEnum[] = {
     {"generic",         0x00},
     {"unobtainable",    0x01},
     {"congestion",      0x02},
-    {"",  0xff},
+    {0,0}
 };
 
 static const Parameter s_taskRefusedErr[] = {
@@ -6830,13 +6830,13 @@ static const TokenDict s_appStates[] = {
     {"active",      TcapXApplication::Active},
     {"shutdown",    TcapXApplication::ShutDown},
     {"inactive",    TcapXApplication::Inactive},
-    {"", 0},
+    {0, 0},
 };
 
 static const TokenDict s_userTypes[] = {
     {"MAP",     TcapXUser::MAP},
     {"CAMEL",   TcapXUser::CAMEL},
-    {"", 0},
+    {0, 0},
 };
 
 static void replace(String& str, char what, char with)

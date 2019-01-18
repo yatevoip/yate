@@ -136,6 +136,7 @@ const TokenDict SCCPManagement::s_broadcastType[] = {
     { "RemoteSCCPInaccessible",      SCCPManagement::SccpRemoteInaccessible },
     { "RemoteSCCPAccessible",        SCCPManagement::SccpRemoteAccessible },
     { "SignallingPointCongested",    SCCPManagement::PCCongested },
+    { 0, 0 }
 };
 
 static const TokenDict s_sccpNotif[] = {

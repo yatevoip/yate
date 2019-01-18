@@ -1355,7 +1355,7 @@ static TokenDict s_dbAccountInfo[] = {
     {"errorred",	    DatabaseAccount::ERROR_IDX},
     {"querytime",	    DatabaseAccount::TIME_IDX},
     {"hasconn",		    DatabaseAccount::CONN_IDX},
-    {0,-1}
+    {0,0}
 };
 
 TokenDict RTPEntry::s_rtpInfo[] = {

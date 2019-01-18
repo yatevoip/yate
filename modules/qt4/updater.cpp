@@ -112,7 +112,7 @@ static const TokenDict s_policies[] = {
     { "check",    UpdateLogic::Check    },
     { "download", UpdateLogic::Download },
     { "install",  UpdateLogic::Install  },
-    { 0,          UpdateLogic::Invalid  }
+    {0,0}
 };
 
 UpdateLogic::~UpdateLogic()

@@ -211,7 +211,7 @@ const TokenDict SS7TCAP::s_tcapVersion[] = {
     {"UnknownTCAP", SS7TCAP::UnknownTCAP},
     {"ITU-T TCAP",  SS7TCAP::ITUTCAP},
     {"ANSI TCAP",   SS7TCAP::ANSITCAP},
-    {0,-1},
+    {0,0},
 };
 
 const TokenDict SS7TCAP::s_compPrimitives[] = {
@@ -251,6 +251,7 @@ const TokenDict SS7TCAP::s_compOperClasses[] = {
     {"reportFail",       SS7TCAP::FailureOnlyReport},
     {"reportSuccess",    SS7TCAP::SuccessOnlyReport},
     {"reportNone",       SS7TCAP::NoReport},
+    {0,0},
 };
 
 
@@ -1599,6 +1600,7 @@ const TokenDict SS7TCAPComponent::s_compStates[] = {
     {"OperationPending",    SS7TCAPComponent::OperationPending},
     {"OperationSent",       SS7TCAPComponent::OperationSent},
     {"WaitForReject",       SS7TCAPComponent::WaitForReject},
+    {0,0}
 };
 
 SS7TCAPComponent::SS7TCAPComponent(SS7TCAP::TCAPType type, SS7TCAPTransaction* trans, NamedList& params, unsigned int index)
@@ -3284,7 +3286,7 @@ const TokenDict SS7TCAPTransactionITU::s_resultPDUValues[] = {
     {"provider-no-common-dialogue-portion",            SS7TCAPTransactionITU::DiagnosticProviderNoCommonDialog},
     {"dialogue-service-user",                          SS7TCAPTransactionITU::AbortSourceUser},
     {"dialogue-service-provider",                      SS7TCAPTransactionITU::AbortSourceProvider},
-    {0,-1},
+    {0,0},
 };
 
 SS7TCAPTransactionITU::SS7TCAPTransactionITU(SS7TCAP* tcap, SS7TCAP::TCAPUserTransActions type,

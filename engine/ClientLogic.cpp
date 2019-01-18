@@ -861,7 +861,7 @@ static const TokenDict s_notifPrefix[] = {
     {"messages_1:",           PrivNotification1},
     {"messages_2:",           PrivNotification2},
     {"messages_3:",           PrivNotification3},
-    {0,0,}
+    {0,0}
 };
 enum ChatLogEnum {
     ChatLogSaveAll = 1,

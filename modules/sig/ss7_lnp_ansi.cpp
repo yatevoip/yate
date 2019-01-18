@@ -327,6 +327,7 @@ static const TokenDict s_digitTypes[] = {
     {"OriginalCalledNumber",      LNPClient::OriginalCalledNumber},
     {"RedirectionNumber",         LNPClient::RedirectiongNumber},
     {"ConnectedNumber",           LNPClient::ConnectedNumber},
+    {0,0}
 };
 
 static const TokenDict s_operations[] = {
@@ -337,11 +338,13 @@ static const TokenDict s_operations[] = {
     {"NetworkManagement:ACG",               LNPClient::NetworkManagementACG},
     {"Procedural:ReportError",              LNPClient::ProceduralError},
     {"None",                                LNPClient::None},
+    {0,0}
 };
 
 static const TokenDict s_nature[] = {
     {"national",         LNPClient::NatureNational},
     {"international",    LNPClient::NatureInternational},
+    {0,0}
 };
 
 static const TokenDict s_plans[] = {
@@ -353,12 +356,14 @@ static const TokenDict s_plans[] = {
     {"maritimemobile", LNPClient::NPMaritimeMobile},
     {"landmobile",     LNPClient::NPLandMobile},
     {"private",        LNPClient::NPPrivate},
+    {0,0}
 };
 
 static const TokenDict s_encodings[] = {
     {"notused",        LNPClient::EncodingNotUsed},
     {"bcd",           LNPClient::EncodingBCD},
     {"ia5",           LNPClient::EncodingIA5},
+    {0,0}
 };
 
 // ANSI Originating Line Info
@@ -389,6 +394,7 @@ static const TokenDict s_announce[] = {
     {"reorder",         LNPClient::Reorder},
     {"ring",            LNPClient::Ringing},
     {"",                LNPClient::NotUsed},
+    { 0, 0 }
 };
 
 static const TokenDict s_acgCauses[] = {
@@ -417,6 +423,7 @@ static const TokenDict s_gaps[] = {
     {"217", 14},
     {"300", 15},
     {"0", 0},
+    {0,0}
 };
 
 static const String s_remPC = "RemotePC";
