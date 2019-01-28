@@ -889,6 +889,14 @@ bool Connection::processChar(unsigned char c)
 	    if (!autoComplete())
 		errorBeep();
 	    return false;
+	case 0x02: // ^B = Back one page
+	    m_escmode = 0;
+	    pagedCommand(true);
+	    return false;
+	case 0x06: // ^F = Forward one page
+	    m_escmode = 0;
+	    pagedCommand(false);
+	    return false;
     }
     if (m_escmode) {
 	switch (c) {
