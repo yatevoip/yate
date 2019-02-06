@@ -1173,10 +1173,16 @@ void ExtModReceiver::run()
 	use();
 	lock();
 	char* buffer = static_cast<char*>(m_buffer.data());
-	int readsize = m_in ? m_in->readData(buffer+posinbuf,m_buffer.length()-posinbuf) : 0;
+	int bufspace = m_buffer.length() - posinbuf - 1;
+	int readsize = (m_in && bufspace) ? m_in->readData(buffer+posinbuf,bufspace) : 0;
 	unlock();
 	if (unuse())
 	    return;
+	if (!bufspace) {
+	    Debug("ExtModule",DebugWarn,"Overflow reading in buffer of length %u, closing [%p]",
+		m_buffer.length(),this);
+	    return;
+	}
 	if (!readsize) {
 	    if (m_in)
 		Debug("ExtModule",DebugInfo,"Read EOF on %p [%p]",m_in,this);
@@ -1207,7 +1213,7 @@ void ExtModReceiver::run()
 		m_buffer.length(),this);
 	    return;
 	}
-	buffer[totalsize]=0;
+	buffer[totalsize] = 0;
 	for (;;) {
 	    char *eoline = ::strchr(buffer,'\n');
 	    if (!eoline && ((int)::strlen(buffer) < totalsize))
