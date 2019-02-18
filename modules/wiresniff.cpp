@@ -189,14 +189,15 @@ void WireSniffPlugin::initialize()
 	
     if(!(addr.host() && addr.port())) {
 	s_socket.terminate();
-	Debug(this,DebugWarn,"Remote address and remote port are not configured");
+	if(remoteName)
+	    Debug(this,DebugWarn,"Remote address is invalid");
+	return;
     }
 	
-    if (!(addr.valid())) {
+    if (addr.host() && addr.port() && !(addr.valid())) {
 	DDebug(this,DebugWarn,"Invalid address '%s'",remoteName.c_str());
 	return;
     }
-
 
     if(addr.family() != SocketAddr::IPv6)
 	s_addr.host(s_cfg.getValue("general","local_host","0.0.0.0"));
@@ -211,10 +212,12 @@ void WireSniffPlugin::initialize()
 	    
     }
 
+    if (addr.host()) {
     if (s_addr.family() != addr.family()) {
 	Debug(this,DebugWarn,"Socket Addresses are not compatible");
 	return;
 	}
+    }
 
     if (!s_socket.create(s_addr.family(),SOCK_DGRAM)) {
 	Debug(this,DebugWarn,"Could not create socket %s", strerror(s_socket.error()));
@@ -233,6 +236,7 @@ void WireSniffPlugin::initialize()
     }
 
     if (!s_socket.setBlocking(false)) {
+	s_socket.terminate();
 	Debug(DebugWarn,"Unable to set socket %s to nonblocking mode", strerror(s_socket.error()));
         return;
     }
@@ -242,7 +246,7 @@ void WireSniffPlugin::initialize()
     }
 	
     DDebug(this,DebugNote,"Socket bound to: %s:%u",s_addr.host().c_str(),s_addr.port());
-    Debug(this,DebugNote,"Sending from %s:%u to %s:%u",s_addr.host().c_str(),s_addr.port(),addr.host().c_str(),addr.port());
+    Debug(this,DebugNote,"Sending from %s to %s:%u",s_addr.addr().c_str(),addr.host().c_str(),addr.port());
 	
     if (m_first) {
 	m_first = false;
