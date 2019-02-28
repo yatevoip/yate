@@ -3663,9 +3663,12 @@ ExpOperation* JsParser::parseJSON(const char* text, Mutex* mtx, ObjList* stack, 
     ExpOperation* ret = 0;
     JsCode* code = new JsCode;
     ParsePoint pp(text,code);
-    if (code->parseSimple(pp,true,mtx))
+    if (code->parseSimple(pp,true,mtx)) {
 	ret = code->popOpcode();
-    if (stack)
+	if (code->skipComments(pp,context))
+	    TelEngine::destruct(ret);
+    }
+    if (stack && ret)
 	code->resolveObjectParams(YOBJECT(JsObject,ret),*stack,context);
     TelEngine::destruct(code);
     return ret;
