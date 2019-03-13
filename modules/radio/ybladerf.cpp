@@ -3219,7 +3219,7 @@ const char* BrfBufsThreshold::init(DataBlock& db, const String& str,
 	}
 	else
 	    bSamples = s.substr(pos1 + 1).trimBlanks().toInt64(-1);
-	XDebug(&__plugin,DebugAll,"BrfBufsThreshold::init() %u/%u '%s' -> "FMT64"/"FMT64"/%d",
+	XDebug(&__plugin,DebugAll,"BrfBufsThreshold::init() %u/%u '%s' -> " FMT64 "/" FMT64 "/%d",
 	    i + 1,n,s.c_str(),sRate,bSamples,txMinBufs);
 	if (sRate < caps.minSampleRate || sRate > caps.maxSampleRate)
 	    result = "samplerate out of range";
@@ -6537,7 +6537,7 @@ unsigned int BrfLibUsbDevice::internalSetFreqOffs(float val, float* newVal, Stri
 
 unsigned int BrfLibUsbDevice::internalSetFrequency(bool tx, uint64_t val, String* error)
 {
-    XDebug(m_owner,DebugAll,"BrfLibUsbDevice::setFrequency("FMT64U",%s) [%p]",
+    XDebug(m_owner,DebugAll,"BrfLibUsbDevice::setFrequency(" FMT64U ",%s) [%p]",
 	val,brfDir(tx),m_owner);
     String e;
     unsigned int status = 0;
@@ -6612,7 +6612,7 @@ unsigned int BrfLibUsbDevice::internalSetFrequency(bool tx, uint64_t val, String
 	break;
     }
     if (status) {
-	e.printf(1024,"Failed to set %s frequency to "FMT64U"Hz - %s",brfDir(tx),val,e.c_str());
+	e.printf(1024,"Failed to set %s frequency to " FMT64U "Hz - %s",brfDir(tx),val,e.c_str());
 	return showError(status,e,0,error);
     }
     if (getDirState(tx).frequency != hz) {
