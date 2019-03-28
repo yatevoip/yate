@@ -1652,6 +1652,7 @@ int Engine::run()
 		s_timejump = MIN_TIME_JUMP;
 	    s_timejump *= 1000;
 	    initPlugins();
+	    last = 0;
 	}
 
 	if (s_debug) {
