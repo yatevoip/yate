@@ -2083,7 +2083,7 @@ const String& GenObject::toString() const
     return String::empty();
 }
 
-unsigned int String::encodeFlags(const TokenDict* tokens)
+unsigned int String::encodeFlags(const TokenDict* tokens) const
 {
     unsigned int flags = 0;
     ObjList* list = split(',',false);
@@ -2094,7 +2094,7 @@ unsigned int String::encodeFlags(const TokenDict* tokens)
     return flags;
 }
 
-uint64_t String::encodeFlags(const TokenDict64* tokens)
+uint64_t String::encodeFlags(const TokenDict64* tokens) const
 {
     uint64_t flags = 0;
     ObjList* list = split(',',false);

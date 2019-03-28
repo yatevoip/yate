@@ -2092,14 +2092,14 @@ public:
      * @param tokens The dictionary containing the flags
      * @return Encoded flags
      */
-    unsigned int encodeFlags(const TokenDict* tokens);
+    unsigned int encodeFlags(const TokenDict* tokens) const;
 
      /**
      * Encode flags from dictionary values
      * @param tokens The dictionary containing the flags
      * @return Encoded flags
      */
-    uint64_t encodeFlags(const TokenDict64* tokens);
+    uint64_t encodeFlags(const TokenDict64* tokens) const;
 
      /**
      * Decodoe flags from dictionary values
