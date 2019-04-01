@@ -42,6 +42,7 @@ static bool s_create = false;
 static const String s_general = "general";
 static ObjList s_expand;
 static int s_count = 0;
+static ObjList s_skipParams;
 
 INIT_PLUGIN(RegfilePlugin);
 
@@ -76,11 +77,10 @@ public:
 class RouteHandler : public MessageHandler
 {
 public:
-    RouteHandler(const char *name, unsigned prio = 100);
-    ~RouteHandler();
+    RouteHandler(const char *name, unsigned prio = 100)
+	: MessageHandler(name,prio,__plugin.name())
+	{ }
     virtual bool received(Message &msg);
-private:
-    ObjList* m_skip;
 };
 
 class StatusHandler : public MessageHandler
@@ -170,6 +170,15 @@ bool AuthHandler::received(Message &msg)
     msg.retValue() = *pass;
     Debug(&__plugin,DebugAll,"Authenticating user %s with password length %u",
 	username.c_str(),pass->length());
+
+    for (ObjList* o = usr->paramList()->skipNull(); o; o = o->skipNext()) {
+	const NamedString* s = static_cast<NamedString*>(o->get());
+	if (s && !s_skipParams.find(s->name())) {
+	    String value = *s;
+	    msg.replaceParams(value);
+	    msg.setParam(s->name(),value);
+	}
+    }
     return true;
 }
 
@@ -252,17 +261,6 @@ bool UnRegistHandler::received(Message &msg)
     return false;
 }
 
-RouteHandler::RouteHandler(const char *name, unsigned prio)
-    : MessageHandler(name,prio,__plugin.name())
-{
-    m_skip = String("alternatives,password").split(',');
-}
-
-RouteHandler::~RouteHandler()
-{
-    TelEngine::destruct(m_skip);
-}
-
 bool RouteHandler::received(Message &msg)
 {
     if (!msg.getBoolValue(YSTRING("route_regfile"),true))
@@ -276,7 +274,7 @@ bool RouteHandler::received(Message &msg)
 	    unsigned int n = params->length();
 	    for (unsigned int i = 0; i < n; i++) {
 		const NamedString* s = params->getParam(i);
-		if (s && !m_skip->find(s->name())) {
+		if (s && !s_skipParams.find(s->name())) {
 		    String value = *s;
 		    msg.replaceParams(value);
 		    msg.setParam(s->name(),value);
@@ -453,6 +451,9 @@ void RegfilePlugin::initialize()
 	    s_accounts = conf;
 	    s_accounts.load();
 	}
+	s_skipParams.append(new String("alternatives"));
+	s_skipParams.append(new String("password"));
+
 	Engine::install(new AuthHandler("user.auth",s_cfg.getIntValue("general","auth",100)));
 	Engine::install(new RegistHandler("user.register",s_cfg.getIntValue("general","register",100)));
 	Engine::install(new UnRegistHandler("user.unregister",s_cfg.getIntValue("general","register",100)));
