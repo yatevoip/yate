@@ -304,9 +304,10 @@ void MGCPTransaction::processMessage(MGCPMessage* msg)
 	    ok = !m_response;
 	    if (ok)
 		m_response = msg;
-	    else if (m_response->code() == msg->code()) {
-		retrans = true;
-		send(m_ack);
+	    else {
+		retrans = (m_response->code() == msg->code());
+		if (retrans)
+		    send(m_ack);
 	    }
 	    DDebug(m_engine,(ok || retrans) ? DebugAll : DebugNote,
 		"%s. Received %sresponse %d [%p]",m_debug.c_str(),
