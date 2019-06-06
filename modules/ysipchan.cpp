@@ -6161,6 +6161,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
 	    m->setParam("xsip_nonce_age",String(age));
 	}
 	m_domain = m->getValue(YSTRING("domain"));
+	setChanParams(*m,true);
     }
 
     setRtpLocalAddr(m_rtpLocalAddr);
