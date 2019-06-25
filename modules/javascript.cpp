@@ -1195,8 +1195,10 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		if (level < 0) {
 		    if (op->isInteger())
 			level = (int)op->number();
-		    else
+		    else {
+			TelEngine::destruct(op);
 			return false;
+		    }
 		}
 		else
 		    info = *op;
@@ -1375,8 +1377,10 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
     else if (oper.name() == YSTRING("debugAt")) {
 	if (oper.number() == 1) {
 	    ExpOperation* op = popValue(stack,context);
-	    if (!(op && op->isInteger()))
+	    if (!(op && op->isInteger())) {
+		TelEngine::destruct(op);
 		return false;
+	    }
 	    ExpEvaluator::pushOne(stack,new ExpOperation(debugAt((int)op->valInteger())));
 	    TelEngine::destruct(op);
 	}
@@ -4544,6 +4548,7 @@ bool JsChannel::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    case 3:
 		params = popValue(stack,context);
 		peer = params && params->valBoolean();
+		TelEngine::destruct(params);
 		// fall through
 	    case 2:
 		params = popValue(stack,context);
