@@ -1769,6 +1769,9 @@ bool Router::route()
 	    chan = 0;
 	    *m_msg = "call.route";
 	    m_msg->retValue().clear();
+	    if (Engine::trackParam())
+		m_msg->clearParam(Engine::trackParam());
+	    m_msg->msgTime() = Time::now();
 	}
 	ok = Engine::dispatch(m_msg);
     }
@@ -1802,6 +1805,9 @@ bool Router::route()
 	    m_msg->setParam("callto",m_msg->retValue());
 	    m_msg->clearParam(YSTRING("error"));
 	    m_msg->retValue().clear();
+	    if (Engine::trackParam())
+		m_msg->clearParam(Engine::trackParam());
+	    m_msg->msgTime() = Time::now();
 	    ok = Engine::dispatch(m_msg);
 	    if (ok)
 		chan->callAccept(*m_msg);
