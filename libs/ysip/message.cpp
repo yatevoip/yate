@@ -300,7 +300,7 @@ void SIPMessage::complete(SIPEngine* engine, const char* user, const char* domai
 	    if (m_cseq <= 0) {
 		int sep = hl->find(' ');
 		if (sep > 0)
-		    m_cseq = hl->substr(sep).toInteger(-1,10);
+		    m_cseq = hl->substr(0,sep).toInteger(-1,10);
 	    }
 	}
 	else {
