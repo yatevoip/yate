@@ -63,6 +63,7 @@ static Mutex s_mutex(true,"ExtModule");
 static Mutex s_uses(false,"ExtModUse");
 static int s_waitFlush = WAIT_FLUSH;
 static int s_timeout = MSG_TIMEOUT;
+static bool s_settime = false;
 static bool s_timebomb = false;
 static bool s_pluginSafe = true;
 static const char* s_trackName = 0;
@@ -272,6 +273,7 @@ private:
     bool m_selfWatch;
     bool m_reenter;
     bool m_setdata;
+    bool m_settime;
     bool m_writing;
     int m_timeout;
     bool m_timebomb;
@@ -789,7 +791,7 @@ ExtModReceiver::ExtModReceiver(const char* script, const char* args, File* ain, 
       m_role(RoleUnknown), m_dead(false), m_quit(false), m_use(1), m_pid(-1),
       m_in(0), m_out(0), m_ain(ain), m_aout(aout),
       m_chan(chan), m_watcher(0),
-      m_selfWatch(false), m_reenter(false), m_setdata(true), m_writing(false),
+      m_selfWatch(false), m_reenter(false), m_setdata(true), m_settime(s_settime), m_writing(false),
       m_timeout(s_timeout), m_timebomb(s_timebomb), m_restart(false), m_scripted(false),
       m_buffer(0,DEF_INCOMING_LINE), m_script(script), m_args(args), m_trackName(s_trackName)
 {
@@ -807,7 +809,7 @@ ExtModReceiver::ExtModReceiver(const char* name, Stream* io, ExtModChan* chan, i
       m_role(role), m_dead(false), m_quit(false), m_use(1), m_pid(-1),
       m_in(io), m_out(io), m_ain(0), m_aout(0),
       m_chan(chan), m_watcher(0),
-      m_selfWatch(false), m_reenter(false), m_setdata(true), m_writing(false),
+      m_selfWatch(false), m_reenter(false), m_setdata(true), m_settime(s_settime), m_writing(false),
       m_timeout(s_timeout), m_timebomb(s_timebomb), m_restart(false), m_scripted(false),
       m_buffer(0,DEF_INCOMING_LINE), m_script(name), m_args(conn), m_trackName(s_trackName)
 {
@@ -1553,6 +1555,11 @@ bool ExtModReceiver::processLine(const char* line)
 		val = m_setdata;
 		ok = true;
 	    }
+	    else if (id == "settime") {
+		m_settime = val.toBoolean(m_settime);
+		val = m_setdata;
+		ok = true;
+	    }
 	    else if (id == "selfwatch") {
 		m_selfWatch = val.toBoolean(m_selfWatch);
 		val = m_selfWatch;
@@ -1648,6 +1655,8 @@ bool ExtModReceiver::processLine(const char* line)
 		    }
 		}
 	    }
+	    if (m_settime || !m->msgTime())
+		m->msgTime() = Time::now();
 	    m->startup(this);
 	    unlock();
 	    return false;
@@ -2031,6 +2040,7 @@ void ExtModulePlugin::initialize()
     s_cfg.load();
     s_timeout = s_cfg.getIntValue("general","timeout",MSG_TIMEOUT);
     s_timebomb = s_cfg.getBoolValue("general","timebomb",false);
+    s_settime = s_cfg.getBoolValue("general","settime",false);
     s_trackName = s_cfg.getBoolValue("general","trackparam",false) ?
 	name().c_str() : (const char*)0;
     int wf = s_cfg.getIntValue("general","waitflush",WAIT_FLUSH);
