@@ -848,7 +848,7 @@ bool YRTPWrapper::startSRTP(const String& suite, const String& keyParams, const 
     RTPSecure* srtp = new RTPSecure;
     if (srtp->supported(m_rtp) && srtp->setup(suite,keyParams,paramList)) {
 	m_rtp->receiver()->security(srtp);
-	Debug(&splugin,DebugNote,"Started SRTP suite '%s' [%p]",suite.c_str(),this);
+	Debug(&splugin,DebugCall,"Started SRTP suite '%s' [%p]",suite.c_str(),this);
 	return true;
     }
     TelEngine::destruct(srtp);
