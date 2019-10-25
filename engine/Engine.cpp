@@ -1749,11 +1749,16 @@ int Engine::run()
 	}
 
 	// Attempt to sleep until the next full second
-	long t = 1000000 - (long)(Time::now() % 1000000) - corr;
+	u_int64_t tstart = Time::now();
+	long t = 1000000 - (long)(tstart % 1000000) - corr;
 	if (t < 250000)
 	    t += 1000000;
 	XDebug(DebugAll,"Sleeping for %ld",t);
-	Thread::usleep(t);
+	long diff = 0;
+	while (t > diff) {
+	    Thread::usleep(t - diff);
+	    diff = Time::now() - tstart;
+	}
 	Message* m = new Message("engine.timer",0,true);
 	m->addParam("time",String(m->msgTime().sec()));
 	if (nodeName())
