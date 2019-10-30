@@ -7003,6 +7003,12 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	if (tr->autoAck())
 	    startPendingUpdate();
 	else if (!m_rtpForward) {
+	    const MimeHeaderLine* co = msg->getHeader("Contact");
+	    if (co) {
+		Lock lck(driver());
+		m_uri = *co;
+		m_uri.parse();
+	    }
 	    MimeSdpBody* sdp = m_rtpMedia ? createRtpSDP(true) : 0;
 	    Debug(this,DebugNote,"Sending ACK %s SDP now since RTP is not forwarded [%p]",
 		(sdp ? "with" : "without"),this);
