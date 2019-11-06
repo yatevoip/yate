@@ -174,6 +174,10 @@ ifneq (@HAVE_ISAC@,no)
 PROGS := $(PROGS) isaccodec.yate
 endif
 
+ifneq (@HAVE_G722WR@,no)
+PROGS := $(PROGS) g722webrtc.yate
+endif
+
 ifneq (@HAVE_SPEEX@,no)
 PROGS := $(PROGS) speexcodec.yate
 endif
@@ -383,6 +387,10 @@ ilbcwebrtc.yate: LOCALLIBS = -L../libs/miniwebrtc -lminiwebrtc
 isaccodec.yate: ../libs/miniwebrtc/libminiwebrtc.a
 isaccodec.yate: LOCALFLAGS = @ISAC_INC@ -I@top_srcdir@/libs/miniwebrtc/audio/common/processing -I@top_srcdir@/libs/miniwebrtc
 isaccodec.yate: LOCALLIBS = -L../libs/miniwebrtc -lminiwebrtc
+
+g722webrtc.yate: ../libs/miniwebrtc/libminiwebrtc.a
+g722webrtc.yate: LOCALFLAGS = @G722WR_INC@ -I@top_srcdir@/libs/miniwebrtc/audio/common/processing -I@top_srcdir@/libs/miniwebrtc
+g722webrtc.yate: LOCALLIBS = -L../libs/miniwebrtc -lminiwebrtc
 
 gsmcodec.yate: EXTERNFLAGS = @GSM_INC@
 gsmcodec.yate: EXTERNLIBS = @GSM_LIB@

@@ -1082,6 +1082,23 @@ fi
 AC_SUBST(HAVE_ISAC)
 AC_SUBST(ISAC_INC)
 
+HAVE_G722WR=no
+G722WR_INC=""
+AC_ARG_ENABLE(g722-webrtc,AC_HELP_STRING([--enable-g722-webrtc],[Enable G.722 webrtc codec (default: yes)]),want_g722_webrtc=$enableval,want_g722_webrtc=yes)
+if [[ "x$want_g722_webrtc" = "xyes" ]]; then
+AC_MSG_CHECKING([for G.722 miniwebrtc in libs])
+	basedir=`cd "$srcdir" && pwd`
+	incg722="libs/miniwebrtc/audio/coding_g722"
+        if [[ -f "$basedir/$incg722/g722_interface.h" ]]; then
+		HAVE_G722WR=yes
+		basedir=`echo "$basedir" | sed 's/\([[^\]]\)\([[[:space:]\$\"'\'']]\)/\1\\\2/g'`
+		G722WR_INC="-I$basedir/$incg722"
+	fi
+AC_MSG_RESULT([$HAVE_G722WR])
+fi
+AC_SUBST(HAVE_G722WR)
+AC_SUBST(G722WR_INC)
+
 HAVE_SPEEX=no
 SPEEX_INC=""
 SPEEX_LIB="-lspeex"

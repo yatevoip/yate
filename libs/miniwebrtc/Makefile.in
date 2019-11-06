@@ -58,6 +58,9 @@ OBJS :=  audio/common/resampler/resampler.o \
 	audio/common/vad/vad_gmm.o  \
 	audio/common/vad/vad_sp.o  \
 	audio/common/vad/webrtc_vad.o  \
+	audio/coding_g722/g722_decode.o  \
+	audio/coding_g722/g722_encode.o  \
+	audio/coding_g722/g722_interface.o  \
 	audio/coding_isac/fix/arith_routines.o  \
 	audio/coding_isac/fix/arith_routines_hist.o  \
 	audio/coding_isac/fix/arith_routines_logist.o  \

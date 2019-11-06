@@ -34,6 +34,7 @@ const TokenDict SDPParser::s_payloads[] = {
     { "lpc10",         7 },
     { "slin",         11 },
     { "g726",          2 },
+    { "g722/16000",    9 },
     { "g722",          9 },
     { "g723",          4 },
     { "g728",         15 },

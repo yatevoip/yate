@@ -3851,7 +3851,7 @@ void YJGDriver::initialize()
 	s_knownCodecs.add("4",  "G723",    "8000",  "g723");
 	s_knownCodecs.add("7",  "LPC",     "8000",  "lpc10");
 	s_knownCodecs.add("8",  "PCMA",    "8000",  "alaw");
-	s_knownCodecs.add("9",  "G722",    "8000",  "g722");
+	s_knownCodecs.add("9",  "G722",    "8000",  "g722/16000");
 	s_knownCodecs.add("11", "L16",     "8000",  "slin");
 	s_knownCodecs.add("15", "G728",    "8000",  "g728");
 	s_knownCodecs.add("18", "G729",    "8000",  "g729");

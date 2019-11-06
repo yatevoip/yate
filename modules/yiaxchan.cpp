@@ -46,7 +46,7 @@ static const TokenDict dict_payloads[] = {
     {"adpcm",  IAXFormat::ADPCM},
     {"g726",   IAXFormat::G726},
     {"slin",   IAXFormat::SLIN},
-    {"g722",   IAXFormat::G722},
+    {"g722/16000", IAXFormat::G722},
     {"amr",    IAXFormat::AMR},
     {"gsmhr",  IAXFormat::GSM_HR},
     {0, 0}
