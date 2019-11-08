@@ -867,6 +867,114 @@ uint32_t Time::fromNtp(uint32_t val, uint32_t* under, bool rfc2030)
     return 0;
 }
 
+unsigned int Time::toString(char* buf, uint64_t time, int frac)
+{
+    if (!buf)
+	return 0;
+    int y;
+    unsigned int m,d,hh,mm,ss;
+    if (!Time::toDateTime(time / 1000000,y,m,d,hh,mm,ss) || y < 0 || y > 9999)
+	return 0;
+    unsigned int n = 0;
+    if (!frac)
+	n = ::sprintf(buf,"%04d-%02u-%02uT%02u:%02u:%02u",y,m,d,hh,mm,ss);
+    else {
+	unsigned int f = time % 1000000;
+	if (frac > 0)
+	    n = ::sprintf(buf,"%04d-%02u-%02uT%02u:%02u:%02u.%03u",y,m,d,hh,mm,ss,f / 1000);
+	else
+	    n = ::sprintf(buf,"%04d-%02u-%02uT%02u:%02u:%02u.%06u",y,m,d,hh,mm,ss,f);
+    }
+    if (n)
+	buf[n++] = 'Z';
+    return n;
+}
+
+static inline bool addNum2(const char* buf, unsigned int& val, unsigned int maxVal = 0)
+{
+    if (buf[0] < '0' || buf[0] > '9' || buf[1] < '0' || buf[1] > '9')
+	return false;
+    val += 10 * (buf[0] - '0') + (buf[1] - '0');
+    return !maxVal || val <= maxVal;
+}
+
+// Decode yyyy-mm-dd{T|t}hh:mm:ss[.SEC-FRAC]{{Z|z}|{+/-hh:mm}}
+uint64_t Time::toEpoch(const char* buf, unsigned int len, int frac)
+{
+    if (!buf)
+	return (uint64_t)-1;
+    if (!len)
+	len = ::strlen(buf);
+    if (len < 20)
+	return (uint64_t)-1;
+    // Check mandatory yyyy-mm-ddThh:mm:ss
+    if (buf[4] != '-' || buf[7] != '-' || (buf[10] != 'T' && buf[10] != 't')
+	|| buf[13] != ':' || buf[16] != ':')
+	return (uint64_t)-1;
+    int offsetSec = 0;
+    unsigned int delta = 0;
+    if (buf[19] != 'Z' && buf[19] != 'z') {
+	// We must receive at least '.' + digit + 'Z' or TZ offset
+	if (len < 22)
+	    return (uint64_t)-1;
+	unsigned int crt = 19;
+	// Second fraction ?
+	if (buf[19] == '.') {
+	    for (crt++; crt < len; crt++) {
+		if (buf[crt] < '0' || buf[crt] > '9')
+		    break;
+	    }
+	    unsigned int fracLen = crt - 20;
+	    // Empty fraction or buffer end
+	    if (!fracLen || crt == len)
+		return (uint64_t)-1;
+	    if (frac) {
+		unsigned int req = frac > 0 ? 3 : 6;
+		String tmp(buf + 20,fracLen > req ? req : fracLen);
+		delta = tmp.toInteger(0,10);
+		for (; fracLen < req; ++fracLen)
+		    delta *= 10;
+	    }
+	}
+	// TZ offset: ('+' / '-')hh:mm
+	if (buf[crt] != 'Z' && buf[crt] != 'z') {
+	    const char* b = buf + crt;
+	    unsigned int tzOffsLen = len - crt;
+	    if (tzOffsLen != 6 || b[3] != ':')
+		return (uint64_t)-1;
+	    int mul = 1;
+	    if (*b == '-')
+		mul = -1;
+	    else if (*b != '+')
+		return (uint64_t)-1;
+	    unsigned int hh = 0, mm = 0;
+	    if (!(addNum2(b + 1,hh,23) && addNum2(b + 4,mm,59)))
+		return (uint64_t)-1;
+	    offsetSec = mul * (int)(hh * 3600 + mm * 60);
+	}
+    }
+    unsigned int y = 0, m = 0, d = 0, hh = 0, mm = 0, ss = 0;
+    if (!addNum2(buf,y))
+	return (uint64_t)-1;
+    y *= 100;
+    if (!(addNum2(buf + 2,y) && (addNum2(buf + 5,m,12) || !m) && (addNum2(buf + 8,d,31) || !d)
+	&& addNum2(buf + 11,hh,23) && addNum2(buf + 14,mm,59) && addNum2(buf + 17,ss,60)))
+	return (uint64_t)-1;
+    bool leapSec = (ss == 60);
+    if (leapSec)
+	ss = 59;
+    uint64_t sec = toEpoch(y,m,d,hh,mm,ss,offsetSec);
+    if (sec == (unsigned int)-1)
+	return (uint64_t)-1;
+    if (leapSec)
+	sec++;
+    if (!frac)
+	return sec;
+    if (frac > 0)
+	return sec * 1000 + delta;
+    return sec * 1000000 + delta;
+}
+
 int Time::timeZone()
 {
 #ifdef _WINDOWS

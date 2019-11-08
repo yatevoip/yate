@@ -3868,6 +3868,49 @@ public:
     static uint32_t fromNtp(uint32_t val, uint32_t* under = 0, bool rfc2030 = true);
 
     /**
+     * Convert EPOCH time to a string representation. Does not add a NUL char at end
+     * Minimal representation is yyyy-mm-ddThh:mm:ssZ
+     * Destination buffer length must be at least 20 if no fractions are going to be filled
+     * For milliseconds fractions extra 4 bytes must be available in buffer
+     * For microseconds fractions extra 7 bytes must be available in buffer
+     * @param buf Buffer to be filled
+     * @param time System time in microseconds to convert
+     * @param frac Add second fractions. 0: none, negative: microseconds, positive: milliseconds
+     * @return The number of chars written in buffer. 0 on failure
+     */
+    static unsigned int toString(char* buf, uint64_t time, int frac = 0);
+
+    /**
+     * Convert system time to a string representation
+     * Minimal representation is yyyy-mm-ddThh:mm:ssZ
+     * Destination buffer length must be at least 20 if no fractions are going to be filled
+     * For milliseconds fractions extra 4 bytes must be available in buffer
+     * For microseconds fractions extra 7 bytes must be available in buffer
+     * @param buf Buffer to append to
+     * @param time System time in microseconds to convert
+     * @param frac Add second fractions. 0: none, negative: microseconds, positive: milliseconds
+     * @return The number of chars added to buffer. 0 on failure
+     */
+    static inline unsigned int appendTo(String& buf, uint64_t time, int frac = 0) {
+	    char tmp[30];
+	    unsigned int n = toString(tmp,time,frac);
+	    if (n)
+		buf.append(tmp,n);
+	    return n;
+	}
+
+    /**
+     * Decode string to EPOCH time
+     * Decode yyyy-mm-dd{T|t}hh:mm:ss[.SEC-FRAC]{{Z|z}|{+/-hh:mm}}
+     * Date seconds may contain leap seconds (value 60). These are ignored (second will be used as 59)
+     * @param buf Buffer to parse
+     * @param len Buffer length. 0 to detect
+     * @param frac Handle second fractions. 0: none, negative: microseconds, positive: milliseconds
+     * @return EPOCH time in (milli|micro)seconds, -1 on failure
+     */
+    static uint64_t toEpoch(const char* buf, unsigned int len, int frac = 0);
+
+    /**
      * Check if an year is a leap one
      * @param year The year to check
      * @return True if the given year is a leap one
