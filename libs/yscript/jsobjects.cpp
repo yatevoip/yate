@@ -70,6 +70,8 @@ public:
 	    params().addParam(new ExpFunction("getUTCMinutes"));
 	    params().addParam(new ExpFunction("getUTCMonth"));
 	    params().addParam(new ExpFunction("getUTCSeconds"));
+
+	    params().addParam(new ExpFunction("toJSON"));
 	}
     virtual void initConstructor(JsFunction* construct)
 	{
@@ -77,6 +79,12 @@ public:
 	    construct->params().addParam(new ExpFunction("UTC"));
 	}
     virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    virtual const String& toString() const {
+	    if (!m_str)
+		Time::appendTo(m_str,(uint64_t)m_time * 1000000 + (uint64_t)m_msec * 1000,1);
+	    return m_str;
+	}
+
 protected:
     inline JsDate(Mutex* mtx, u_int64_t msecs, bool local = false)
 	: JsObject("Date",mtx),
@@ -93,6 +101,7 @@ private:
     unsigned int m_time;
     unsigned int m_msec;
     int m_offs;
+    mutable String m_str;
 };
 
 // Math class - not really an object, all methods are static
@@ -145,6 +154,8 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 		type = "JsFunction";
 	    else if (YOBJECT(JsRegExp,scr))
 		type = "JsRegExp";
+	    else if (YOBJECT(JsDate,scr))
+		type = "JsDate";
 	    else
 		type = "JsObject";
 	}
@@ -337,6 +348,10 @@ void JsObject::toJSON(const NamedString* ns, String& buf, int spaces, int indent
 	return;
     }
     if (jso) {
+	if (YOBJECT(JsDate,jso)) {
+	    buf << strEscape(jso->toString());
+	    return;
+	}
 	switch (jso->params().count()) {
 	    case 1:
 		if (!jso->params().getParam(protoName()))
@@ -1480,8 +1495,17 @@ JsObject* JsDate::runConstructor(ObjList& stack, const ExpOperation& oper, GenOb
 	case 1:
 	    {
 		ExpOperation* val = static_cast<ExpOperation*>(args[0]);
-		if (val && val->isInteger())
-		    obj = new JsDate(mutex(),val->number());
+		if (val) {
+		    if (val->isInteger())
+			obj = new JsDate(mutex(),val->number());
+		    else {
+			// Check string
+			uint64_t n = Time::toEpoch(*val,val->length(),1);
+			if (n == (uint64_t)-1)
+			    return JsParser::nullObject();
+			obj = new JsDate(mutex(),n);
+		    }
+		}
 	    }
 	    break;
 	case 2:
@@ -1709,6 +1733,11 @@ bool JsDate::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 	    ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)sec));
 	else
 	    return false;
+    }
+    else if (oper.name() == YSTRING("toJSON")) {
+	if (toString().null())
+	    return false;
+	ExpEvaluator::pushOne(stack,new ExpOperation(toString()));
     }
     else
 	return JsObject::runNative(stack,oper,context);
