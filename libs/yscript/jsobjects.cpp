@@ -655,6 +655,47 @@ void JsObject::initialize(ScriptContext* context)
 	addObject(p,"Math",new JsMath(mtx));
 }
 
+bool JsObject::getIntField(const String& name, int64_t& val)
+{
+    NamedString* ns = params().getParam(name);
+    ExpOperation* op = YOBJECT(ExpOperation,ns);
+    if (!(op && op->isInteger()))
+	return false;
+    val = op->number();
+    return true;
+}
+
+bool JsObject::getBoolField(const String& name, bool& val)
+{
+    NamedString* ns = params().getParam(name);
+    ExpOperation* op = YOBJECT(ExpOperation,ns);
+    if (!(op && op->isBoolean()))
+	return false;
+    val = op->valBoolean();
+    return true;
+}
+
+bool JsObject::getStringField(const String& name, String& val)
+{
+    NamedString* ns = params().getParam(name);
+    if (!(ns && *ns))
+	return false;
+    val = ns;
+    return true;
+}
+
+bool JsObject::getObjField(const String& name, JsObject*& obj)
+{
+    if (!name)
+	return false;
+    String* n = params().getParam(name);
+    JsObject* jso = YOBJECT(JsObject,n);
+    if (jso && jso ->ref()) {
+        obj = jso;
+        return true;
+    }
+    return false;
+}
 
 bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {

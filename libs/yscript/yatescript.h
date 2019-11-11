@@ -2073,6 +2073,95 @@ public:
 	{ params().clearParam(name); }
 
     /**
+     * Set a integer field in this object
+     * @param name Name of field to set
+     * @param val Integer value to set
+     * @return True if set was successful
+     */
+    inline bool setIntField(const char* name, int64_t val)
+    {
+	if (!name)
+	    return false;
+	params().setParam(new ExpOperation(val,name));
+	return true;
+    }
+
+    /**
+     * Set a boolean field in this object
+     * @param name Name of field to set
+     * @param val Boolean value to set
+     * @return True if set was successful
+     */
+    inline bool setBoolField(const char* name, bool val)
+    {
+	if (!name)
+	    return false;
+	params().setParam(new ExpOperation(val,name));
+	return true;
+
+    }
+
+    /**
+     * Set a string field in this object
+     * @param name Name of field to set
+     * @param val String value to set
+     * @return True if set was successful
+     */
+    inline bool setStringField(const char* name, const char* val)
+    {
+	if (!name)
+	    return false;
+	params().setParam(new ExpOperation(val,name));
+	return true;
+    }
+
+    /**
+     * Set a object field in this object
+     * @param name Name of field to set
+     * @param obj Object value to set
+     * @return True if set was successful
+     */
+    inline bool setObjField(const char* name, JsObject* obj)
+    {
+	if (!(name && obj))
+	    return false;
+	params().setParam(new ExpWrapper(obj,name));
+	return true;
+    }
+
+    /**
+     * Get the integer value of the field with the given name
+     * @param name Name of field to retrieve
+     * @param val Field where to put the retrieved value
+     * @return True if field was retrieved, false if not found or not the right type
+     */
+    bool getIntField(const String& name, int64_t& val);
+
+    /**
+     * Get the boolean value of the field with the given name
+     * @param name Name of field to retrieve
+     * @param val Field where to put the retrieved value
+     * @return True if field was retrieved, false if not found or not the right type
+     */
+    bool getBoolField(const String&  name, bool& val);
+
+    /**
+     * Get the string value of the field with the given name
+     * @param name Name of field to retrieve
+     * @param val Field where to put the retrieved value
+     * @return True if field was retrieved, false if not found or not the right type
+     */
+    bool getStringField(const String& name, String& val);
+
+    /**
+     * Get the object associated with the field with the given name
+     * @param name Name of field to retrieve
+     * @param val Field where to put the retrieved value
+     * @return True if field was retrieved, false if not found or not the right type
+     */
+    bool getObjField(const String& name, JsObject*& obj);
+
+    /**
      * Retrieve the object frozen status (cannot modify attributes or methods)
      * @return True if the object is frozen
      */
