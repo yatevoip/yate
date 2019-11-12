@@ -3878,8 +3878,10 @@ bool SS7SCCP::processMSU(SS7MsgSCCP::Type type, const unsigned char* paramPtr,
 	    Debug(this,DebugWarn,"Failed to build msu from sccpMessage %s",
 		SS7MsgSCCP::lookup(ref->type()));
 	lock.drop();
-	transmitMSU(*msu,outLabel,outLabel.sls());
-	TelEngine::destruct(msu);
+	if (msu) {
+	    transmitMSU(*msu,outLabel,outLabel.sls());
+	    TelEngine::destruct(msu);
+	}
 	TelEngine::destruct(ref);
 	TelEngine::destruct(msg);
 	return true;
