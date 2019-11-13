@@ -1031,7 +1031,7 @@ private:
     void startPendingUpdate();
     bool processTransaction2(SIPEvent* ev, const SIPMessage* msg, int code);
     SIPMessage* createDlgMsg(const char* method, const char* uri = 0);
-    void updateTarget(const SIPMessage* msg);
+    void updateTarget(const SIPMessage* msg, bool force = false, bool chgParty = true);
     void emitUpdate();
     bool emitPRACK(const SIPMessage* msg);
     bool startClientReInvite(NamedList& msg, bool rtpForward);
@@ -1233,6 +1233,7 @@ static bool s_update_target = false;
 static bool s_update_verify = false;
 static bool s_preventive_bye = true;
 static bool s_ignoreVia = true;          // Ignore Via headers and send answer back to the source
+static bool s_changeParty2xx = false;    // Change party when handling 2xx. Ignored if autochangeparty is disabled
 static bool s_sipt_isup = false;         // Control the application/isup body processing
 static bool s_printMsg = true;           // Print sent/received SIP messages to output
 static ObjList* s_authCopyHeader = 0;    // Copy headers in user.auth
@@ -6644,20 +6645,22 @@ SIPMessage* YateSIPConnection::createDlgMsg(const char* method, const char* uri)
 }
 
 // Update the dialog from received target refresh message
-void YateSIPConnection::updateTarget(const SIPMessage* msg)
+void YateSIPConnection::updateTarget(const SIPMessage* msg, bool force, bool chgParty)
 {
-    if (!s_update_target)
+    if (!(s_update_target || force))
 	return;
     if (!msg)
 	return;
     const MimeHeaderLine* co = msg->getHeader("Contact");
     if (co) {
-	// (re)INVITE had a Contact: header - change remote URI
+	String old = m_uri;
 	m_uri = *co;
 	m_uri.parse();
 	m_dialog.remoteURI = m_uri;
+	if (old != m_uri)
+	    Debug(this,DebugInfo,"Dialog URI changed '%s' -> '%s' [%p]",old.c_str(),m_uri.c_str(),this);
     }
-    if (!m_autoChangeParty)
+    if (!(m_autoChangeParty && chgParty))
 	return;
     SIPParty* party = msg->getParty();
     if (party) {
@@ -6980,11 +6983,9 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	updateTags = false;
 	m_cancel = false;
 	Lock lock(driver());
+	updateTarget(msg,true,s_changeParty2xx);
 	const SIPMessage* ack = m_tr ? m_tr->latestMessage() : 0;
 	if (ack && ack->isACK()) {
-	    // accept any URI change caused by a Contact: header in the 2xx
-	    m_uri = ack->uri;
-	    m_uri.parse();
 	    DDebug(this,DebugInfo,"YateSIPConnection clearing answered transaction %p [%p]",
 		m_tr,this);
 	    m_tr->setUserData(0);
@@ -7003,12 +7004,6 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	if (tr->autoAck())
 	    startPendingUpdate();
 	else if (!m_rtpForward) {
-	    const MimeHeaderLine* co = msg->getHeader("Contact");
-	    if (co) {
-		Lock lck(driver());
-		m_uri = *co;
-		m_uri.parse();
-	    }
 	    MimeSdpBody* sdp = m_rtpMedia ? createRtpSDP(true) : 0;
 	    Debug(this,DebugNote,"Sending ACK %s SDP now since RTP is not forwarded [%p]",
 		(sdp ? "with" : "without"),this);
@@ -9370,6 +9365,7 @@ void SIPDriver::initialize()
     s_1xx_formats = s_cfg.getBoolValue("hacks","1xx_change_formats",true);
     s_sdp_implicit = s_cfg.getBoolValue("hacks","sdp_implicit",true);
     s_rtp_preserve = s_cfg.getBoolValue("hacks","ignore_sdp_addr",false);
+    s_changeParty2xx = s_cfg.getBoolValue("general","change_party_2xx",false);
     m_parser.initialize(s_cfg.getSection("codecs"),s_cfg.getSection("hacks"),s_cfg.getSection("general"));
     if (!m_endpoint) {
 	Thread::Priority prio = Thread::priority(s_cfg.getValue("general","thread"));

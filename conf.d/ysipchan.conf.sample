@@ -294,6 +294,12 @@
 ; This parameter is applied on reload
 ;autochangeparty=disable
 
+; change_party_2xx: bool: Change party when handling 2xx response to INVITE
+; Defaults to disable
+; This parameter is applied on reload
+; This parameter is ignored if 'autochangeparty' is disabled
+;change_party_2xx=disable
+
 ; ssl_certificate_file: string: File containing client SSL certificate to present
 ; This parameter is used for outgoing encrypted connections if a certificate
 ;  is requested by the server during SSL negotiation
