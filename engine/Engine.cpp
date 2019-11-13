@@ -1537,6 +1537,18 @@ int Engine::engineInit()
     s_params.addParam("maxmsgage",String(s_maxmsgage));
     s_params.addParam("maxqueued",String(s_maxqueued));
     s_params.addParam("maxevents",String(s_maxevents));
+
+    int nodeBits = s_cfg.getIntValue("general","nodebits",0,0,10);
+    if (nodeBits) {
+	int nodeId = s_cfg.getIntValue("general","nodeid",0);
+	if (0 <= nodeId && nodeId < (1 << nodeBits)) {
+	    s_params.addParam("nodeid",String(nodeId));
+	    s_params.addParam("nodebits",String(nodeBits));
+	}
+	else
+	    Debug(DebugConf,"Not setting node ID to '%d': not in range 0-%d, node bits='%d'",
+	        nodeId,(1 << nodeBits) - 1,nodeBits);
+    }
     if (track)
 	s_params.addParam("trackparam",track);
 #ifdef _WINDOWS
