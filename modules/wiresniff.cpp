@@ -5,7 +5,7 @@
  * Capture interface for YATE messages.
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2018 Null Team
+ * Copyright (C) 2018-2019 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -32,8 +32,8 @@ namespace { //anonymous
 
 static Configuration s_cfg;
 static Socket s_socket;
-static SocketAddr addr;
-static SocketAddr s_addr;
+static SocketAddr s_remoteAddr;
+static SocketAddr s_localAddr;
 static Regexp s_filter;
 static bool s_timer = false;
 static Mutex s_mutex(false,"WireSniff");
@@ -121,7 +121,7 @@ static bool sendMessage(const Message& msg, bool result, bool handled)
 	DDebug(DebugWarn,"Buffer Overrun");
 	
     s_mutex.lock();
-    unsigned int len = s_socket.sendTo(buf.data(),buf.length(),addr);
+    unsigned int len = s_socket.sendTo(buf.data(),buf.length(),s_remoteAddr);
     s_mutex.unlock();
     if (!len)
 	DDebug(DebugWarn,"Unable to send package");
@@ -138,7 +138,7 @@ bool WireSniffHandler::received(Message &msg)
 	Debug(DebugWarn,"Socket %s is not valid", strerror(s_socket.error()));
 	return false;
     }
-    if (!s_addr.valid()){
+    if (!s_localAddr.valid()){
 	Debug(DebugWarn,"SocketAddr is not valid");
 	return false;
     }
@@ -147,8 +147,6 @@ bool WireSniffHandler::received(Message &msg)
 	return false;
 	
     sendMessage(msg,false,false);
-	
-	
     return false;
 }
     
@@ -180,73 +178,75 @@ void WireSniffPlugin::initialize()
     s_mutex.unlock();
 
     String remoteName = s_cfg.getValue("general","remote_host");
-    addr.host(remoteName);
-    addr.port(s_cfg.getIntValue("general","remote_port"));
+    s_remoteAddr.host(remoteName);
+    s_remoteAddr.port(s_cfg.getIntValue("general","remote_port"));
 	
-    if(addr.valid() && addr.port()) {
-        DDebug(this,DebugNote,"Remote address '%s' and remote port '%u' are set", remoteName.c_str(), addr.port());
+    if(s_remoteAddr.valid() && s_remoteAddr.port()) {
+        DDebug(this,DebugNote,"Remote address '%s' and remote port '%u' are set", remoteName.c_str(), s_remoteAddr.port());
     }
 	
-    if(!(addr.host() && addr.port())) {
+    if(!(s_remoteAddr.host() && s_remoteAddr.port())) {
 	s_socket.terminate();
 	if(remoteName)
 	    Debug(this,DebugWarn,"Remote address is invalid");
 	return;
     }
 	
-    if (addr.host() && addr.port() && !(addr.valid())) {
+    if (s_remoteAddr.host() && s_remoteAddr.port() && !(s_remoteAddr.valid())) {
 	DDebug(this,DebugWarn,"Invalid address '%s'",remoteName.c_str());
 	return;
     }
 
-    if(addr.family() != SocketAddr::IPv6)
-	s_addr.host(s_cfg.getValue("general","local_host","0.0.0.0"));
+    if(s_remoteAddr.family() != SocketAddr::IPv6)
+	s_localAddr.host(s_cfg.getValue("general","local_host","0.0.0.0"));
     else
-	s_addr.host(s_cfg.getValue("general","local_host","::"));
+	s_localAddr.host(s_cfg.getValue("general","local_host","::"));
 	
-    s_addr.port(s_cfg.getIntValue("general","local_port",0));
+    s_localAddr.port(s_cfg.getIntValue("general","local_port",0));
 	
-    if (!(s_addr.valid() && s_addr.host())) {
-	DDebug(this,DebugWarn,"Invalid address '%s'", s_addr.host().c_str());
+    if (!(s_localAddr.valid() && s_localAddr.host())) {
+	DDebug(this,DebugWarn,"Invalid address '%s'", s_localAddr.host().c_str());
 	return;
 	    
     }
 
-    if (addr.host()) {
-    if (s_addr.family() != addr.family()) {
+    if (s_remoteAddr.host()) {
+    if (s_localAddr.family() != s_remoteAddr.family()) {
 	Debug(this,DebugWarn,"Socket Addresses are not compatible");
 	return;
 	}
     }
 
-    if (!s_socket.create(s_addr.family(),SOCK_DGRAM)) {
+    if (!s_socket.create(s_localAddr.family(),SOCK_DGRAM)) {
 	Debug(this,DebugWarn,"Could not create socket %s", strerror(s_socket.error()));
 	s_socket.terminate();
     }
 
-    if (!s_socket.bind(s_addr)) {
-	Debug(this,DebugWarn,"Unable to bind to %s:%u : %s",s_addr.host().c_str(),s_addr.port(),strerror(s_socket.error()));
+    if (!s_socket.bind(s_localAddr)) {
+	Debug(this,DebugWarn,"Unable to bind to %s:%u : %s",s_localAddr.host().c_str(),s_localAddr.port(),strerror(s_socket.error()));
         return;
     }
 	
+#ifdef IP_MTU_DISCOVER
     int val = 1;
     if (!s_socket.setOption(IPPROTO_IP, IP_MTU_DISCOVER, &val, sizeof(val))) {
 	Debug(this,DebugWarn,"Socket %s option is not set!", strerror(s_socket.error()));
         return;
     }
+#endif
 
     if (!s_socket.setBlocking(false)) {
 	s_socket.terminate();
 	Debug(DebugWarn,"Unable to set socket %s to nonblocking mode", strerror(s_socket.error()));
         return;
     }
-    if (!s_socket.getSockName(s_addr)) {
+    if (!s_socket.getSockName(s_localAddr)) {
 	Debug(this,DebugWarn,"Error getting address: %s",strerror(s_socket.error()));
         return;
     }
 	
-    DDebug(this,DebugNote,"Socket bound to: %s:%u",s_addr.host().c_str(),s_addr.port());
-    Debug(this,DebugNote,"Sending from %s to %s:%u",s_addr.addr().c_str(),addr.host().c_str(),addr.port());
+    DDebug(this,DebugNote,"Socket bound to: %s:%u",s_localAddr.host().c_str(),s_localAddr.port());
+    Debug(this,DebugNote,"Sending from %s to %s:%u",s_localAddr.addr().c_str(),s_remoteAddr.host().c_str(),s_remoteAddr.port());
 	
     if (m_first) {
 	m_first = false;
