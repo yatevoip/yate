@@ -28,6 +28,10 @@
 ; retries: int: Number of retries before giving up
 ;retries=2
 
+; success: bool: Return true to finalize routing when a match is found
+;  If set to false on success the message will have "success_enum"="true"
+;success=true
+
 ; redirect: bool: Attempt to redirect the incoming call to found address
 ;redirect=false
 

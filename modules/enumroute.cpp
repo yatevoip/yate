@@ -5,7 +5,7 @@
  * ENUM routing module
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2019 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -50,6 +50,7 @@ static int s_timeout;
 static int s_retries;
 static int s_maxcall;
 
+static bool s_success;
 static bool s_redirect;
 static bool s_autoFork;
 static bool s_sipUsed;
@@ -76,7 +77,7 @@ public:
 	{ }
     virtual bool received(Message& msg);
 private:
-    static bool resolve(Message& msg,bool canRedirect);
+    static bool resolve(Message& msg,bool canRedirect,const ObjList* domains);
     static void addRoute(String& dest,const String& src);
 };
 
@@ -84,16 +85,30 @@ private:
 // Routing message handler, performs checks and calls resolve method
 bool EnumHandler::received(Message& msg)
 {
-    if (s_domains.null() || !msg.getBoolValue("enumroute",true))
+    if (!msg.getBoolValue(YSTRING("enumroute"),true))
 	return false;
     // perform per-thread initialization of resolver and timeout settings
     if (!Resolver::init(s_timeout,s_retries))
 	return false;
-    return resolve(msg,s_telUsed);
+
+    const String* d = msg.getParam(YSTRING("enum_domains"));
+    s_mutex.lock();
+    if (!d)
+	d = &s_domains;
+    ObjList* domains = d->split(',',false);
+    s_mutex.unlock();
+    bool ok = domains && resolve(msg,s_telUsed,domains);
+    TelEngine::destruct(domains);
+    // return false to allow further routing if configured or asked so
+    if (ok && !msg.getBoolValue(YSTRING("enum_success"),s_success)) {
+	msg.setParam("success_enum",String::boolText(true));
+	ok = false;
+    }
+    return ok;
 }
 
 // Resolver function, may call itself recursively at most once
-bool EnumHandler::resolve(Message& msg,bool canRedirect)
+bool EnumHandler::resolve(Message& msg,bool canRedirect,const ObjList* domains)
 {
     // give preference to full (e164) called number if exists
     String called(msg.getValue("calledfull"));
@@ -107,11 +122,6 @@ bool EnumHandler::resolve(Message& msg,bool canRedirect)
 	return false;
     if (called.length() < s_minlen)
 	return false;
-    s_mutex.lock();
-    ObjList* domains = s_domains.split(',',false);
-    s_mutex.unlock();
-    if (!domains)
-	return false;
     bool rval = false;
     // put the standard international prefix in front
     called = "+" + called;
@@ -120,7 +130,7 @@ bool EnumHandler::resolve(Message& msg,bool canRedirect)
 	tmp << called.at(i) << ".";
     u_int64_t dt = Time::now();
     ObjList res;
-    for (ObjList* l = domains; l; l = l->next()) {
+    for (const ObjList* l = domains; l; l = l->next()) {
 	const String* s = static_cast<const String*>(l->get());
 	if (!s || s->null())
 	    continue;
@@ -131,7 +141,6 @@ bool EnumHandler::resolve(Message& msg,bool canRedirect)
     dt = Time::now() - dt;
     Debug(&emodule,DebugInfo,"Returned %d NAPTR records in %u.%06u s",
 	res.count(),(unsigned int)(dt / 1000000),(unsigned int)(dt % 1000000));
-    TelEngine::destruct(domains);
     bool reroute = false;
     bool unassigned = false;
     if (res.skipNull()) {
@@ -228,7 +237,7 @@ bool EnumHandler::resolve(Message& msg,bool canRedirect)
     emodule.changed();
     s_mutex.unlock();
     if (reroute)
-	return resolve(msg,false);
+	return resolve(msg,false,domains);
     if (unassigned && !rval) {
 	rval = true;
 	msg.retValue() = "-";
@@ -307,6 +316,7 @@ void EnumModule::initialize()
 	tmp = 120000;
     s_maxcall = tmp;
 
+    s_success = cfg.getBoolValue("general","success",true);
     s_redirect = cfg.getBoolValue("general","redirect");
     s_autoFork = cfg.getBoolValue("general","autofork");
     s_sipUsed  = cfg.getBoolValue("protocols","sip",true);
