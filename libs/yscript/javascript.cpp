@@ -2882,17 +2882,34 @@ bool JsCode::callFunction(ObjList& stack, const ExpOperation& oper, GenObject* c
     pushOne(stack,new ExpOperation(OpcFunc,oper.name(),retIndex,true));
     if (scopeObj)
 	pushOne(stack,new ExpWrapper(scopeObj,"()"));
+    JsObject* arguments = new JsObject("Arguments",func->mutex());
     JsObject* ctxt = JsObject::buildCallContext(func->mutex(),thisObj);
+    int64_t cnt = 0;
     for (unsigned int idx = 0; ; idx++) {
 	const String* name = func->formalName(idx);
-	if (!name)
+	if (!(name || arguments))
 	    break;
 	ExpOperation* param = static_cast<ExpOperation*>(args.remove(false));
-	if (param)
-	    ctxt->params().setParam(param->clone(*name));
-	else
-	    ctxt->params().setParam(new ExpWrapper(0,*name));
+	if (name) {
+	    if (param)
+		ctxt->params().setParam(param->clone(*name));
+	    else
+		ctxt->params().setParam(new ExpWrapper(0,*name));
+	    // don't overwrite an explicit "arguments" argument
+	    if (*name == YSTRING("arguments"))
+		TelEngine::destruct(arguments);
+	}
+	else if (!param)
+	    break;
+	if (arguments && param)
+	    arguments->params().setParam(param->clone(String(cnt++)));
 	TelEngine::destruct(param);
+    }
+    if (arguments) {
+	arguments->params().setParam(new ExpOperation(cnt,"length"));
+	arguments->params().setParam(new ExpWrapper(func,"callee"));
+	func->ref();
+	ctxt->params().setParam(new ExpWrapper(arguments,"arguments"));
     }
     pushOne(stack,new ExpWrapper(ctxt,ctxt->toString(),true));
     if (!jumpToLabel(func->label(),context))
