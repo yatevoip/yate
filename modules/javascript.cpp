@@ -171,7 +171,10 @@ protected:
 class JsTimeEvent : public RefObject
 {
 public:
-    JsTimeEvent(JsEngineWorker* worker, const ExpFunction& callback, unsigned int interval,bool repeatable, unsigned int id);
+    JsTimeEvent(JsEngineWorker* worker, const ExpFunction& callback, unsigned int interval,bool repeatable, unsigned int id,
+	    ObjList* args = 0);
+    ~JsTimeEvent()
+	{ TelEngine::destruct(m_args); }
     void processTimeout(const Time& when);
     inline bool repeatable() const
 	{ return m_repeat; }
@@ -188,6 +191,7 @@ private:
     u_int64_t m_fire;
     bool m_repeat;
     unsigned int m_id;
+    ObjList* m_args;
 };
 
 class JsEngineWorker : public Thread
@@ -195,7 +199,7 @@ class JsEngineWorker : public Thread
 public:
     JsEngineWorker(JsEngine* engine, ScriptContext* context, ScriptCode* code);
     ~JsEngineWorker();
-    unsigned int addEvent(const ExpFunction& callback, unsigned int interval, bool repeat);
+    unsigned int addEvent(const ExpFunction& callback, unsigned int interval, bool repeat, ObjList* args = 0);
     bool removeEvent(unsigned int id, bool repeatable);
     ScriptRun* getRunner();
 protected:
@@ -1119,6 +1123,14 @@ static void copyObjParams(NamedList& dest, const NamedList* src)
     }
 }
 
+static void copyArgList(ObjList& dst, ObjList& args)
+{
+    for (ObjList* o = &args; o; o = o->next()) {
+	ExpOperation* param = static_cast<ExpOperation*>(o->get());
+	if (param)
+	    dst.append(param->clone());
+    }
+}
 
 bool JsEngAsync::run()
 {
@@ -1470,8 +1482,13 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	    m_worker = new JsEngineWorker(this,scontext,scode);
 	    m_worker->startup();
 	}
+	ObjList* cbkArgs = 0;
+	if (args.length() > 2) {
+	    cbkArgs = new ObjList;
+	    copyArgList(*cbkArgs,*(args + 2));
+	}
 	unsigned int id = m_worker->addEvent(*callback,interval->toInteger(),
-		oper.name() == YSTRING("setInterval"));
+		oper.name() == YSTRING("setInterval"),cbkArgs);
 	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)id));
     }
     else if (oper.name() == YSTRING("clearInterval") || oper.name() == YSTRING("clearTimeout")) {
@@ -4347,9 +4364,9 @@ void JsDNS::initialize(ScriptContext* context)
  */
 
 JsTimeEvent::JsTimeEvent(JsEngineWorker* worker, const ExpFunction& callback,
-	unsigned int interval,bool repeatable, unsigned int id)
+	unsigned int interval,bool repeatable, unsigned int id, ObjList* args)
     : m_worker(worker), m_callbackFunction(callback.name(),1),
-    m_interval(interval), m_repeat(repeatable), m_id(id)
+    m_interval(interval), m_repeat(repeatable), m_id(id), m_args(args)
 {
     XDebug(&__plugin,DebugAll,"Created new JsTimeEvent(%u,%s) [%p]",interval,
 	   String::boolText(repeatable),this);
@@ -4364,6 +4381,8 @@ void JsTimeEvent::processTimeout(const Time& when)
     if (!runner)
 	return;
     ObjList args;
+    if (m_args)
+	copyArgList(args,*m_args);
     runner->call(m_callbackFunction.name(),args);
 }
 
@@ -4387,13 +4406,13 @@ JsEngineWorker::~JsEngineWorker()
     TelEngine::destruct(m_runner);
 }
 
-unsigned int JsEngineWorker::addEvent(const ExpFunction& callback, unsigned int interval, bool repeat)
+unsigned int JsEngineWorker::addEvent(const ExpFunction& callback, unsigned int interval, bool repeat, ObjList* args)
 {
     Lock myLock(m_eventsMutex);
     if (interval < MIN_CALLBACK_INTERVAL)
 	interval = MIN_CALLBACK_INTERVAL;
     // TODO find a better way to generate the id's
-    postponeEvent(new JsTimeEvent(this,callback,interval,repeat,++m_id));
+    postponeEvent(new JsTimeEvent(this,callback,interval,repeat,++m_id,args));
     return m_id;
 }
 
