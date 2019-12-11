@@ -2156,7 +2156,7 @@ public:
     /**
      * Get the object associated with the field with the given name
      * @param name Name of field to retrieve
-     * @param val Field where to put the retrieved value
+     * @param obj Field where to put the retrieved value
      * @return True if field was retrieved, false if not found or not the right type
      */
     bool getObjField(const String& name, JsObject*& obj);
