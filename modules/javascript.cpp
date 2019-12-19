@@ -123,6 +123,7 @@ class JsGlobal : public NamedString
 public:
     JsGlobal(const char* scriptName, const char* fileName, bool relPath = true, bool fromCfg = true);
     virtual ~JsGlobal();
+    bool load();
     bool fileChanged(const char* fileName) const;
     inline JsParser& parser()
 	{ return m_jsCode; }
@@ -141,7 +142,14 @@ public:
 	{ return s_globals; }
     inline static void unloadAll()
 	{ s_globals.clear(); }
+
+    static Mutex s_mutex;
+    static bool s_keepOldOnFail;
+
 private:
+    static bool buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
+	const String& fileName, bool relPath, bool fromCfg, bool fromInit = false);
+
     JsParser m_jsCode;
     RefPointer<ScriptContext> m_context;
     bool m_inUse;
@@ -5007,6 +5015,8 @@ void JsAssist::msgPostExecute(const Message& msg, bool handled)
 
 
 ObjList JsGlobal::s_globals;
+Mutex JsGlobal::s_mutex(false,"JsGlobal");
+bool JsGlobal::s_keepOldOnFail = false;
 
 JsGlobal::JsGlobal(const char* scriptName, const char* fileName, bool relPath, bool fromCfg)
     : NamedString(scriptName,fileName),
@@ -5018,11 +5028,6 @@ JsGlobal::JsGlobal(const char* scriptName, const char* fileName, bool relPath, b
     m_jsCode.setMaxFileLen(s_maxFile);
     m_jsCode.link(s_allowLink);
     m_jsCode.trace(s_allowTrace);
-    DDebug(&__plugin,DebugAll,"Loading global Javascript '%s' from '%s'",name().c_str(),c_str());
-    if (m_jsCode.parseFile(*this))
-	Debug(&__plugin,DebugInfo,"Parsed '%s' script: %s",name().c_str(),c_str());
-    else if (*this)
-	Debug(&__plugin,DebugWarn,"Failed to parse '%s' script: %s",name().c_str(),c_str());
 }
 
 JsGlobal::~JsGlobal()
@@ -5042,6 +5047,18 @@ JsGlobal::~JsGlobal()
     }
 }
 
+bool JsGlobal::load()
+{
+    DDebug(&__plugin,DebugAll,"Loading global Javascript '%s' from '%s'",name().c_str(),c_str());
+    if (m_jsCode.parseFile(*this)) {
+	Debug(&__plugin,DebugInfo,"Parsed '%s' script: %s",name().c_str(),c_str());
+	return true;
+    }
+    if (*this)
+	Debug(&__plugin,DebugWarn,"Failed to parse '%s' script: %s",name().c_str(),c_str());
+    return false;
+}
+
 bool JsGlobal::fileChanged(const char* fileName) const
 {
     return m_jsCode.scriptChanged(fileName,s_basePath,s_libsPath);
@@ -5049,27 +5066,28 @@ bool JsGlobal::fileChanged(const char* fileName) const
 
 void JsGlobal::markUnused()
 {
-    ListIterator iter(s_globals);
-    while (JsGlobal* script = static_cast<JsGlobal*>(iter.get()))
+    for (ObjList* o = s_globals.skipNull(); o; o = o->skipNext()) {
+	JsGlobal* script = static_cast<JsGlobal*>(o->get());
 	script->m_inUse = !script->m_confLoaded;
+    }
 }
 
 void JsGlobal::freeUnused()
 {
-    Lock mylock(__plugin);
+    Lock mylock(JsGlobal::s_mutex);
     ListIterator iter(s_globals);
     while (JsGlobal* script = static_cast<JsGlobal*>(iter.get()))
 	if (!script->m_inUse) {
 	    s_globals.remove(script,false);
 	    mylock.drop();
 	    TelEngine::destruct(script);
-	    mylock.acquire(__plugin);
+	    mylock.acquire(JsGlobal::s_mutex);
 	}
 }
 
 void JsGlobal::reloadDynamic()
 {
-    Lock mylock(__plugin);
+    Lock mylock(JsGlobal::s_mutex);
     ListIterator iter(s_globals);
     while (JsGlobal* script = static_cast<JsGlobal*>(iter.get()))
 	if (!script->m_confLoaded) {
@@ -5077,7 +5095,7 @@ void JsGlobal::reloadDynamic()
 	    String name = script->name();
 	    mylock.drop();
 	    JsGlobal::initScript(name,filename,true,false);
-	    mylock.acquire(__plugin);
+	    mylock.acquire(JsGlobal::s_mutex);
 	}
 }
 
@@ -5087,53 +5105,36 @@ bool JsGlobal::initScript(const String& scriptName, const String& fileName, bool
 	return false;
     DDebug(&__plugin,DebugInfo,"Initialize %s script '%s' from %s file '%s'",(fromCfg ? "configured" : "dynamically loaded"),
                scriptName.c_str(),(relPath ? "relative" : "absolute"),fileName.c_str());
-    Lock mylock(__plugin);
-    JsGlobal* script = static_cast<JsGlobal*>(s_globals[scriptName]);
-    if (script) {
+    Lock mylock(JsGlobal::s_mutex);
+    ObjList* o = s_globals.find(scriptName);
+    if (o) {
+	JsGlobal* script = static_cast<JsGlobal*>(o->get());
 	if (script->m_confLoaded != fromCfg) {
 	    Debug(&__plugin,DebugWarn,"Trying to load script '%s' %s, but it was already loaded %s",
 		    scriptName.c_str(),fromCfg ? "from configuration file" : "dynamically",
 		    fromCfg ? "dynamically" : "from configuration file");
 	    return false;
 	}
-	if (script->fileChanged(fileName)) {
-	    s_globals.remove(script,false);
-	    mylock.drop();
-	    TelEngine::destruct(script);
-	    mylock.acquire(__plugin);
-	}
-	else {
+	if (!script->fileChanged(fileName)) {
 	    script->m_inUse = true;
 	    script->m_confLoaded = fromCfg;
 	    return true;
 	}
     }
-    script = new JsGlobal(scriptName,fileName,relPath,fromCfg);
-    s_globals.append(script);
-    mylock.drop();
-    return script->runMain();
+    return buildNewScript(mylock,o,scriptName,fileName,relPath,fromCfg,true);
 }
 
 bool JsGlobal::reloadScript(const String& scriptName)
 {
     if (scriptName.null())
 	return false;
-    Lock mylock(__plugin);
-    JsGlobal* script = static_cast<JsGlobal*>(s_globals[scriptName]);
-    if (!script)
+    Lock mylock(JsGlobal::s_mutex);
+    ObjList* o = s_globals.find(scriptName);
+    if (!o)
 	return false;
+    JsGlobal* script = static_cast<JsGlobal*>(o->get());
     String fileName = *script;
-    if (fileName.null())
-	return false;
-    bool fromCfg = script->m_confLoaded;
-    s_globals.remove(script,false);
-    mylock.drop();
-    TelEngine::destruct(script);
-    mylock.acquire(__plugin);
-    script = new JsGlobal(scriptName,fileName,false,fromCfg);
-    s_globals.append(script);
-    mylock.drop();
-    return script->runMain();
+    return fileName && buildNewScript(mylock,o,scriptName,fileName,false,script->m_confLoaded);
 }
 
 void JsGlobal::loadScripts(const NamedList* sect)
@@ -5162,6 +5163,30 @@ bool JsGlobal::runMain()
     ScriptRun::Status st = runner->run();
     TelEngine::destruct(runner);
     return (ScriptRun::Succeeded == st);
+}
+
+bool JsGlobal::buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
+    const String& fileName, bool relPath, bool fromCfg, bool fromInit)
+{
+    JsGlobal* oldScript = old ? static_cast<JsGlobal*>(old->get()) : 0;
+    JsGlobal* script = new JsGlobal(scriptName,fileName,relPath,fromCfg);
+    if (script->load() || !s_keepOldOnFail || !old) {
+	if (old)
+	    old->set(script,false);
+	else
+	    s_globals.append(script);
+	lck.drop();
+	TelEngine::destruct(oldScript);
+	return script->runMain();
+    }
+    // Make sure we don't remove the old one if unused
+    if (oldScript && fromInit) {
+	oldScript->m_inUse = true;
+	oldScript->m_confLoaded = fromCfg;
+    }
+    lck.drop();
+    TelEngine::destruct(script);
+    return false;
 }
 
 
@@ -5211,9 +5236,10 @@ void JsModule::msgPostExecute(const Message& msg, bool handled)
 
 void JsModule::statusParams(String& str)
 {
-    lock();
-    str << "globals=" << JsGlobal::globals().count() << ",routing=" << calls().count();
-    unlock();
+    Lock lck(JsGlobal::s_mutex);
+    str << "globals=" << JsGlobal::globals().count();
+    lck.acquire(this);
+    str << ",routing=" << calls().count();
 }
 
 bool JsModule::commandExecute(String& retVal, const String& line)
@@ -5225,14 +5251,19 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 
     if (cmd.null() || cmd == YSTRING("info")) {
 	retVal.clear();
-	lock();
-	ListIterator iter(JsGlobal::globals());
-	while (JsGlobal* script = static_cast<JsGlobal*>(iter.get()))
+	Lock lck(JsGlobal::s_mutex);
+	for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
+	    JsGlobal* script = static_cast<JsGlobal*>(o->get());
 	    retVal << script->name() << " = " << *script << "\r\n";
-	iter.assign(calls());
-	while (JsAssist* assist = static_cast<JsAssist*>(iter.get()))
-	    retVal << assist->id() << ": " << assist->stateName() << "\r\n";
-	unlock();
+	}
+	lck.acquire(this);
+	for (unsigned int i = 0; i < calls().length(); i++) {
+	    ObjList* o = calls().getList(i);
+	    for (o ? o = o->skipNull() : 0; o; o = o->skipNext()) {
+		JsAssist* assist = static_cast<JsAssist*>(o->get());
+		retVal << assist->id() << ": " << assist->stateName() << "\r\n";
+	    }
+	}
 	return true;
     }
 
@@ -5244,13 +5275,14 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 	cmd.extractTo(" ",scr).trimSpaces();
 	if (scr.null() || cmd.null())
 	    return false;
-	Lock mylock(this);
+	Lock mylock(JsGlobal::s_mutex);;
 	JsGlobal* script = static_cast<JsGlobal*>(JsGlobal::globals()[scr]);
 	if (script) {
 	    RefPointer<ScriptContext> ctxt = script->context();
 	    mylock.drop();
 	    return evalContext(retVal,cmd,ctxt);
 	}
+	mylock.acquire(this);
 	JsAssist* assist = static_cast<JsAssist*>(calls()[scr]);
 	if (assist) {
 	    RefPointer<ScriptContext> ctxt = assist->context();
@@ -5344,15 +5376,20 @@ bool JsModule::commandComplete(Message& msg, const String& partLine, const Strin
     else if (partLine == name()) {
 	static const String s_eval("eval=");
 	if (partWord.startsWith(s_eval)) {
-	    lock();
-	    ListIterator iter(JsGlobal::globals());
-	    while (JsGlobal* script = static_cast<JsGlobal*>(iter.get()))
-		if (!script->name().null())
+	    Lock lck(JsGlobal::s_mutex);
+	    for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
+		JsGlobal* script = static_cast<JsGlobal*>(o->get());
+		if (script->name())
 		    itemComplete(msg.retValue(),s_eval + script->name(),partWord);
-	    iter.assign(calls());
-	    while (JsAssist* assist = static_cast<JsAssist*>(iter.get()))
-		itemComplete(msg.retValue(),s_eval + assist->id(),partWord);
-	    unlock();
+	    }
+	    lck.acquire(this);
+	    for (unsigned int i = 0; i < calls().length(); i++) {
+		ObjList* o = calls().getList(i);
+		for (o ? o = o->skipNull() : 0; o; o = o->skipNext()) {
+		    JsAssist* assist = static_cast<JsAssist*>(o->get());
+		    itemComplete(msg.retValue(),s_eval + assist->id(),partWord);
+		}
+	    }
 	    return true;
 	}
 	for (const char** list = s_cmds; *list; list++)
@@ -5360,13 +5397,12 @@ bool JsModule::commandComplete(Message& msg, const String& partLine, const Strin
 	return true;
     }
     else if (partLine == YSTRING("javascript reload")) {
-	lock();
-	ListIterator iter(JsGlobal::globals());
-	while (JsGlobal* script = static_cast<JsGlobal*>(iter.get())) {
-	    if (!script->name().null())
+	Lock lck(JsGlobal::s_mutex);
+	for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
+	    JsGlobal* script = static_cast<JsGlobal*>(o->get());
+	    if (script->name())
 		itemComplete(msg.retValue(),script->name(),partWord);
 	}
-	unlock();
 	return true;
     }
     return Module::commandComplete(msg,partLine,partWord);
@@ -5469,9 +5505,9 @@ ChanAssist* JsModule::create(Message& msg, const String& id)
 {
     if ((msg == YSTRING("chan.startup")) && (msg[YSTRING("direction")] == YSTRING("outgoing")))
 	return 0;
-    lock();
+    Lock lck(JsGlobal::s_mutex);
     ScriptRun* runner = m_assistCode.createRunner(0,NATIVE_TITLE);
-    unlock();
+    lck.drop();
     if (!runner)
 	return 0;
     DDebug(this,DebugInfo,"Creating Javascript for '%s'",id.c_str());
@@ -5513,6 +5549,7 @@ void JsModule::initialize()
     s_maxFile = cfg.getIntValue("general","max_length",500000,32768,2097152);
     s_autoExt = cfg.getBoolValue("general","auto_extensions",true);
     s_allowAbort = cfg.getBoolValue("general","allow_abort");
+    JsGlobal::s_keepOldOnFail = cfg.getBoolValue("general","keep_old_on_fail");
     bool changed = false;
     if (cfg.getBoolValue("general","allow_trace") != s_allowTrace) {
 	s_allowTrace = !s_allowTrace;
@@ -5524,7 +5561,7 @@ void JsModule::initialize()
     }
     tmp = cfg.getValue("general","routing");
     Engine::runParams().replaceParams(tmp);
-    lock();
+    Lock lck(JsGlobal::s_mutex);
     if (changed || m_assistCode.scriptChanged(tmp,s_basePath,s_libsPath)) {
 	m_assistCode.clear();
 	m_assistCode.setMaxFileLen(s_maxFile);
@@ -5538,7 +5575,7 @@ void JsModule::initialize()
 	    Debug(this,DebugWarn,"Failed to parse script: %s",tmp.c_str());
     }
     JsGlobal::markUnused();
-    unlock();
+    lck.drop();
     JsGlobal::loadScripts(cfg.getSection("scripts"));
     if (m_started)
 	JsGlobal::loadScripts(cfg.getSection("late_scripts"));
