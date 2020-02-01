@@ -3,7 +3,7 @@
  * This file is part of the YATE Project http://YATE.null.ro
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2020 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -236,14 +236,17 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 		    if (s.startSkip("$enabled")) {
 			if ((s == YSTRING("else")) || (s == YSTRING("toggle")))
 			    enabled = !enabled;
-			else
+			else {
+			    Engine::runParams().replaceParams(s);
 			    enabled = s.toBoolean(true);
+			}
 			continue;
 		    }
 		    if (!enabled)
 			continue;
 		    bool noerr = false;
 		    if (s.startSkip("$require") || (noerr = s.startSkip("$include"))) {
+			Engine::runParams().replaceParams(s);
 			String path;
 			if (!s.startsWith(Engine::pathSeparator())) {
 			    path = file;
@@ -287,6 +290,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			    ok = (loadFile(path,sect,depth+1,warn) || noerr) && ok;
 			continue;
 		    }
+		    Engine::runParams().replaceParams(s);
 		    sect = s;
 		    createSection(sect);
 		}

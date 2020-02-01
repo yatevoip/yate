@@ -168,6 +168,16 @@ h323chan.yate=yes
 ;  sip=filter 127.0.0.1
 
 
+[run_params]
+; Extra runtime parameters to add to the Engine at startup
+; It is not possible to overwrite existing parameters, only add new ones
+; These parameters are only loaded once at startup
+; Use the 'runparam' command to add more later
+; Examples:
+;  temppath=/tmp
+;  remote_ip=10.1.2.3
+
+
 [variables]
 ; Each line in this section initializes a variable in the Engine's shared list
 ; These variables can be accessed and modified from each module

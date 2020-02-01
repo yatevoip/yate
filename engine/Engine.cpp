@@ -3,7 +3,7 @@
  * This file is part of the YATE Project http://YATE.null.ro
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2020 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -621,6 +621,8 @@ static const char s_evtsOpt[] = "  events [clear] [type]\r\n";
 static const char s_evtsMsg[] = "Show or clear events or alarms collected since the engine startup\r\n";
 static const char s_logvOpt[] = "  logview\r\n";
 static const char s_logvMsg[] = "Show log of engine startup and initialization process\r\n";
+static const char s_runpOpt[] = "  runparam name=value\r\n";
+static const char s_runpMsg[] = "Add a new parameter to the Engine's runtime list\r\n";
 
 // get the base name of a module file
 static String moduleBase(const String& fname)
@@ -726,6 +728,7 @@ void EngineCommand::doCompletion(Message &msg, const String& partLine, const Str
 	completeOne(msg.retValue(),"module",partWord);
 	completeOne(msg.retValue(),"events",partWord);
 	completeOne(msg.retValue(),"logview",partWord);
+	completeOne(msg.retValue(),"runparam",partWord);
     }
     else if (partLine == YSTRING("status")) {
 	completeOne(msg.retValue(),"engine",partWord);
@@ -827,6 +830,20 @@ bool EngineCommand::received(Message &msg)
 	    (msg.retValue() = "Events: ") << cnt << "\r\n";
 	    return true;
 	}
+	if (line.startSkip("runparam")) {
+	    int sep = line.find('=');
+	    if (sep > 0) {
+		String par = line.substr(0,sep).trimBlanks();
+		if (Engine::runParams().getParam(par))
+		    msg.retValue() = "Not overwriting runtime parameter '" + par + "'\r\n";
+		else {
+		    String val = line.substr(sep+1);
+		    Engine::runParams().replaceParams(val);
+		    Engine::s_params.addParam(par,val.trimBlanks());
+		}
+		return true;
+	    }
+	}
 	return false;
     }
 
@@ -894,7 +911,7 @@ bool EngineHelp::received(Message &msg)
     const char* opts = (s_nounload ? s_cmdsOptNoUnload : s_cmdsOpt);
     String line = msg.getValue("line");
     if (line.null()) {
-	msg.retValue() << opts << s_evtsOpt << s_logvOpt;
+	msg.retValue() << opts << s_evtsOpt << s_logvOpt << s_runpOpt;
 	return false;
     }
     if (line == YSTRING("module"))
@@ -903,6 +920,8 @@ bool EngineHelp::received(Message &msg)
 	msg.retValue() << s_evtsOpt << s_evtsMsg;
     else if (line == YSTRING("logview"))
 	msg.retValue() << s_logvOpt << s_logvMsg;
+    else if (line == YSTRING("runparam"))
+	msg.retValue() << s_runpOpt << s_runpMsg;
     else
 	return false;
     return true;
@@ -1565,7 +1584,48 @@ int Engine::engineInit()
 	    s_params.addParam("workpath",buf);
     }
 #endif
-    NamedList* vars = s_cfg.getSection("variables");
+    // Apply and remove any 'runparam' commands here, before anything can use them
+    for (ObjList* cmd = s_cmds->skipNull(); cmd; ) {
+	String* s = static_cast<String*>(cmd->get());
+	if (!s->startSkip("runparam")) {
+	    cmd = cmd->skipNext();
+	    continue;
+	}
+	String par;
+	int sep = s->find('=');
+	if (sep > 0)
+	    par = s->substr(0,sep).trimBlanks();
+	if (par) {
+	    if (s_params.getParam(par))
+		Debug(DebugMild,"Not overwriting runtime parameter '%s'",par.c_str());
+	    else {
+		String val = s->substr(sep+1);
+		s_params.replaceParams(val);
+		s_params.addParam(par,val.trimBlanks());
+	    }
+	}
+	else
+	    Debug(DebugWarn,"Invalid command 'runparam %s'",s->safe());
+	cmd->remove();
+	cmd = cmd->skipNull();
+    }
+    NamedList* vars = s_cfg.getSection("run_params");
+    if (vars) {
+	unsigned int n = vars->length();
+	for (unsigned int i = 0; i < n; i++) {
+	    NamedString* p = vars->getParam(i);
+	    if (!(p && p->name()))
+		continue;
+	    if (s_params.getParam(p->name()))
+		Debug(DebugMild,"Not overwriting runtime parameter '%s'",p->name().c_str());
+	    else {
+		String val = *p;
+		Engine::s_params.replaceParams(val);
+		s_params.addParam(p->name(),val);
+	    }
+	}
+    }
+    vars = s_cfg.getSection("variables");
     if (vars) {
 	unsigned int n = vars->length();
 	for (unsigned int i = 0; i < n; i++) {
