@@ -1585,7 +1585,7 @@ int Engine::engineInit()
     }
 #endif
     // Apply and remove any 'runparam' commands here, before anything can use them
-    for (ObjList* cmd = s_cmds->skipNull(); cmd; ) {
+    for (ObjList* cmd = s_cmds ? s_cmds->skipNull() : 0; cmd; ) {
 	String* s = static_cast<String*>(cmd->get());
 	if (!s->startSkip("runparam")) {
 	    cmd = cmd->skipNext();
