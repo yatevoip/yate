@@ -1234,6 +1234,7 @@ static bool s_update_verify = false;
 static bool s_preventive_bye = true;
 static bool s_ignoreVia = true;          // Ignore Via headers and send answer back to the source
 static bool s_changeParty2xx = false;    // Change party when handling 2xx. Ignored if autochangeparty is disabled
+static bool s_warnPacketUDP = true;      // Warn when receiving possible truncated packet
 static bool s_sipt_isup = false;         // Control the application/isup body processing
 static bool s_printMsg = true;           // Print sent/received SIP messages to output
 static ObjList* s_authCopyHeader = 0;    // Copy headers in user.auth
@@ -3338,7 +3339,7 @@ int YateSIPUDPTransport::process()
     else
 	retVal = Thread::idleUsec();
     // We can read the data
-    m_buffer.resize(m_maxpkt);
+    m_buffer.resize(m_maxpkt + 1);
     int res = m_sock->recvFrom((void*)m_buffer.data(),m_buffer.length() - 1,m_remote);
     if (res <= 0) {
 	printReadError();
@@ -3349,6 +3350,12 @@ int YateSIPUDPTransport::process()
 	    "Transport(%s) received short SIP message of %d bytes from %s [%p]",
 	    m_id.c_str(),res,m_remote.addr().c_str(),this);
 	return 0;
+    }
+    if (res == (int)m_maxpkt && s_warnPacketUDP) {
+	s_warnPacketUDP = false;
+	Alarm(&plugin,"config",DebugConf,
+	    "Transport(%s) received packet with length %d: same as configured maxpkt [%p]",
+	    m_id.c_str(),res,this);
     }
     char* b = (char*)m_buffer.data();
     b[res] = 0;
@@ -3839,7 +3846,7 @@ bool YateSIPTCPTransport::sendPending(const Time& time, bool& sent)
 bool YateSIPTCPTransport::readData(const Time& time, bool& read)
 {
     read = false;
-    m_buffer.resize(m_maxpkt);
+    m_buffer.resize(m_maxpkt + 1);
     int res = m_sock->readData((void*)m_buffer.data(),m_buffer.length() - 1);
     if (res < 0) {
 	printReadError();
@@ -9319,6 +9326,7 @@ void SIPDriver::initialize()
     else
 	s_dtmfMethods.setDefault();
     s_globalMutex.unlock();
+    s_warnPacketUDP = true;
     s_checkAllowInfo = s_cfg.getBoolValue("general","check_allow_info",true);
     s_missingAllowInfoDefVal = s_cfg.getBoolValue("general","missing_allow_info",true);
     s_honorDtmfDetect = s_cfg.getBoolValue("general","honor_dtmf_detect",true);
