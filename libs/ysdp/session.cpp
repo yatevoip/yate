@@ -408,7 +408,18 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 		    const String* mapping = static_cast<const String*>(pl->get());
 		    if (!mapping)
 			continue;
-		    if (mapping->startsWith(tmp)) {
+		    found = mapping->startsWith(tmp);
+		    if (!found) {
+			for (ObjList* o = pl->skipNext(); o; o = o->skipNext()) {
+			    const String* tmpM = static_cast<const String*>(o->get());
+			    if (tmpM->startsWith(tmp)) {
+				found = true;
+				mapping = tmpM;
+				break;
+			    }
+			}
+		    }
+		    if (found) {
 			payload = -1;
 			tmp = *mapping;
 			tmp >> "=" >> payload;
