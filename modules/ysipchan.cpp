@@ -3354,7 +3354,7 @@ int YateSIPUDPTransport::process()
     if (res == (int)m_maxpkt && s_warnPacketUDP) {
 	s_warnPacketUDP = false;
 	Alarm(&plugin,"config",DebugConf,
-	    "Transport(%s) received packet with length %d: same as configured maxpkt [%p]",
+	    "Transport(%s) received likely truncated packet with length %d, try to increase maxpkt [%p]",
 	    m_id.c_str(),res,this);
     }
     char* b = (char*)m_buffer.data();
