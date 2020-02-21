@@ -27,6 +27,17 @@
 
 #define MIN_CALLBACK_INTERVAL Thread::idleMsec()
 
+#define CALL_NATIVE_METH_STR(obj,meth) \
+    if (YSTRING(#meth) == oper.name()) { \
+	ExpEvaluator::pushOne(stack,new ExpOperation((obj).meth())); \
+	return true; \
+    }
+#define CALL_NATIVE_METH_INT(obj,meth) \
+    if (YSTRING(#meth) == oper.name()) { \
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)(obj).meth())); \
+	return true; \
+    }
+
 using namespace TelEngine;
 namespace { // anonymous
 
@@ -301,6 +312,39 @@ private:
     HashList m_list;
 };
 
+class JsURI : public JsObject
+{
+public:
+    inline JsURI(Mutex* mtx)
+	: JsObject("URI",mtx,true)
+	{
+	    XDebug(DebugAll,"JsURI::JsURI() [%p]",this);
+	    params().addParam(new ExpFunction("getDescription"));
+	    params().addParam(new ExpFunction("getProtocol"));
+	    params().addParam(new ExpFunction("getUser"));
+	    params().addParam(new ExpFunction("getHost"));
+	    params().addParam(new ExpFunction("getPort"));
+	    params().addParam(new ExpFunction("getExtra"));
+	    params().addParam(new ExpFunction("getCanonical"));
+	}
+    inline JsURI(const char* str, Mutex* mtx)
+	: JsObject(mtx,"[object URI]",false),
+	  m_uri(str)
+	{
+	    XDebug(DebugAll,"JsURI::JsURI(%u) [%p]",size,this);
+	}
+    virtual ~JsURI()
+	{
+	    XDebug(DebugAll,"~JsURI() [%p]",this);
+	}
+    virtual void* getObject(const String& name) const;
+    virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
+protected:
+    bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+private:
+    URI m_uri;
+};
+
 #define MKDEBUG(lvl) params().addParam(new ExpOperation((int64_t)Debug ## lvl,"Debug" # lvl))
 #define MKTIME(typ) params().addParam(new ExpOperation((int64_t)SysUsage:: typ ## Time,# typ "Time"))
 class JsEngine : public JsObject, public DebugEnabler
@@ -370,6 +414,7 @@ public:
 	    params().addParam(new ExpFunction("htob"));
 	    addConstructor(params(), "Semaphore", new JsSemaphore(mtx));
 	    addConstructor(params(),"HashList",new JsHashList(mtx));
+	    addConstructor(params(),"URI",new JsURI(mtx));
 	}
     static void initialize(ScriptContext* context, const char* name = 0);
     inline void resetWorker()
@@ -4053,6 +4098,71 @@ bool JsHashList::runNative(ObjList& stack, const ExpOperation& oper, GenObject* 
 {
     if (YSTRING("count") == oper.name()) {
 	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)m_list.count()));
+	return true;
+    }
+    return JsObject::runNative(stack,oper,context);
+}
+
+void* JsURI::getObject(const String& name) const
+{
+    void* obj = (name == YATOM("JsURI")) ? const_cast<JsURI*>(this) : JsObject::getObject(name);
+    if (!obj)
+	obj = m_uri.getObject(name);
+    return obj;
+}
+
+JsObject* JsURI::runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    XDebug(&__plugin,DebugAll,"JsURI::runConstructor '%s'(" FMT64 ")",oper.name().c_str(),oper.number());
+    ObjList args;
+    const char* str = 0;
+    switch (extractArgs(stack,oper,context,args)) {
+	case 1:
+	{
+	    ExpOperation* op = static_cast<ExpOperation*>(args[0]);
+	    if (!op)
+		return 0;
+	    str = *op;
+	    break;
+	}
+	case 0:
+	    break;
+	default:
+	    return 0;
+    }
+
+    JsURI* obj = new JsURI(str,mutex());
+    if (!ref()) {
+	TelEngine::destruct(obj);
+	return 0;
+    }
+    obj->params().addParam(new ExpWrapper(this,protoName()));
+    return obj;
+}
+
+bool JsURI::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    CALL_NATIVE_METH_STR(m_uri,getDescription);
+    CALL_NATIVE_METH_STR(m_uri,getProtocol);
+    CALL_NATIVE_METH_STR(m_uri,getUser);
+    CALL_NATIVE_METH_STR(m_uri,getHost);
+    CALL_NATIVE_METH_INT(m_uri,getPort);
+    CALL_NATIVE_METH_STR(m_uri,getExtra);
+    if (YSTRING("getCanonical") == oper.name()) {
+	String str;
+	if (m_uri.getProtocol())
+	    str += m_uri.getProtocol() + ":";
+	if (m_uri.getUser())
+	    str += m_uri.getUser();
+	if (m_uri.getHost()) {
+	    if (m_uri.getUser())
+		str << "@";
+	    if (m_uri.getPort())
+		SocketAddr::appendTo(str,m_uri.getHost(),m_uri.getPort());
+	    else
+		str << m_uri.getHost();
+	}
+	ExpEvaluator::pushOne(stack,new ExpOperation(str));
 	return true;
     }
     return JsObject::runNative(stack,oper,context);
