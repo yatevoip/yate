@@ -844,24 +844,22 @@ bool JsContext::runStringFunction(GenObject* obj, const String& name, ObjList& s
 	JsArray* array = new JsArray(context,mutex());
 	if (!(extractArgs(stack,oper,context,args) && args.skipNull()))
 	    SPLIT_EMPTY();
-	String* s = static_cast<String*>(args[0]);
-	if (!s)
+	GenObject* gen = args[0];
+	if (!gen)
 	    SPLIT_EMPTY();
-	char ch = s->at(0);
+	JsRegExp* jsReg = YOBJECT(JsRegExp,gen);
+	ObjList* splits = jsReg ? str->split(jsReg->regexp()) :
+	    str->split(static_cast<String*>(gen)->at(0));
 	unsigned int limit = 0;
-	ObjList* splits = str->split(ch);
 	if (args.count() >= 2) {
 	    String* l = static_cast<String*>(args[1]);
 	    if (l)
-		limit = l->toInteger(splits->count());
+		limit = l->toInteger(0xffffffff);
 	}
 	if (!limit)
-	    limit = splits->count();
-	int i = limit;
-	for (ObjList* o = splits->skipNull();o && i > 0;o = o->skipNext(),i--) {
-	    String* slice = static_cast<String*>(o->get());
-	    array->push(new ExpOperation(*slice));
-	}
+	    limit = 0xffffffff;
+	for (ObjList* o = splits->skipNull(); o && limit; o = o->skipNext(), limit--)
+	    array->push(new ExpOperation(*static_cast<String*>(o->get())));
 	ExpEvaluator::pushOne(stack,new ExpWrapper(array,0));
 	TelEngine::destruct(splits);
 	return true;
