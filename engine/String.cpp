@@ -1543,6 +1543,25 @@ ObjList* String::split(char separator, bool emptyOK) const
     return list;
 }
 
+ObjList* String::split(const Regexp& reg, bool emptyOK) const
+{
+    String s = *this;
+    ObjList* list = new ObjList;
+    ObjList* dest = list;
+    while (true) {
+	if (!(s && s.matches(reg))) {
+	    if (s || emptyOK)
+		dest = dest->append(new String(s));
+	    break;
+	}
+	int pos = s.matchOffset(0);
+	if (emptyOK || pos > 0)
+	    dest = dest->append(new String(s.c_str(),pos));
+	s = s.substr(pos + s.matchLength(0));
+    }
+    return list;
+}
+
 String String::msgEscape(const char* str, char extraEsc)
 {
     String s;

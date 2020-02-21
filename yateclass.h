@@ -2805,6 +2805,14 @@ public:
     ObjList* split(char separator, bool emptyOK = true) const;
 
     /**
+     * Splits the string at Regexp delimiter
+     * @param reg Regexp describing the delimiter
+     * @param emptyOK True if empty strings should be inserted in list
+     * @return A newly allocated list of strings, must be deleted after use
+     */
+    ObjList* split(const Regexp& reg, bool emptyOK = true) const;
+
+    /**
      * Create an escaped string suitable for use in messages
      * @param str String to convert to escaped format
      * @param extraEsc Character to escape other than the default ones
