@@ -359,6 +359,12 @@
 ; If set this parameter must be less than 'tcp_keepalive'
 ;tcp_keepalive_first=0
 
+; initial_headers: boolean: Put all headers from initial requests in yate message
+; Handled for incoming channel preroute, user (un)register and messages sent on SIP
+;  requests received outside a dialog
+; This parameter is applied on reload
+;initial_headers=no
+
 
 [options]
 ; Controls the behaviour for SIP options retrieval

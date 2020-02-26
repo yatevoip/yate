@@ -1235,6 +1235,7 @@ static bool s_preventive_bye = true;
 static bool s_ignoreVia = true;          // Ignore Via headers and send answer back to the source
 static bool s_changeParty2xx = false;    // Change party when handling 2xx. Ignored if autochangeparty is disabled
 static bool s_warnPacketUDP = true;      // Warn when receiving possible truncated packet
+static bool s_initialHeaders = false;    // Put all headers as received in initial message sent to yate
 static bool s_sipt_isup = false;         // Control the application/isup body processing
 static bool s_printMsg = true;           // Print sent/received SIP messages to output
 static ObjList* s_authCopyHeader = 0;    // Copy headers in user.auth
@@ -1728,22 +1729,26 @@ static bool matchAny(const String& name, const char** strs)
 }
 
 // Copy headers from SIP message to Yate message
-static void copySipHeaders(NamedList& msg, const SIPMessage& sip, bool filter = true, bool auth = false)
+static void copySipHeaders(NamedList& msg, const SIPMessage& sip, bool filter = true, bool auth = false,
+    bool all = false)
 {
     const ObjList* l = sip.header.skipNull();
     for (; l; l = l->skipNext()) {
 	const MimeHeaderLine* t = static_cast<const MimeHeaderLine*>(l->get());
 	String name(t->name());
 	name.toLower();
-	if (matchAny(name,s_rejectHeaders))
-	    continue;
+	// Filtered headers (from/to) are added explicitly
 	if (filter && matchAny(name,s_filterHeaders))
 	    continue;
-	if (!auth && matchAny(name,s_authHeaders))
-	    continue;
-	String tmp;
-	t->buildLine(tmp,false);
-	msg.addParam("sip_" + name,tmp);
+	const char* prefix = "sip_";
+	if (matchAny(name,s_rejectHeaders) || (!auth && matchAny(name,s_authHeaders))) {
+	    if (!all)
+		continue;
+	    prefix = "sipheader_";
+	}
+	NamedString* ns = new NamedString(prefix + name);
+	t->buildLine(*ns,false);
+	msg.addParam(ns);
     }
 }
 
@@ -5631,7 +5636,8 @@ void YateSIPEndPoint::regRun(const SIPMessage* message, SIPTransaction* t)
 	if (trans)
 	    trans->fillMessage(msg,(0 != expires));
     }
-    copySipHeaders(msg,*message,true,static_cast<const YateSIPEngine*>(t->getEngine())->foreignAuth());
+    copySipHeaders(msg,*message,true,
+	static_cast<const YateSIPEngine*>(t->getEngine())->foreignAuth(),s_initialHeaders);
     SIPMessage* r = 0;
     bool ok = Engine::dispatch(msg);
     t->setTransCount(msg.getIntValue(YSTRING("xsip_trans_count"),-1));
@@ -5803,7 +5809,8 @@ bool YateSIPEndPoint::generic(const SIPMessage* message, SIPTransaction* t, cons
     // establish the dialog here so user code will have the dialog tag handy
     t->setDialogTag();
     m.addParam("xsip_dlgtag",t->getDialogTag());
-    copySipHeaders(m,*message,false,static_cast<const YateSIPEngine*>(t->getEngine())->foreignAuth());
+    copySipHeaders(m,*message,false,
+	static_cast<const YateSIPEngine*>(t->getEngine())->foreignAuth(),s_initialHeaders);
 
     doDecodeIsupBody(&plugin,m,message->body);
     copySipBody(m,*message);
@@ -6097,7 +6104,8 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
     m->addParam("sip_to",ev->getMessage()->getHeaderValue("To"));
     m->addParam("sip_callid",callid(),false);
     m->addParam("device",ev->getMessage()->getHeaderValue("User-Agent"));
-    copySipHeaders(*m,*ev->getMessage(),true,static_cast<const YateSIPEngine*>(tr->getEngine())->foreignAuth());
+    copySipHeaders(*m,*ev->getMessage(),true,
+	static_cast<const YateSIPEngine*>(tr->getEngine())->foreignAuth(),s_initialHeaders);
 
     const char* reason = 0;
     hl = m_tr->initialMessage()->getHeader("Referred-By");
@@ -9374,6 +9382,7 @@ void SIPDriver::initialize()
     s_sdp_implicit = s_cfg.getBoolValue("hacks","sdp_implicit",true);
     s_rtp_preserve = s_cfg.getBoolValue("hacks","ignore_sdp_addr",false);
     s_changeParty2xx = s_cfg.getBoolValue("general","change_party_2xx",false);
+    s_initialHeaders = s_cfg.getBoolValue("general","initial_headers");
     m_parser.initialize(s_cfg.getSection("codecs"),s_cfg.getSection("hacks"),s_cfg.getSection("general"));
     if (!m_endpoint) {
 	Thread::Priority prio = Thread::priority(s_cfg.getValue("general","thread"));
