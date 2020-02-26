@@ -7346,7 +7346,7 @@ bool YateSIPConnection::reInviteForward(SIPTransaction* t, MimeSdpBody* sdp, int
 	t->autoAck(false);
 	msg.addParam("sdp_ack",String::boolText(true));
     }
-    bool ok = Engine::dispatch(msg);
+    bool ok = Engine::dispatch(msg) && (msg.retValue() != YSTRING("error")) && (msg.retValue() != "-");
     Lock mylock(driver());
     // if peer doesn't support updates fail the reINVITE
     if (!ok) {
