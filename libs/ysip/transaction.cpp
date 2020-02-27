@@ -33,7 +33,7 @@ SIPTransaction::SIPTransaction(SIPMessage* message, SIPEngine* engine, bool outg
       m_response(0), m_timeouts(0), m_timeout(0),
       m_firstMessage(message), m_lastMessage(0), m_pending(0), m_engine(engine), m_private(0),
       m_autoChangeParty(autoChangeParty ? *autoChangeParty : engine->autoChangeParty()),
-      m_autoAck(true)
+      m_autoAck(true), m_silent(false)
 {
     DDebug(getEngine(),DebugAll,"SIPTransaction::SIPTransaction(%p,%p,%d) [%p]",
 	message,engine,outgoing,this);
@@ -81,7 +81,7 @@ SIPTransaction::SIPTransaction(SIPTransaction& original, SIPMessage* answer)
       m_pending(0), m_engine(original.m_engine),
       m_branch(original.m_branch), m_callid(original.m_callid), m_tag(original.m_tag),
       m_private(0), m_autoChangeParty(original.m_autoChangeParty),
-      m_autoAck(original.m_autoAck)
+      m_autoAck(original.m_autoAck), m_silent(original.m_silent)
 {
     DDebug(getEngine(),DebugAll,"SIPTransaction::SIPTransaction(&%p,%p) [%p]",
 	&original,answer,this);
@@ -127,7 +127,7 @@ SIPTransaction::SIPTransaction(const SIPTransaction& original, const String& tag
       m_pending(0), m_engine(original.m_engine),
       m_branch(original.m_branch), m_callid(original.m_callid), m_tag(tag),
       m_private(0), m_autoChangeParty(original.m_autoChangeParty),
-      m_autoAck(original.m_autoAck)
+      m_autoAck(original.m_autoAck), m_silent(original.m_silent)
 {
     if (m_firstMessage)
 	m_firstMessage->ref();
@@ -269,13 +269,18 @@ SIPEvent* SIPTransaction::getEvent(bool pendingOnly, u_int64_t time)
     SIPEvent *e = 0;
 
     if (m_pending) {
-	e = m_pending;
+	if (m_silent)
+	    delete m_pending;
+	else
+	    e = m_pending;
 	m_pending = 0;
 	return e;
     }
 
     if (m_transmit) {
 	m_transmit = false;
+	if (m_silent)
+	    return 0;
 	return new SIPEvent(m_lastMessage ? m_lastMessage : m_firstMessage,this);
     }
 
@@ -295,15 +300,19 @@ SIPEvent* SIPTransaction::getEvent(bool pendingOnly, u_int64_t time)
     }
 
     e = isOutgoing() ? getClientEvent(m_state,timeout) : getServerEvent(m_state,timeout);
-    if (e)
-	return e;
+    if (e) {
+	if (!m_silent)
+	    return e;
+	delete e;
+	return 0;
+    }
 
     // do some common default processing
     switch (m_state) {
 	case Retrans:
 	    if (timeout < 0)
 		break;
-	    if (timeout && m_lastMessage)
+	    if (timeout && m_lastMessage && !m_silent)
 		e = new SIPEvent(m_lastMessage,this);
 	    // fall through because we recheck the timeout
 	case Finish:
@@ -313,7 +322,10 @@ SIPEvent* SIPTransaction::getEvent(bool pendingOnly, u_int64_t time)
 	    // fall through so we don't wait another turn for processing
 	case Cleared:
 	    setTimeout();
-	    e = new SIPEvent(m_firstMessage,this);
+	    if (!m_silent)
+		e = new SIPEvent(m_firstMessage,this);
+	    else
+		e = new SIPEvent(0,this);
 	    // make sure we don't get trough this one again
 	    changeState(Invalid);
 	    return e;
@@ -792,6 +804,12 @@ bool SIPTransaction::tryAutoAuth(SIPMessage* answer)
     changeState(Initial);
     tr->processClientMessage(answer,Process);
     return true;
+}
+
+void SIPTransaction::setSilent()
+{
+    m_silent = true;
+    DDebug(getEngine(),DebugAll,"SIPTransaction silenced in state=%s [%p]",stateName(m_state),this);
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

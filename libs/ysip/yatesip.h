@@ -1052,6 +1052,11 @@ public:
     inline void* getUserData() const
 	{ return m_private; }
 
+    /**
+     * Silent this transaction
+     */
+    void setSilent();
+
 protected:
     /**
      * Constructor from previous auto authenticated transaction. This is used only internally
@@ -1159,6 +1164,7 @@ protected:
     void *m_private;
     bool m_autoChangeParty;
     bool m_autoAck;
+    bool m_silent;
 };
 
 /**

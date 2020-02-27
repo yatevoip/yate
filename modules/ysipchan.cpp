@@ -1056,6 +1056,12 @@ private:
     bool infoAllowed(const SIPMessage* msg);
     // Send tone(s) using method
     bool sendTone(Message& msg, const char* tone, int meth, bool& retVal);
+    inline void setSilent(const char* reason) {
+	    if (m_silent || (YSTRING("silent") != reason))
+		return;
+	    m_silent = true;
+	    clearTransaction();
+	}
 
     SIPTransaction* m_tr;
     SIPTransaction* m_tr2;
@@ -1092,6 +1098,7 @@ private:
     int m_lastRseq;
     // media parameters before we sent a reINVITE
     NamedList m_revert;
+    bool m_silent;                       // Silently discard SIP dialog
 };
 
 class YateSIPGenerate : public GenObject
@@ -6041,7 +6048,8 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
       m_authBye(true), m_autoChangeParty(tr->getEngine()->autoChangeParty()),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
-      m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0), m_revert("")
+      m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
+      m_revert(""), m_silent(false)
 {
     m_ipv6 = s_ipv6;
     setSdpDebug(this,this);
@@ -6238,7 +6246,8 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
       m_authBye(false), m_autoChangeParty(true),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
-      m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0), m_revert("")
+      m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
+      m_revert(""), m_silent(false)
 {
     Debug(this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,'%s') [%p]",
 	&msg,uri.c_str(),this);
@@ -6487,7 +6496,9 @@ void YateSIPConnection::clearTransaction()
     Lock lock(driver());
     if (m_tr) {
 	m_tr->setUserData(0);
-	if (m_tr->setResponse()) {
+	if (m_silent)
+	    m_tr->setSilent();
+	else if (m_tr->setResponse()) {
 	    SIPMessage* m = new SIPMessage(m_tr->initialMessage(),m_reasonCode,
 		m_reason.safe("Request Terminated"));
 	    paramMutex().lock();
@@ -6506,9 +6517,13 @@ void YateSIPConnection::clearTransaction()
     // cancel any pending reINVITE
     if (m_tr2) {
 	m_tr2->setUserData(0);
-	m_tr2->autoAck(true);
-	if (m_tr2->isIncoming())
-	    m_tr2->setResponse(487);
+	if (m_silent)
+	    m_tr2->setSilent();
+	else {
+	    m_tr2->autoAck(true);
+	    if (m_tr2->isIncoming())
+		m_tr2->setResponse(487);
+	}
 	m_tr2->deref();
 	m_tr2 = 0;
     }
@@ -6548,7 +6563,7 @@ void YateSIPConnection::hangup()
     Engine::enqueue(m);
     if (!error)
 	error = res.c_str();
-    bool sendBye = true;
+    bool sendBye = !m_silent;
     switch (m_state) {
 	case Cleared:
 	    clearTransaction();
@@ -6563,7 +6578,7 @@ void YateSIPConnection::hangup()
 	    break;
 	case Outgoing:
 	case Ringing:
-	    if (m_cancel && m_tr) {
+	    if (!m_silent && m_cancel && m_tr) {
 		SIPMessage* m = new SIPMessage("CANCEL",m_uri);
 		setSipParty(m,plugin.findLine(m_line),true,m_host,m_port);
 		if (!m->getParty())
@@ -7731,6 +7746,7 @@ void YateSIPConnection::complete(Message& msg, bool minimal) const
 void YateSIPConnection::disconnected(bool final, const char *reason)
 {
     Debug(this,DebugAll,"YateSIPConnection::disconnected() '%s' [%p]",reason,this);
+    setSilent(reason);
     if (reason) {
 	int code = lookup(reason,dict_errors);
 	if (code >= 300 && code <= 699)
@@ -7903,6 +7919,7 @@ bool YateSIPConnection::msgDrop(Message& msg, const char* reason)
 {
     if (!Channel::msgDrop(msg,reason))
 	return false;
+    setSilent(reason);
     int code = lookup(reason,dict_errors);
     if (code >= 300 && code <= 699)
 	setReason(lookup(code,SIPResponses,reason),code,driver());
@@ -8207,6 +8224,7 @@ void YateSIPConnection::callAccept(Message& msg)
 void YateSIPConnection::callRejected(const char* error, const char* reason, const Message* msg)
 {
     Channel::callRejected(error,reason,msg);
+    setSilent(error);
     int code = lookup(error,dict_errors,500);
     if (code < 300 || code > 699)
 	code = 500;
