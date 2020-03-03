@@ -331,7 +331,7 @@ public:
 	: JsObject(mtx,"[object URI]",false),
 	  m_uri(str)
 	{
-	    XDebug(DebugAll,"JsURI::JsURI(%u) [%p]",size,this);
+	    XDebug(DebugAll,"JsURI::JsURI('%s') [%p]",str,this);
 	}
     virtual ~JsURI()
 	{
