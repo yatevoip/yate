@@ -28,7 +28,7 @@ namespace TelEngine {
  */
 SDPSession::SDPSession(SDPParser* parser)
     : m_parser(parser), m_mediaStatus(MediaMissing),
-      m_rtpForward(false), m_sdpForward(false), m_rtpMedia(0),
+      m_rtpForward(false), m_sdpForward(parser->sdpForward()), m_rtpMedia(0),
       m_sdpSession(0), m_sdpVersion(0), m_sdpHash(YSTRING_INIT_HASH),
       m_secure(m_parser->m_secure), m_rfc2833(m_parser->m_rfc2833),
       m_ipv6(false), m_amrExtra(""), m_enabler(0), m_ptr(0)
@@ -38,12 +38,13 @@ SDPSession::SDPSession(SDPParser* parser)
 
 SDPSession::SDPSession(SDPParser* parser, NamedList& params)
     : m_parser(parser), m_mediaStatus(MediaMissing),
-      m_rtpForward(false), m_sdpForward(false), m_rtpMedia(0),
+      m_rtpForward(false), m_sdpForward(parser->sdpForward()), m_rtpMedia(0),
       m_sdpSession(0), m_sdpVersion(0), m_sdpHash(YSTRING_INIT_HASH),
       m_ipv6(false), m_amrExtra(""), m_enabler(0), m_ptr(0)
 {
     setSdpDebug();
     m_rtpForward = params.getBoolValue("rtp_forward");
+    m_sdpForward = params.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
     m_secure = params.getBoolValue("secure",parser->m_secure);
     m_rfc2833 = parser->m_rfc2833;
     setRfc2833(params.getParam("rfc2833"));
@@ -632,12 +633,9 @@ MimeSdpBody* SDPSession::createPasstroughSDP(NamedList& msg, bool update,
     if (!(m_rtpForward && tmp.toBoolean()))
 	return 0;
     String* raw = msg.getParam("sdp_raw");
-    if (raw) {
-	m_sdpForward = m_sdpForward || m_parser->sdpForward();
-	if (m_sdpForward) {
-	    msg.setParam("rtp_forward","accepted");
-	    return new MimeSdpBody("application/sdp",raw->safe(),raw->length());
-	}
+    if (raw && m_sdpForward) {
+	msg.setParam("rtp_forward","accepted");
+	return new MimeSdpBody("application/sdp",raw->safe(),raw->length());
     }
     String addr;
     ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr);

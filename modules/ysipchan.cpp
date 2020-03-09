@@ -6205,7 +6205,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
 	    m->addParam("rtp_addr",m_rtpAddr);
 	    putMedia(*m);
 	}
-	if (plugin.parser().sdpForward()) {
+	if (m_sdpForward) {
 	    const DataBlock& raw = sdp->getBody();
 	    String tmp((const char*)raw.data(),raw.length());
 	    m->addParam("sdp_raw",tmp);
@@ -6282,6 +6282,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     m_secure = msg.getBoolValue(YSTRING("secure"),plugin.parser().secure());
     setRfc2833(msg.getParam(YSTRING("rfc2833")));
     m_rtpForward = msg.getBoolValue(YSTRING("rtp_forward"));
+    m_sdpForward = msg.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
     m_user = msg.getValue(YSTRING("user"));
     String tmp;
     bool genSips = sips(msg.getBoolValue(YSTRING("sips"),line && line->sips()));
@@ -8114,8 +8115,10 @@ bool YateSIPConnection::callPrerouted(Message& msg, bool handled)
 bool YateSIPConnection::callRouted(Message& msg)
 {
     // try to disable RTP forwarding earliest possible
-    if (m_rtpForward && !msg.getBoolValue(YSTRING("rtp_forward")))
-	m_rtpForward = false;
+    if (m_rtpForward) {
+	m_rtpForward = msg.getBoolValue(YSTRING("rtp_forward"));
+	m_sdpForward = msg.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
+    }
     setRfc2833(msg.getParam(YSTRING("rfc2833")));
     updateRtpNatAddress(&msg);
     Channel::callRouted(msg);
@@ -8189,9 +8192,8 @@ void YateSIPConnection::callAccept(Message& msg)
     if (m_authBye)
 	m_authBye = msg.getBoolValue(YSTRING("xsip_auth_bye"),true);
     if (m_rtpForward) {
-	String tmp(msg.getValue(YSTRING("rtp_forward")));
-	if (tmp != YSTRING("accepted"))
-	    m_rtpForward = false;
+	m_rtpForward = (msg[YSTRING("rtp_forward")] == YSTRING("accepted"));
+	m_sdpForward = msg.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
     }
     if (m_tr && msg.getBoolValue("sdp_ack"))
 	m_tr->autoAck(false);
