@@ -136,6 +136,7 @@ static const CommandInfo s_cmdInfo[] =
     { Admin, "drop", "{chan|*|all} [reason]", s_dall, "Drops one or all active calls" },
     { Admin, "call", "chan target", 0, "Execute an outgoing call" },
     { Admin, "control", "chan [operation] [param=val] [param=...]", 0, "Apply arbitrary control operations to a channel or entity" },
+    { Admin, "cfgmerge", "configfile", 0, "Generate a merged configuration file" },
     { Admin, "reload", "[plugin]", 0, "Reloads module configuration files" },
     { Admin, "restart", "[now]", s_rnow, "Restarts the engine if executing supervised" },
     { Admin, "stop", "[exitcode]", 0, "Stops the engine with optionally provided exit code" },
@@ -1677,6 +1678,29 @@ bool Connection::processCommand(const char *line, bool saveLine)
 	else
 	    str = (m_machine ? "%%=control:fail:" : "Could not control ") + str + "\r\n";
 	writeStr(str);
+    }
+    else if (str.startSkip("cfgmerge"))
+    {
+        if (!str)
+            writeStr("Missing configuration name\r\n");
+        else {
+            String conf = Engine::configFile(str);
+            Configuration cfg(conf,false);
+            if (!cfg.load()) {
+                str = "Failed to load configuration file '" + conf + "'\r\n";
+                writeStr(str);
+            }
+            else {
+                String newCfg = conf + ".merged";
+                cfg = newCfg;
+                if (!cfg.save())
+                    str = "Could not save merged configuration to '";
+                else
+                    str = "Saved merged configuration to '";
+                str += newCfg + "'\r\n";
+                writeStr(str);
+            }
+        }
     }
 #ifdef HAVE_MALLINFO
     else if (str.startSkip("meminfo"))
