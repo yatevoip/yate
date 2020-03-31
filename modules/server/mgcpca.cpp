@@ -6,7 +6,7 @@
  *  for other protocols
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2020 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -1127,7 +1127,13 @@ void MGCPSpan::operational(const SocketAddr& address)
 {
     if (address.host().null() || (address.host() == YSTRING("0.0.0.0")))
 	return;
-    m_address = address.host();
+    s_mutex.lock();
+    if (address.host() != m_address) {
+	m_address = address.host();
+	Debug(&splugin,DebugNote,"MGCPSpan '%s' remote address %s [%p]",
+	    id().c_str(),address.host().c_str(),this);
+    }
+    s_mutex.unlock();
     const MGCPEpInfo* ep = s_endpoint->find(epId().id());
     if (ep && !(m_operational && ep->address().valid()))
 	const_cast<MGCPEpInfo*>(ep)->address(address);
