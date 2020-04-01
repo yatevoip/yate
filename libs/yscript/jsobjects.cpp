@@ -88,7 +88,7 @@ public:
 protected:
     inline JsDate(Mutex* mtx, u_int64_t msecs, bool local = false)
 	: JsObject("Date",mtx),
-	  m_time((unsigned int)(msecs / 1000)), m_msec((unsigned int)(msecs % 1000)), m_offs(Time::timeZone())
+	  m_time((unsigned int)(msecs / 1000)), m_msec((unsigned int)(msecs % 1000)), m_offs(Time::timeZone(m_time))
 	{ if (local) m_time -= m_offs; }
     inline JsDate(Mutex* mtx, const char* name, unsigned int time, unsigned int msec, unsigned int offs)
 	: JsObject(mtx,name),

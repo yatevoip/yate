@@ -3928,9 +3928,10 @@ public:
 
     /**
      * Retrieve the difference between local time and UTC in seconds east of UTC
+     * @param when UNIX time for which to compute timezone, affects daylight saving
      * @return Difference between local time and UTC in seconds
      */
-    static int timeZone();
+    static int timeZone(u_int32_t when = secNow());
 
 private:
     u_int64_t m_time;

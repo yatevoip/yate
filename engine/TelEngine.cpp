@@ -975,11 +975,11 @@ uint64_t Time::toEpoch(const char* buf, unsigned int len, int frac)
     return sec * 1000000 + delta;
 }
 
-int Time::timeZone()
+int Time::timeZone(u_int32_t when)
 {
 #ifdef _WINDOWS
     struct tm t;
-    time_t time = (time_t)secNow();
+    time_t time = (time_t)when;
     _localtime_s(&t,&time);
     if (t.tm_isdst)
 	return -(_timezone + _dstbias);
@@ -987,7 +987,7 @@ int Time::timeZone()
 #else
 #ifdef HAVE_GMTOFF
     struct tm t;
-    time_t time = (time_t)secNow();
+    time_t time = (time_t)when;
     if (localtime_r(&time,&t))
 	return t.tm_gmtoff;
 #endif
