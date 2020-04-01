@@ -41,6 +41,21 @@
 using namespace TelEngine;
 namespace { // anonymous
 
+static inline void dumpTraceToMsg(Message* msg, ObjList* lst)
+{
+    if (!(msg && lst))
+	return;
+    unsigned int count = msg->getIntValue(YSTRING("trace_msg_count"),0);
+    static String s_tracePref = "trace_msg_";
+    for (ObjList* o = lst->skipNull(); o; o = o->skipNext()) {
+	String* s = static_cast<String*>(o->get());
+	if (TelEngine::null(s))
+	    continue;
+	msg->setParam(s_tracePref + String(count++),*s);
+    }
+    msg->setParam(YSTRING("trace_msg_count"),String(count));
+}
+
 class JsEngineWorker;
 class JsEngine;
 
@@ -375,6 +390,9 @@ public:
 	    params().addParam(new ExpFunction("output"));
 	    params().addParam(new ExpFunction("debug"));
 	    params().addParam(new ExpFunction("alarm"));
+	    params().addParam(new ExpFunction("lineNo"));
+	    params().addParam(new ExpFunction("fileName"));
+	    params().addParam(new ExpFunction("fileNo"));
 	    params().addParam(new ExpFunction("sleep"));
 	    params().addParam(new ExpFunction("usleep"));
 	    params().addParam(new ExpFunction("yield"));
@@ -435,7 +453,8 @@ public:
 
     inline JsMessage(Mutex* mtx)
 	: JsObject("Message",mtx,true),
-	  m_message(0), m_dispatch(false), m_owned(false), m_trackPrio(true)
+	  m_message(0), m_dispatch(false), m_owned(false), m_trackPrio(true),
+	  m_traceLvl(DebugInfo), m_traceLst(0)
 	{
 	    XDebug(&__plugin,DebugAll,"JsMessage::JsMessage() [%p]",this);
 	    params().addParam(new ExpFunction("enqueue"));
@@ -452,12 +471,15 @@ public:
 	    params().addParam(new ExpFunction("getResult"));
 	    params().addParam(new ExpFunction("copyParams"));
 	    params().addParam(new ExpFunction("clearParam"));
+	    params().addParam(new ExpFunction("trace"));
 	}
     inline JsMessage(Message* message, Mutex* mtx, bool disp, bool owned = false)
 	: JsObject(mtx,"[object Message]"),
-	  m_message(message), m_dispatch(disp), m_owned(owned), m_trackPrio(true)
+	  m_message(message), m_dispatch(disp), m_owned(owned), m_trackPrio(true),
+	  m_traceLvl(DebugInfo), m_traceLst(0)
 	{
 	    XDebug(&__plugin,DebugAll,"JsMessage::JsMessage(%p) [%p]",message,this);
+	    setTrace();
 	}
     virtual ~JsMessage()
 	{
@@ -471,6 +493,7 @@ public:
 		MessageHook* hook = static_cast<MessageHook*>(o->get());
 		Engine::uninstallHook(hook);
 	    }
+	    TelEngine::destruct(m_traceLst);
 	}
     virtual void* getObject(const String& name) const;
     virtual NamedList* nativeParams() const
@@ -489,9 +512,15 @@ public:
 	    construct->params().addParam(new ExpFunction("trackName"));
 	}
     inline void clearMsg()
-	{ m_message = 0; m_owned = false; m_dispatch = false; }
+    { 
+	dumpTraceToMsg(m_message,m_traceLst);
+	m_message = 0;
+	m_owned = false;
+	m_dispatch = false; 
+	setTrace();
+    }
     inline void setMsg(Message* message)
-	{ m_message = message; m_owned = false; m_dispatch = false; }
+	{ m_message = message; m_owned = false; m_dispatch = false; setTrace(); }
     static void initialize(ScriptContext* context);
     void runAsync(ObjList& stack, Message* msg, bool owned);
 protected:
@@ -500,6 +529,13 @@ protected:
     void getRow(ObjList& stack, const ExpOperation* row, GenObject* context);
     void getResult(ObjList& stack, const ExpOperation& row, const ExpOperation& col, GenObject* context);
     bool installHook(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    inline void setTrace() 
+    {
+	m_traceId = m_message ? m_message->getValue(YSTRING("trace_id")) : "";
+	m_traceLvl = m_message ? m_message->getIntValue(YSTRING("trace_lvl"),DebugInfo,DebugGoOn,DebugAll) : DebugInfo;
+	TelEngine::destruct(m_traceLst);
+	m_traceLst = m_message ? (m_message->getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0) : 0;
+    }
     ObjList m_handlers;
     ObjList m_hooks;
     String m_trackName;
@@ -507,6 +543,9 @@ protected:
     bool m_dispatch;
     bool m_owned;
     bool m_trackPrio;
+    String m_traceId;
+    int m_traceLvl;
+    ObjList* m_traceLst;
 };
 
 class JsHandler : public MessageHandler
@@ -1286,6 +1325,32 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		level = limit;
 	    Alarm(this,info,level,"%s",str.c_str());
 	}
+    }
+    else if (oper.name() == YSTRING("lineNo")) {
+	if (oper.number())
+	    return false;
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (!runner)
+	    return false;
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)runner->currentLineNo()));
+    }
+    else if (oper.name() == YSTRING("fileName") || oper.name() == YSTRING("fileNo")) {
+	if (oper.number() > 1)
+	    return false;
+	bool wholePath = false;
+	if (oper.number() == 1) {
+            ExpOperation* op = popValue(stack,context);
+	    if (!op)
+		return false;
+	    wholePath = op->valBoolean();
+	}
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (!runner)
+	    return false;
+	String fileName = runner->currentFileName(wholePath);
+	if (oper.name() == YSTRING("fileNo"))
+	    fileName << ":" << runner->currentLineNo();
+	ExpEvaluator::pushOne(stack,new ExpOperation(fileName));
     }
     else if (oper.name() == YSTRING("sleep")) {
 	if (oper.number() != 1)
@@ -2280,7 +2345,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	switch (extractArgs(stack,oper,context,args)) {
 	    case 3:
 		skip = static_cast<ExpOperation*>(args[2])->valBoolean(skip);
-	        // intentional
+		// intentional
 	    case 2:
 		prefix = static_cast<ExpOperation*>(args[1]);
 		// intentional
@@ -2364,6 +2429,73 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    default:
 		return false;
 	}
+    }
+    else if (oper.name() == YSTRING("trace")) {
+	if (!m_message)
+	    return true;
+	ObjList args;
+	unsigned int c = extractArgs(stack,oper,context,args);
+	if (c < 2)
+	    return false;
+	ExpOperation* ret = static_cast<ExpOperation*>(args[0]);
+	ExpOperation* op = static_cast<ExpOperation*>(args[1]);
+
+	int level = -1;
+	int limit = s_allowAbort ? DebugFail : DebugTest;
+	if (op->number() > 1 && op->isInteger()) {
+	    level = (int)op->number();	    
+	    if (level > DebugAll)
+		level = DebugAll;
+	    else if (level < limit)
+		level = limit;
+	}
+
+	String str;
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (m_traceId) {
+	    if (!runner)
+		return false;
+	    str = runner->currentFileName();
+	    str << ":" << runner->currentLineNo();
+	    if (ret->isBoolean())
+		str << " - return:" << ret->valBoolean();
+	}
+
+	for (unsigned int i = 2; i < c; i++) {
+	    ExpOperation* op = static_cast<ExpOperation*>(args[i]);
+	    if (!op)
+		continue;
+	    else if (*op) {
+		if (str)
+		    str << " ";
+		str << *op;
+	    }
+	}
+
+	DebugEnabler* dbg = &__plugin;
+	if (runner && runner->context()) {
+	    JsEngine* engine = YOBJECT(JsEngine,runner->context()->params().getParam(YSTRING("Engine")));
+	    if (engine)
+		dbg = engine;
+	}
+
+	if (m_traceId) {
+	    if (level > m_traceLvl || level == -1)
+		level = m_traceLvl;
+	    if (level < limit)
+		level = limit;
+	    Debug(dbg,level,"Trace:%s %s",m_traceId.c_str(),str.c_str());
+	    if (m_traceLst)
+		m_traceLst->append(new String(str));
+	}
+	else if (level > -1 && str)
+	    Debug(dbg,level,"%s",str.c_str());
+
+	if (!JsParser::isUndefined(*ret))
+	    ExpEvaluator::pushOne(stack,JsParser::isNull(*ret) ? 
+		JsParser::nullClone() : new ExpOperation(*ret));
+	else
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(0,0));
     }
     else
 	return JsObject::runNative(stack,oper,context);

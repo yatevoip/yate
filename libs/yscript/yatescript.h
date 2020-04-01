@@ -1783,6 +1783,21 @@ public:
     virtual bool appendAsync(ScriptAsync* oper);
 
     /**
+     * Retrieve current file line being executed
+     * @return The file line being evaluated
+     */
+    virtual unsigned int currentLineNo() const
+	{ return 0; }
+
+    /**
+     * Retrieve the name of the source file from which code is being executed
+     * @parma wholePath Retrieve name including path
+     * @return The file name
+     */
+    virtual const String& currentFileName(bool wholePath = false) const
+	{ return String::empty(); }
+
+    /**
      * Try to assign a value to a single field in the script context
      * @param oper Field to assign to, contains the field name and new value
      * @param context Pointer to arbitrary object to be passed to called methods

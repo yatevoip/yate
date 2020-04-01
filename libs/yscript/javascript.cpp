@@ -83,11 +83,11 @@ class JsCodeFile : public String
 {
 public:
     inline JsCodeFile(const String& file)
-	: String(file), m_fileTime(0)
-	{ File::getFileTime(file,m_fileTime); }
+	: String(file), m_fileTime(0), m_shortName(file)
+	{ File::getFileTime(file,m_fileTime); setShortName(); }
     inline JsCodeFile(const String& file, unsigned int fTime)
-	: String(file), m_fileTime(fTime)
-	{ }
+	: String(file), m_fileTime(fTime), m_shortName(file)
+	{ setShortName(); }
     inline unsigned int fileTime() const
 	{ return m_fileTime; }
     inline bool fileChanged() const
@@ -98,8 +98,21 @@ public:
 	    File::getFileTime(c_str(),t);
 	    return t != m_fileTime;
 	}
+    inline const String& shortName() const
+        { return m_shortName; }
 private:
+    inline void setShortName()
+    {
+        int pos = rfind('/');
+#ifdef _WINDOWS
+	    int backPos = rfind('\\');
+	    pos = pos > backPos ? pos : backPos;
+#endif
+        if (pos >= 0 && (pos < (int)length() - 1))
+            m_shortName = substr(pos + 1);
+    }
     unsigned int m_fileTime;
+    String m_shortName;
 };
 
 struct JsEntry
@@ -191,9 +204,9 @@ public:
 	{ return (line >> 24) & 0xff; }
     inline unsigned int getFileCount() const
 	{ return m_included.length(); }
-    const String& getFileAt(unsigned int index) const;
-    inline const String& getFileName(unsigned int line) const
-	{ return getFileAt(getFileNo(line)); }
+    const String& getFileAt(unsigned int index, bool wholePath = true) const;
+    inline const String& getFileName(unsigned int line, bool wholePath = true) const
+	{ return getFileAt(getFileNo(line),wholePath); }
     bool scriptChanged() const;
 protected:
     inline void trace(bool allowed)
@@ -381,6 +394,9 @@ public:
     void tracePost(const ExpOperation& oper);
     void traceCall(const ExpOperation& oper, const JsFunction& func);
     void traceReturn();
+    const ExpOperation* getCurrentOpCode() const;
+    virtual unsigned int currentLineNo() const;
+    virtual const String& currentFileName(bool wholePath = false) const;
 protected:
     virtual Status resume();
     void traceDump();
@@ -1048,12 +1064,12 @@ bool JsCode::link()
     return true;
 }
 
-const String& JsCode::getFileAt(unsigned int index) const
+const String& JsCode::getFileAt(unsigned int index, bool wholePath) const
 {
     if (!index)
 	return s_noFile;
-    const GenObject* file = m_included[index - 1];
-    return file ? file->toString() : s_noFile;
+    const JsCodeFile* file = static_cast<JsCodeFile*>(m_included[index - 1]);
+    return file ? (wholePath ? file->toString() : file->shortName()) : s_noFile;
 }
 
 void JsCode::formatLineNo(String& buf, unsigned int line) const
@@ -3305,7 +3321,36 @@ void JsFuncStats::updateCall(const char* name, unsigned int caller, unsigned int
     l->insert(new JsCallStats(name,caller,called,instr,usec));
 }
 
+const ExpOperation* JsRunner::getCurrentOpCode() const
+{
+    const ExpOperation* o = 0;
+    if (m_opcode)
+	o = static_cast<const ExpOperation*>(m_opcode->get());
+    if (!o)
+	o = static_cast<const ExpOperation*>(static_cast<const JsCode*>(code())->m_linked[m_index]);
+    if (!o) {
+	String str;
+	static_cast<const JsCode*>(code())->formatLineNo(str,m_lastLine);
+	Debug(DebugWarn,"Current operation unavailable in %s [%p]",str.c_str(),this);
+	return 0;
+    }
+    return o;
+}
 
+unsigned int JsRunner::currentLineNo() const
+{
+    const ExpOperation* o = getCurrentOpCode();
+    return o ? JsCode::getLineNo(o->lineNumber()) : 0;
+}
+
+const String& JsRunner::currentFileName(bool wholePath) const 
+{
+    const ExpOperation* o = getCurrentOpCode();
+    if (!(o && code()))
+	return YSTRING("???");
+    return (static_cast<const JsCode*>(code()))->getFileName(o->lineNumber(),wholePath);
+}
+ 
 JsCodeStats::JsCodeStats(JsCode* code, const char* file)
     : Mutex(false,"JsCodeStats"),
       m_fileName(file)
