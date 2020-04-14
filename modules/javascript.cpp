@@ -343,7 +343,7 @@ public:
 	    params().addParam(new ExpFunction("getCanonical"));
 	}
     inline JsURI(const char* str, Mutex* mtx)
-	: JsObject(mtx,"[object URI]",false),
+	: JsObject(mtx,str,false),
 	  m_uri(str)
 	{
 	    XDebug(DebugAll,"JsURI::JsURI('%s') [%p]",str,this);
