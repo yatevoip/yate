@@ -49,6 +49,7 @@
 ;  $(rotate,N,ITEM1,ITEM2,...) = list rotated N (modulo length of list) times
 ;  $(config,SECTION,KEY) = value of KEY= in [SECTION] of main config file (yate.conf, yate-qt4.conf)
 ;  $(engine,NAME) = value of Engine's runtime parameter NAME
+;  $(loaded,NAME) = true if plugin NAME is loaded, false otherwise
 ;  $(runid) = the current Engine run identifier
 ;  $(nodename) = the node name the Engine runs as, may be empty
 ;  $(accepting) = call accept status in engine, one of "accept", "partial", "congestion" or "reject"

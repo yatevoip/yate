@@ -424,6 +424,7 @@ public:
 	    params().addParam(new ExpFunction("loadLibrary"));
 	    params().addParam(new ExpFunction("loadObject"));
 	    params().addParam(new ExpFunction("replaceParams"));
+	    params().addParam(new ExpFunction("pluginLoaded"));
 	    params().addParam(new ExpFunction("atob"));
 	    params().addParam(new ExpFunction("btoa"));
 	    params().addParam(new ExpFunction("atoh"));
@@ -1638,6 +1639,13 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	    }
 	}
 	ExpEvaluator::pushOne(stack,new ExpOperation(ok));
+    }
+    else if (oper.name() == YSTRING("pluginLoaded")) {
+	ObjList args;
+	if (extractArgs(stack,oper,context,args) != 1)
+	    return false;
+	ExpEvaluator::pushOne(stack,new ExpOperation(
+	    Engine::self()->pluginLoaded(*static_cast<ExpOperation*>(args[0]))));
     }
     else if (oper.name() == YSTRING("replaceParams")) {
 	ObjList args;

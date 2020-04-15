@@ -1572,6 +1572,14 @@ public:
 	{ m_dispatcher.getStats(enqueued,dequeued,dispatched,queueMax); }
 
     /**
+     * Check if a plugin is currently loaded
+     * @param name Name of the plugin to check
+     * @return True if the named plugin is loaded
+     */
+    inline bool pluginLoaded(const String& name) const
+	{ return !!m_libs[name]; }
+
+    /**
      * Loads the plugins from an extra plugins directory or just an extra plugin
      * @param relPath Path to the extra directory, relative to the main modules
      * @return True if the plugin was loaded or the directory could at least be opened

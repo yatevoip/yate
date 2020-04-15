@@ -237,8 +237,17 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			if ((s == YSTRING("else")) || (s == YSTRING("toggle")))
 			    enabled = !enabled;
 			else {
+			    if (s.startSkip("elseif") && enabled) {
+				enabled = false;
+				continue;
+			    }
 			    Engine::runParams().replaceParams(s);
-			    enabled = s.toBoolean(true);
+			    if (s.startSkip("$loaded"))
+				enabled = Engine::self() && Engine::self()->pluginLoaded(s);
+			    else if (s.startSkip("$unloaded"))
+				enabled = !(Engine::self() && Engine::self()->pluginLoaded(s));
+			    else
+				enabled = s.toBoolean(true);
 			}
 			continue;
 		    }

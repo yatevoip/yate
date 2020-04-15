@@ -1591,6 +1591,11 @@ bool ExtModReceiver::processLine(const char* line)
 		    val.clear();
 		}
 	    }
+	    else if (id.startsWith("loaded.")) {
+		ok = val.null();
+		// keep the index in substr in sync with length of "loaded."
+		val = Engine::self()->pluginLoaded(id.substr(7));
+	    }
 	    else if (id == "runid") {
 		ok = val.null();
 		val = Engine::runId();

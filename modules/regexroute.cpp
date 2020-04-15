@@ -368,6 +368,8 @@ static void evalFunc(String& str, Message& msg)
 	}
 	else if (str == YSTRING("engine"))
 	    str = Engine::runParams().getValue(vars(par));
+	else if (str == YSTRING("loaded"))
+	    str = Engine::self()->pluginLoaded(par);
 	else if (str == YSTRING("message")) {
 	    if (sep >= 0) {
 		str = par.substr(sep+1).trimBlanks();
