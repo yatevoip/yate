@@ -9,6 +9,9 @@
 ; priority: int: Priority of the call.execute handler
 ;priority=100
 
+; maxqueue: int: How many messages can be queued in a receiver, zero disables limit
+;maxqueue=1000
+
 ; timeout: int: How many milliseconds to wait for a module to answer
 ;timeout=10000
 
