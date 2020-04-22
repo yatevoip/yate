@@ -125,7 +125,7 @@ bool CallEndpoint::connect(CallEndpoint* peer, const char* reason, bool notify)
     if (peer == m_peer)
 	return true;
     if (peer == this) {
-	Debug(DebugWarn,"CallEndpoint '%s' trying to connect to itself! [%p]",m_id.c_str(),this);
+	TraceDebug(traceId(),DebugWarn,"CallEndpoint '%s' trying to connect to itself! [%p]",m_id.c_str(),this);
 	return false;
     }
     DDebug(DebugAll,"CallEndpoint '%s' connecting peer %p to [%p]",m_id.c_str(),peer,this);
@@ -172,7 +172,7 @@ bool CallEndpoint::disconnect(bool final, const char* reason, bool notify, const
 
     Lock lock(s_mutex,5000000);
     if (!checkRetry(lock)) {
-	Alarm("engine","bug",DebugFail,"Call disconnect failed - timeout on call endpoint mutex owned by '%s'!",s_mutex.owner());
+	TraceAlarm(traceId(),"engine","bug",DebugFail,"Call disconnect failed - timeout on call endpoint mutex owned by '%s'!",s_mutex.owner());
 	Engine::restart(0);
 	return false;
     }
@@ -193,7 +193,7 @@ bool CallEndpoint::disconnect(bool final, const char* reason, bool notify, const
     temp->setPeer(0,reason,notify,params);
     bool dead = !alive();
     if (dead)
-	Debug(DebugMild,"CallEndpoint '%s' disconnect called while dead [%p]",m_id.c_str(),this);
+	TraceDebug(traceId(),DebugMild,"CallEndpoint '%s' disconnect called while dead [%p]",m_id.c_str(),this);
     if (final)
 	disconnected(true,reason);
     lock.drop();
@@ -231,7 +231,7 @@ bool CallEndpoint::getPeerId(String& id) const
     }
     Lock lock(s_mutex,5000000);
     if (!checkRetry(lock)) {
-	Alarm("engine","bug",DebugFail,"Peer ID failed - timeout on call endpoint mutex owned by '%s'!",s_mutex.owner());
+	TraceAlarm(traceId(),"engine","bug",DebugFail,"Peer ID failed - timeout on call endpoint mutex owned by '%s'!",s_mutex.owner());
 	Engine::restart(0);
 	return false;
     }
@@ -269,7 +269,7 @@ void CallEndpoint::setLastPeerId()
 	return;
     Lock lock(s_mutex,5000000);
     if (!checkRetry(lock)) {
-	Alarm("engine","bug",DebugCrit,"Set last peer ID failed - timeout on call endpoint mutex owned by '%s'!",s_mutex.owner());
+	TraceAlarm(traceId(),"engine","bug",DebugCrit,"Set last peer ID failed - timeout on call endpoint mutex owned by '%s'!",s_mutex.owner());
 	return;
     }
     if (m_peer) {
@@ -493,7 +493,7 @@ void Channel::dropChan()
 	return;
     m_driver->lock();
     if (!m_driver)
-	Debug(DebugFail,"Driver lost in dropChan! [%p]",this);
+	TraceDebug(traceId(),DebugFail,"Driver lost in dropChan! [%p]",this);
     if (m_driver->channels().remove(this,false)) {
 	if (m_driver->m_chanCount > 0)
 	    m_driver->m_chanCount--;
@@ -644,6 +644,8 @@ void Channel::complete(Message& msg, bool minimal) const
 
     copyChanParams(msg);
     msg.setParam("id",id());
+    if (traceId())
+	msg.setParam("trace_id",traceId());
     if (m_driver)
 	msg.setParam("module",m_driver->name());
     if (s_hangup == msg) {
@@ -773,23 +775,23 @@ bool Channel::msgMasquerade(Message& msg)
     if (m_billid.null())
 	m_billid = msg.getValue(YSTRING("billid"));
     if (msg == YSTRING("call.answered")) {
-	Debug(this,DebugInfo,"Masquerading answer operation [%p]",this);
+	TraceDebug(traceId(),this,DebugInfo,"Masquerading answer operation [%p]",this);
 	m_maxcall = 0;
 	maxPDD(0);
 	m_status = "answered";
     }
     else if (msg == YSTRING("call.progress")) {
-	Debug(this,DebugInfo,"Masquerading progress operation [%p]",this);
+	TraceDebug(traceId(),this,DebugInfo,"Masquerading progress operation [%p]",this);
 	status("progressing");
     }
     else if (msg == YSTRING("call.ringing")) {
-	Debug(this,DebugInfo,"Masquerading ringing operation [%p]",this);
+	TraceDebug(traceId(),this,DebugInfo,"Masquerading ringing operation [%p]",this);
 	status("ringing");
     }
     else if (msg == YSTRING("chan.dtmf")) {
 	// add sequence, stop the message if it was a disallowed DTMF duplicate
 	if (dtmfSequence(msg) && m_driver && !m_driver->m_dtmfDups) {
-	    Debug(this,DebugNote,"Stopping duplicate '%s' DTMF '%s' [%p]",
+	    TraceDebug(traceId(),this,DebugNote,"Stopping duplicate '%s' DTMF '%s' [%p]",
 		msg.getValue("detected"),msg.getValue("text"),this);
 	    return true;
 	}
@@ -917,7 +919,7 @@ void Channel::callAccept(Message& msg)
 	msgProgress(msg);
     else if (m_targetid.null() && msg.getBoolValue(YSTRING("autoanswer"),true)) {
 	// no preference exists in the message so issue a notice
-	Debug(this,DebugNote,"Answering now call %s because we have no targetid [%p]",
+	TraceDebug(traceId(),this,DebugNote,"Answering now call %s because we have no targetid [%p]",
 	    id().c_str(),this);
 	msgAnswered(msg);
     }
@@ -935,7 +937,7 @@ void Channel::callConnect(Message& msg)
 
 void Channel::callRejected(const char* error, const char* reason, const Message* msg)
 {
-    Debug(this,DebugMild,"Call rejected error='%s' reason='%s' [%p]",error,reason,this);
+    TraceDebug(traceId(),this,DebugMild,"Call rejected error='%s' reason='%s' [%p]",error,reason,this);
     if (msg) {
 	const String* cp = msg->getParam(s_copyParams);
 	if (!TelEngine::null(cp)) {
@@ -978,7 +980,7 @@ bool Channel::dtmfEnqueue(Message* msg)
     if (!msg)
 	return false;
     if (dtmfSequence(*msg) && m_driver && !m_driver->m_dtmfDups) {
-	Debug(this,DebugNote,"Dropping duplicate '%s' DTMF '%s' [%p]",
+	TraceDebug(traceId(),this,DebugNote,"Dropping duplicate '%s' DTMF '%s' [%p]",
 	    msg->getValue("detected"),msg->getValue("text"),this);
 	TelEngine::destruct(msg);
 	return false;
