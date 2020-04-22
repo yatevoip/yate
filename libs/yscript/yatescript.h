@@ -1791,11 +1791,25 @@ public:
 
     /**
      * Retrieve the name of the source file from which code is being executed
-     * @parma wholePath Retrieve name including path
+     * @param wholePath Retrieve name including path
      * @return The file name
      */
     virtual const String& currentFileName(bool wholePath = false) const
 	{ return String::empty(); }
+
+    /**
+     * Get the trace ID associated with this instance
+     * @return The trace ID
+     */
+    virtual const String& traceId() const
+        { return m_traceId; }
+
+    /**
+     * Set an associated trace ID for this instance
+     * @param tid Trace ID to associate
+     */
+    virtual void setTraceId(const String& tid)
+        { m_traceId = tid; }
 
     /**
      * Try to assign a value to a single field in the script context
@@ -1818,6 +1832,7 @@ private:
     Status m_state;
     ObjList m_stack;
     ObjList m_async;
+    String m_traceId;
 };
 
 /**

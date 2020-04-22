@@ -389,7 +389,11 @@ public:
 	    MKTIME(Kernel);
 	    params().addParam(new ExpFunction("output"));
 	    params().addParam(new ExpFunction("debug"));
+	    params().addParam(new ExpFunction("traceDebug"));
+	    params().addParam(new ExpFunction("trace"));
+	    params().addParam(new ExpFunction("setTraceId"));
 	    params().addParam(new ExpFunction("alarm"));
+	    params().addParam(new ExpFunction("traceAlarm"));
 	    params().addParam(new ExpFunction("lineNo"));
 	    params().addParam(new ExpFunction("fileName"));
 	    params().addParam(new ExpFunction("fileNo"));
@@ -1257,8 +1261,13 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		str = *op;
 	    TelEngine::destruct(op);
 	}
-	if (str)
-	    Output("%s",str.c_str());
+	if (str) {
+	    const String& traceId = YOBJECT(ScriptRun,context) ? context->traceId() : String::empty();
+	    if (traceId)
+		Output("Trace:%s %s",traceId.c_str(),str.c_str());
+	    else
+		Output("%s",str.c_str());
+	}
     }
     else if (oper.name() == YSTRING("debug")) {
 	int level = DebugNote;
@@ -1283,20 +1292,63 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		level = DebugAll;
 	    else if (level < limit)
 		level = limit;
-	    Debug(this,level,"%s",str.c_str());
+	    TraceDebug(YOBJECT(ScriptRun,context) ? context->traceId() : "",this,level,"%s",str.c_str());
 	}
     }
-    else if (oper.name() == YSTRING("alarm")) {
-	if (oper.number() < 2)
+    else if (oper.name() == YSTRING("traceDebug") || oper.name() == YSTRING("trace")) {
+	ObjList args;
+	unsigned int c = extractArgs(stack,oper,context,args);
+	if (c < 2)
+	    return false;
+	ExpOperation* traceID = static_cast<ExpOperation*>(args[0]);
+	ExpOperation* op = static_cast<ExpOperation*>(args[1]);
+
+	int level = DebugNote;
+	int limit = s_allowAbort ? DebugFail : DebugTest;
+	if (op->number() > 1 && op->isInteger()) {
+	    level = (int)op->number();
+	    if (level > DebugAll)
+		level = DebugAll;
+	    else if (level < limit)
+		level = limit;
+	}
+	
+	String str;
+	for (unsigned int i = 2; i < c; i++) {
+	    ExpOperation* op = static_cast<ExpOperation*>(args[i]);
+	    if (!op)
+		continue;
+	    else if (*op) {
+		if (str)
+		    str << " ";
+		str << *op;
+	    }
+	}
+	if (str) {
+	    const char* t = 0;
+	    if (!(TelEngine::null(*traceID) || JsParser::isNull(*traceID)))
+		t = *traceID;
+	    if (oper.name() == YSTRING("trace"))
+		Trace(t,this,level,"%s",str.c_str());
+	    else
+		TraceDebug(t,this,level,"%s",str.c_str());
+	}
+    }
+    else if (oper.name() == YSTRING("alarm") || oper.name() == YSTRING("traceAlarm")) {
+	int idx = (oper.name() == YSTRING("traceAlarm")) ? 1 : 0;
+	if (oper.number() < 2 + idx)
 	    return false;
 	int level = -1;
 	String info;
 	String str;
+	String traceId = YOBJECT(ScriptRun,context) ? context->traceId() : String::empty();
 	for (int i = (int)oper.number(); i; i--) {
 	    ExpOperation* op = popValue(stack,context);
 	    if (!op)
 		continue;
-	    if (i == 1) {
+	    if (i == 0 + idx)
+		traceId = *op;
+	    else if (i == 1 + idx) {
 		if (level < 0) {
 		    if (op->isInteger())
 			level = (int)op->number();
@@ -1308,7 +1360,7 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		else
 		    info = *op;
 	    }
-	    else if ((i == 2) && oper.number() > 2 && op->isInteger())
+	    else if ((i == 2 + idx) && oper.number() > 2 + idx && op->isInteger())
 		level = (int)op->number();
 	    else if (*op) {
 		if (str)
@@ -1324,8 +1376,32 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		level = DebugAll;
 	    else if (level < limit)
 		level = limit;
-	    Alarm(this,info,level,"%s",str.c_str());
+	    TraceAlarm(traceId,this,info,level,"%s",str.c_str());
 	}
+    }
+    else if (oper.name() == YSTRING("setTraceId")) {
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (!runner)
+	    return false;
+	String tmp;
+	switch (oper.number()) {
+	    case 1:
+	    {
+		ExpOperation* op = popValue(stack,context);
+		if (!op)
+		    return false;
+		if (!JsParser::isNull(*op))
+		    tmp = *op;
+		TelEngine::destruct(op);
+		break;
+	    }
+	    case 0:
+		// reset trace ID
+		break;
+	    default:
+		return false;
+	}
+	runner->setTraceId(tmp);
     }
     else if (oper.name() == YSTRING("lineNo")) {
 	if (oper.number())
@@ -2776,6 +2852,9 @@ JsObject* JsMessage::runConstructor(ObjList& stack, const ExpOperation& oper, Ge
 	if (objParams->nativeParams())
 	    copyObjParams(*m,objParams->nativeParams());
     }
+    const String& traceId = YOBJECT(ScriptRun,context) ? context->traceId() : String::empty();
+    if (traceId)
+	m->setParam(YSTRING("trace_id"),traceId);
     JsMessage* obj = new JsMessage(m,mutex(),true,true);
     obj->params().addParam(new ExpWrapper(this,protoName()));
     return obj;
