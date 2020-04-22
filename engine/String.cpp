@@ -2102,6 +2102,11 @@ const String& GenObject::toString() const
     return String::empty();
 }
 
+const String& GenObject::traceId() const
+{
+    return String::empty();
+}
+
 unsigned int String::encodeFlags(const TokenDict* tokens) const
 {
     unsigned int flags = 0;

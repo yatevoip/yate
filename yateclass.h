@@ -562,6 +562,169 @@ YATE_API void Alarm(const DebugEnabler* component, const char* info, int level, 
 YATE_API void Output(const char* format, ...) FORMAT_CHECK(1);
 
 /**
+ * Outputs a debug string with a trace ID.
+ * @param traceId The trace ID associated with this message
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+YATE_API void TraceDebug(const char* traceId, int level, const char* format, ...) FORMAT_CHECK(3);
+
+/**
+ * Outputs a debug string with a trace ID.
+ * @param traceId The trace ID associated with this message
+ * @param facility Facility that outputs the message
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+YATE_API void TraceDebug(const char* traceId, const char* facility, int level,
+            const char* format, ...) FORMAT_CHECK(4);
+
+/**
+ * Outputs a debug string with a trace ID.
+ * @param traceId The trace ID associated with this message
+ * @param local Pointer to a DebugEnabler holding current debugging settings
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+YATE_API void TraceDebug(const char* traceId, const DebugEnabler* local, int level,
+            const char* format, ...) FORMAT_CHECK(4);
+
+
+#if 0 /* for documentation generator */
+/**
+ * Outputs a debug string with a trace ID.
+ * @param obj Object from where to get trace ID
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void TraceDebugObj(GenObject* obj, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string with a trace ID.
+ * @param obj Object from where to get trace ID
+ * @param facility Facility that outputs the message
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void TraceDebugObj(GenObject* obj, const char* facility, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string with a trace ID.
+ * @param obj Object from where to get trace ID
+ * @param local Pointer to a DebugEnabler holding current debugging settings
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void TraceDebugObj(GenObject* obj, const DebugEnabler* local, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string only if trace ID is valid.
+ * @param obj Object from where to get trace ID
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void Trace(GenObject* obj, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string only if trace ID is valid.
+ * @param obj Object from where to get trace ID
+ * @param facility Facility that outputs the message
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void Trace(GenObject* obj, const char* facility, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string only if trace ID is valid.
+ * @param obj Object from where to get trace ID
+ * @param local Pointer to a DebugEnabler holding current debugging settings
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void Trace(GenObject* obj, const DebugEnabler* local, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string only if trace ID is valid.
+ * @param obj Object from where to get trace ID
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void TraceObj(GenObject* obj, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string only if trace ID is valid.
+ * @param obj Object from where to get trace ID
+ * @param facility Facility that outputs the message
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void TraceObj(GenObject* obj, const char* facility, int level, const char* format, ...);
+
+/**
+ * Outputs a debug string only if trace ID is valid.
+ * @param obj Object from where to get trace ID
+ * @param local Pointer to a DebugEnabler holding current debugging settings
+ * @param level The level of the message
+ * @param format A printf() style format string
+ */
+void TraceObj(GenObject* obj, const DebugEnabler* local, int level, const char* format, ...);
+
+#endif
+
+#define TraceDebugObj(pGenObj,...) \
+TraceDebug((!!(pGenObj)) ? (pGenObj)->traceId() : "",##__VA_ARGS__)
+
+#define Trace(traceId,...) \
+do { if (!TelEngine::null(traceId)) TraceDebug(traceId,##__VA_ARGS__); } while(false)
+
+#define TraceObj(pGenObj,...) \
+do { if (!!(pGenObj) && (pGenObj)->traceId()) TraceDebug((pGenObj)->traceId(),##__VA_ARGS__); } while (false)
+
+
+/**
+ * Outputs a debug string with trace ID and emits an alarm if a callback is installed
+ * @param traceId The trace ID associated with this message
+ * @param component Component that emits the alarm
+ * @param info Extra alarm information
+ * @param level The level of the alarm
+ * @param format A printf() style format string
+ */
+YATE_API void TraceAlarm(const char* traceId, const char* component, int level,
+            const char* format, ...) FORMAT_CHECK(4);
+
+/**
+ * Outputs a debug string with trace ID and emits an alarm if a callback is installed
+ * @param traceId The trace ID associated with this message
+ * @param component Pointer to a DebugEnabler holding component name and debugging settings
+ * @param level The level of the alarm
+ * @param format A printf() style format string
+ */
+YATE_API void TraceAlarm(const char* traceId, const DebugEnabler* component,
+            int level, const char* format, ...) FORMAT_CHECK(4);
+
+/**
+ * Outputs a debug string with trace ID and emits an alarm if a callback is installed
+ * @param traceId The trace ID associated with this message
+ * @param component Component that emits the alarm
+ * @param info Extra alarm information
+ * @param level The level of the alarm
+ * @param format A printf() style format string
+ */
+YATE_API void TraceAlarm(const char* traceId, const char* component, const char* info,
+            int level, const char* format, ...) FORMAT_CHECK(5);
+
+/**
+ * Outputs a debug string with trace ID and emits an alarm if a callback is installed
+ * @param traceId The trace ID associated with this message
+ * @param component Pointer to a DebugEnabler holding component name and debugging settings
+ * @param info Extra alarm information
+ * @param level The level of the alarm
+ * @param format A printf() style format string
+ */
+YATE_API void TraceAlarm(const char* traceId, const DebugEnabler* component,
+            const char* info, int level, const char* format, ...) FORMAT_CHECK(5);
+
+/**
  * This class is used as an automatic variable that logs messages on creation
  *  and destruction (when the instruction block is left or function returns).
  * IMPORTANT: the name is not copied so it should best be static.
@@ -879,6 +1042,12 @@ public:
      *  String) or some form of identification
      */
     virtual const String& toString() const;
+
+    /**
+     * Get the trace ID associated with this object
+     * @return The trace ID or an empty string
+     */
+    virtual const String& traceId() const;
 
     /**
      * Get a pointer to a derived class given that class name

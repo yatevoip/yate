@@ -431,6 +431,182 @@ void Alarm(const DebugEnabler* component, const char* info, int level, const cha
 	abort();
 }
 
+void TraceDebug(const char* traceId, int level, const char* format, ...)
+{
+    if (!s_debugging)
+	return;
+    if (level > s_debug || level < DebugMin)
+	return;
+    if (reentered())
+	return;
+    if (!format)
+	format = "";
+    char buf[OUT_HEADER_SIZE];
+    if (traceId)
+	::snprintf(buf,sizeof(buf),"<%s> Trace:%s ",dbg_level(level),traceId);
+    else
+	::sprintf(buf,"<%s> ",dbg_level(level));
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
+void TraceDebug(const char* traceId, const char* facility, int level, const char* format, ...)
+{
+    if (!s_debugging)
+	return;
+    if (level > s_debug || level < DebugMin)
+	return;
+    if (reentered())
+	return;
+    if (!format)
+	format = "";
+    char buf[OUT_HEADER_SIZE];
+    if (traceId)
+	::snprintf(buf,sizeof(buf),"<%s:%s> Trace:%s ",facility,dbg_level(level),traceId);
+    else
+	::snprintf(buf,sizeof(buf),"<%s:%s> ",facility,dbg_level(level));
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
+void TraceDebug(const char* traceId, const DebugEnabler* local, int level, const char* format, ...)
+{
+    if (!s_debugging)
+	return;
+    const char* facility = 0;
+    if (!local) {
+	if (level > s_debug || level < DebugMin)
+	    return;
+    }
+    else {
+	if (!local->debugAt(level))
+	    return;
+	facility = local->debugName();
+    }
+    if (reentered())
+	return;
+    if (!format)
+	format = "";
+    char buf[OUT_HEADER_SIZE];
+    if (facility) {
+	if (traceId)
+	    ::snprintf(buf,sizeof(buf),"<%s:%s> Trace:%s ",facility,dbg_level(level),traceId);
+	else
+	    ::snprintf(buf,sizeof(buf),"<%s:%s> ",facility,dbg_level(level));
+    }
+    else {
+	if (traceId)
+	    ::snprintf(buf,sizeof(buf),"<%s> Trace:%s ",dbg_level(level),traceId);
+	else
+	    ::sprintf(buf,"<%s> ",dbg_level(level));
+    }
+
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
+void TraceAlarm(const char* traceId, const char* component, int level, const char* format, ...)
+{
+    if (!format || level < DebugMin || reentered())
+	return;
+    if (TelEngine::null(component))
+	component = "unknown";
+    char buf[OUT_HEADER_SIZE];
+    if (traceId)
+	::snprintf(buf,sizeof(buf),"<%s:%s> Trace:%s ",component,dbg_level(level),traceId);
+    else
+	::snprintf(buf,sizeof(buf),"<%s:%s> ",component,dbg_level(level));
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va,component);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
+void TraceAlarm(const char* traceId, const DebugEnabler* component, int level, const char* format, ...)
+{
+    if (!format || level < DebugMin || reentered())
+	return;
+    const char* name = (component && !TelEngine::null(component->debugName()))
+	? component->debugName() : "unknown";
+    char buf[OUT_HEADER_SIZE];
+    if (traceId)
+	::snprintf(buf,sizeof(buf),"<%s:%s> Trace:%s ",name,dbg_level(level),traceId);
+    else
+	::snprintf(buf,sizeof(buf),"<%s:%s> ",name,dbg_level(level));
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va,name);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
+void TraceAlarm(const char* traceId, const char* component, const char* info, int level, const char* format, ...)
+{
+    if (!format || level < DebugMin || reentered())
+	return;
+    if (TelEngine::null(component))
+	component = "unknown";
+    char buf[OUT_HEADER_SIZE];
+       if (traceId)
+	::snprintf(buf,sizeof(buf),"<%s:%s> Trace:%s ",component,dbg_level(level),traceId);
+    else
+	::snprintf(buf,sizeof(buf),"<%s:%s> ",component,dbg_level(level));
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va,component,info);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
+void TraceAlarm(const char* traceId, const DebugEnabler* component, const char* info, int level, const char* format, ...)
+{
+    if (!format || level < DebugMin || reentered())
+	return;
+    const char* name = (component && !TelEngine::null(component->debugName()))
+	? component->debugName() : "unknown";
+    char buf[OUT_HEADER_SIZE];
+    if (traceId)
+	::snprintf(buf,sizeof(buf),"<%s:%s> Trace:%s ",name,dbg_level(level),traceId);
+    else
+	::snprintf(buf,sizeof(buf),"<%s:%s> ",name,dbg_level(level));
+    va_list va;
+    va_start(va,format);
+    ind_mux.lock();
+    dbg_output(level,buf,format,va,name,info);
+    ind_mux.unlock();
+    va_end(va);
+    if (s_abort && (level == DebugFail))
+	abort();
+}
+
 void abortOnBug()
 {
     if (s_abort)
