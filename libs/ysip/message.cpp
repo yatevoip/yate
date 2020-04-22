@@ -36,7 +36,7 @@ SIPMessage::SIPMessage(const SIPMessage& original)
       body(0), m_ep(0),
       m_valid(original.isValid()), m_answer(original.isAnswer()),
       m_outgoing(original.isOutgoing()), m_ack(original.isACK()),
-      m_cseq(-1), m_flags(original.getFlags())
+      m_cseq(-1), m_flags(original.getFlags()), m_dontSend(original.m_dontSend)
 {
     DDebug(DebugAll,"SIPMessage::SIPMessage(&%p) [%p]",
 	&original,this);
@@ -66,7 +66,8 @@ SIPMessage::SIPMessage(const SIPMessage& original)
 SIPMessage::SIPMessage(const char* _method, const char* _uri, const char* _version)
     : version(_version), method(_method), uri(_uri), code(0),
       body(0), m_ep(0), m_valid(true),
-      m_answer(false), m_outgoing(true), m_ack(false), m_cseq(-1), m_flags(-1)
+      m_answer(false), m_outgoing(true), m_ack(false), m_cseq(-1), m_flags(-1),
+      m_dontSend(false)
 {
     DDebug(DebugAll,"SIPMessage::SIPMessage('%s','%s','%s') [%p]",
 	_method,_uri,_version,this);
@@ -74,7 +75,8 @@ SIPMessage::SIPMessage(const char* _method, const char* _uri, const char* _versi
 
 SIPMessage::SIPMessage(SIPParty* ep, const char* buf, int len, unsigned int* bodyLen)
     : code(0), body(0), m_ep(ep), m_valid(false),
-      m_answer(false), m_outgoing(false), m_ack(false), m_cseq(-1), m_flags(-1)
+      m_answer(false), m_outgoing(false), m_ack(false), m_cseq(-1), m_flags(-1),
+      m_dontSend(false)
 {
     DDebug(DebugInfo,"SIPMessage::SIPMessage(%p,%d) [%p]\r\n------\r\n%s------",
 	buf,len,this,buf);
@@ -92,7 +94,8 @@ SIPMessage::SIPMessage(SIPParty* ep, const char* buf, int len, unsigned int* bod
 SIPMessage::SIPMessage(const SIPMessage* message, int _code, const char* _reason)
     : code(_code), body(0),
       m_ep(0), m_valid(false),
-      m_answer(true), m_outgoing(true), m_ack(false), m_cseq(-1), m_flags(-1)
+      m_answer(true), m_outgoing(true), m_ack(false), m_cseq(-1), m_flags(-1),
+      m_dontSend(false)
 {
     DDebug(DebugAll,"SIPMessage::SIPMessage(%p,%d,'%s') [%p]",
 	message,_code,_reason,this);
@@ -121,7 +124,8 @@ SIPMessage::SIPMessage(const SIPMessage* message, int _code, const char* _reason
 SIPMessage::SIPMessage(const SIPMessage* original, const SIPMessage* answer)
     : method("ACK"), code(0),
       body(0), m_ep(0), m_valid(false),
-      m_answer(false), m_outgoing(true), m_ack(true), m_cseq(-1), m_flags(-1)
+      m_answer(false), m_outgoing(true), m_ack(true), m_cseq(-1), m_flags(-1),
+      m_dontSend(false)
 {
     DDebug(DebugAll,"SIPMessage::SIPMessage(%p,%p) [%p]",original,answer,this);
     if (!(original && original->isValid()))

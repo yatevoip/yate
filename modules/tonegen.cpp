@@ -182,6 +182,8 @@ public:
 protected:
     void statusModule(String& str);
     void statusParams(String& str);
+    bool canStopCall() const
+	{ return true; }
 private:
     AttachHandler* m_handler;
 };
@@ -1109,6 +1111,10 @@ bool ToneGenDriver::msgExecute(Message& msg, String& dest)
 {
     CallEndpoint* ch = YOBJECT(CallEndpoint,msg.userData());
     if (ch) {
+	if (msg.getBoolValue(YSTRING("stop_call"),false)) {
+	    msg.setParam(YSTRING("error"),"stopped_call");
+	    return false;
+	}
 	ToneChan *tc = new ToneChan(dest,msg["lang"]);
 	tc->initChan();
 	tc->setChanParams(msg);
@@ -1130,6 +1136,7 @@ bool ToneGenDriver::msgExecute(Message& msg, String& dest)
 	m.clearParam(YSTRING("id"));
 	m.setParam("module",name());
 	m.setParam("cdrtrack",String::boolText(false));
+	m.copyParam(msg,YSTRING("stop_call"));
 	m.copyParam(msg,YSTRING("called"));
 	m.copyParam(msg,YSTRING("caller"));
 	m.copyParam(msg,YSTRING("callername"));

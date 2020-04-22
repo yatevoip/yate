@@ -315,6 +315,19 @@ public:
 	{ return m_flags; }
 
     /**
+     * Get value of flag that specifies the message is not to be sent on wire
+     * @return The value of the flag
+     */
+    inline bool dontSend() const
+	{ return m_dontSend; }
+
+    /**
+     * Set flag that specifies the message is not to be sent on wire
+     * @param val Value of the flag to send
+     */
+    inline void dontSend(bool val)
+	{ m_dontSend = val; }
+    /**
      * Find a header line by name
      * @param name Name of the header to locate
      * @return A pointer to the first matching header line or 0 if not found
@@ -523,6 +536,7 @@ protected:
     mutable DataBlock m_data;
     String m_authUser;
     String m_authPass;
+    bool m_dontSend;
 private:
     SIPMessage(); // no, thanks
 };

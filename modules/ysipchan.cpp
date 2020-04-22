@@ -1009,6 +1009,8 @@ public:
 	{ return callid == m_dialog &&
 	    m_dialog.fromTag(isOutgoing()) == fromTag &&
 	    m_dialog.toTag(isOutgoing()) == toTag; }
+    inline bool stopOCall() const
+	{ return m_stopOCall; }
     // Build and add a callid parameter to a list
     static inline void addCallId(NamedList& nl, const String& dialog,
 	const String& fromTag, const String& toTag) {
@@ -1099,6 +1101,7 @@ private:
     // media parameters before we sent a reINVITE
     NamedList m_revert;
     bool m_silent;                       // Silently discard SIP dialog
+    bool m_stopOCall;
 };
 
 class YateSIPGenerate : public GenObject
@@ -1164,6 +1167,8 @@ protected:
     // Setup a listener from config
     void setupListener(const String& name, const NamedList& params, bool isGeneral,
 	const NamedList& defs = NamedList::empty());
+    bool canStopCall() const
+	{ return true; }
 private:
     bool onHelp(Message& msg);
     // Add status methods
@@ -3523,12 +3528,14 @@ int YateSIPTCPTransport::process()
 		SIPMessage* msg = static_cast<SIPMessage*>(o->get());
 		if (s_printMsg && (o != first || m_sent < 0))
 		    printSendMsg(msg);
-		if (o != first || m_sent <= 0)
-		    buf += msg->getBuffer();
-		else {
-		    int remaining = msg->getBuffer().length() - m_sent;
-		    if (remaining > 0)
-			buf.assign(((char*)msg->getBuffer().data()) + m_sent,remaining);
+		if (!msg->dontSend()) {
+		    if (o != first || m_sent <= 0)
+			buf += msg->getBuffer();
+		    else {
+			int remaining = msg->getBuffer().length() - m_sent;
+			if (remaining > 0)
+			    buf.assign(((char*)msg->getBuffer().data()) + m_sent,remaining);
+		    }
 		}
 	    }
 	    if (buf.length()) {
@@ -3812,10 +3819,12 @@ bool YateSIPTCPTransport::sendPending(const Time& time, bool& sent)
 		return false;
 	    break;
 	}
+	if (msg->dontSend())
+	    break;
 	const DataBlock& buf = msg->getBuffer();
-	sent = true;
+	sent = !msg->dontSend();
 	int len = buf.length();
-	if (len > m_sent) {
+	if (sent && len > m_sent) {
 	    char* b = (char*)(buf.data());
 	    len -= m_sent;
 	    int wr = m_sock->writeData(b + m_sent,len);
@@ -4398,6 +4407,11 @@ bool YateUDPParty::transmit(SIPEvent* event)
 	Lock lck(m_transport);
 	if (s_printMsg)
 	    m_transport->printSendMsg(msg,&m_addr);
+	if (msg->dontSend()) {
+	    if (event->getTransaction())
+		event->getTransaction()->setSilent();
+	    return true;
+	}
 	return m_transport->send(msg->getBuffer().data(),msg->getBuffer().length(),m_addr);
     }
     String tmp;
@@ -4485,8 +4499,12 @@ bool YateTCPParty::transmit(SIPEvent* event)
     const SIPMessage* msg = event->getMessage();
     if (!msg)
 	return false;
-    if (m_transport)
-	return m_transport->send(event);
+    if (m_transport) {
+	bool ok = m_transport->send(event);
+	if (msg->dontSend() && event->getTransaction())
+	    event->getTransaction()->setSilent();
+	return ok;
+    }
     String tmp;
     getMsgLine(tmp,msg);
     Debug(&plugin,DebugWarn,"YateTCPParty no transport to send %s [%p]",
@@ -6049,7 +6067,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
       m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
-      m_revert(""), m_silent(false)
+      m_revert(""), m_silent(false), m_stopOCall(false)
 {
     m_ipv6 = s_ipv6;
     setSdpDebug(this,this);
@@ -6247,7 +6265,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
       m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
-      m_revert(""), m_silent(false)
+      m_revert(""), m_silent(false), m_stopOCall(msg.getBoolValue(YSTRING("stop_call")))
 {
     Debug(this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,'%s') [%p]",
 	&msg,uri.c_str(),this);
@@ -6316,6 +6334,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     if (!m_party && sips() && !haveTransParams(msg,"o"))
 	setParty(msg,true,"o",m_uri.getHost(),m_uri.getPort(),this);
     SIPMessage* m = new SIPMessage("INVITE",m_uri);
+    m->dontSend(m_stopOCall);
     setSipParty(m,line,true,msg.getValue("host"),msg.getIntValue("port"));
     if (!m->getParty()) {
 	String tmp;
@@ -6579,7 +6598,7 @@ void YateSIPConnection::hangup()
 	    break;
 	case Outgoing:
 	case Ringing:
-	    if (!m_silent && m_cancel && m_tr) {
+	    if (!m_silent && !m_stopOCall && m_cancel && m_tr) {
 		SIPMessage* m = new SIPMessage("CANCEL",m_uri);
 		setSipParty(m,plugin.findLine(m_line),true,m_host,m_port);
 		if (!m->getParty())
@@ -9289,6 +9308,10 @@ bool SIPDriver::msgExecute(Message& msg, String& dest)
 	return false;
     }
     YateSIPConnection* conn = new YateSIPConnection(msg,dest,msg.getValue(YSTRING("id")));
+    if (msg.getBoolValue(YSTRING("stop_call"),false)) {
+	conn->destruct();
+	return true;
+    }
     conn->initChan();
     if (conn->getTransaction()) {
 	CallEndpoint* ch = YOBJECT(CallEndpoint,msg.userData());

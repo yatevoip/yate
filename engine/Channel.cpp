@@ -1499,8 +1499,13 @@ bool Driver::received(Message &msg, int id)
 	if (!canAccept(false))
 	    return false;
 	if (dest.startSkip(m_prefix,false) ||
-	    (dest.startSkip("line/",false) && hasLine(msg.getValue(YSTRING("line")))))
+	    (dest.startSkip("line/",false) && hasLine(msg.getValue(YSTRING("line"))))) {
+	    if (msg.getBoolValue(YSTRING("stop_call"),false) && !canStopCall()) {
+		msg.setParam(YSTRING("error"),"stopped_call");
+		return false;
+	    }
 	    return msgExecute(msg,dest);
+	}
 	return false;
     }
 

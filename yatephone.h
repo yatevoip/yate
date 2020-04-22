@@ -2430,6 +2430,13 @@ protected:
     virtual void loadLimits();
 
     /**
+     * Module is able to simulate a call without generating anything at protocol layer
+     * @return True if module is able
+     */
+    virtual bool canStopCall() const
+	{ return false; }
+
+    /**
      * Set if this driver is for dynamic (variable number) channels
      * @param variable True if the channels are dynamic, false for fixed
      */

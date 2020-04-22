@@ -4288,6 +4288,10 @@ bool YJGDriver::received(Message& msg, int id)
 	String callto(msg.getValue("callto"));
 	if (!callto.startSkip("jabber/",false))
 	    return Driver::received(msg,id);
+	if (msg.getBoolValue(YSTRING("stop_call"),false) && !canStopCall()) {
+	    msg.setParam(YSTRING("error"),"stopped_call");
+	    return true;
+	}
 	return msgExecute(msg,callto);
     }
     if (id == Halt) {

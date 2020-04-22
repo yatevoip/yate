@@ -123,6 +123,8 @@ public:
     virtual bool msgExecute(Message& msg, String& dest);
 protected:
     void statusParams(String& str);
+    bool canStopCall() const
+	{ return true; }
 private:
     AttachHandler* m_handler;
 };
@@ -1130,6 +1132,10 @@ bool WaveFileDriver::msgExecute(Message& msg, String& dest)
     unsigned int maxlen = msg.getIntValue("maxlen");
     CallEndpoint* ch = YOBJECT(CallEndpoint,msg.userData());
     if (ch) {
+	if (msg.getBoolValue(YSTRING("stop_call"),false)) {
+	    msg.setParam(YSTRING("error"),"stopped_call");
+	    return false;
+	}
 	Debug(this,DebugInfo,"%s wave file '%s'", (meth ? "Record to" : "Play from"),
 	    dest.matchString(2).c_str());
 	WaveChan *c = new WaveChan(dest.matchString(2),meth,maxlen,msg,msg.getParam("callto"));
@@ -1159,6 +1165,7 @@ bool WaveFileDriver::msgExecute(Message& msg, String& dest)
     m.copyParam(msg,YSTRING("called"));
     m.copyParam(msg,YSTRING("caller"));
     m.copyParam(msg,YSTRING("callername"));
+    m.copyParam(msg,YSTRING("stop_call"));
     String callto(msg.getValue(YSTRING("direct")));
     if (callto.null()) {
 	const char *targ = msg.getValue(YSTRING("target"));

@@ -31,6 +31,9 @@ public:
     ~DumbDriver();
     virtual void initialize();
     virtual bool msgExecute(Message& msg, String& dest);
+protected:
+    bool canStopCall() const
+	{ return true; }
 };
 
 INIT_PLUGIN(DumbDriver);
@@ -71,6 +74,10 @@ bool DumbDriver::msgExecute(Message& msg, String& dest)
 {
     CallEndpoint *dd = YOBJECT(CallEndpoint,msg.userData());
     if (dd) {
+	if (msg.getBoolValue(YSTRING("stop_call"),false)) {
+	    msg.setParam(YSTRING("error"),"stopped_call");
+	    return false;
+	}
 	DumbChannel *c = new DumbChannel(dest,msg,true);
 	c->initChan();
 	if (dd->connect(c)) {
@@ -111,6 +118,7 @@ bool DumbDriver::msgExecute(Message& msg, String& dest)
     m.copyParam(msg,"callername");
     m.copyParam(msg,"maxcall");
     m.copyParam(msg,"timeout");
+    m.copyParam(msg,YSTRING("stop_call"));
     m.copyParams(msg,msg.getValue("copyparams"));
 
     const String& callto = msg["direct"];
