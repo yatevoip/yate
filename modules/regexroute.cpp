@@ -542,14 +542,46 @@ static void setDefault(Regexp& reg)
     }
 }
 
+
+#define TRACE_RULE(dbgLevel,traceId,lst,args,...) \
+do { \
+    Trace(traceId,"Regexroute",dbgLevel,args,##__VA_ARGS__); \
+    if (lst) { \
+	String* tmp = new String(); \
+	tmp->printf(args,##__VA_ARGS__); \
+	lst->append(tmp); \
+    } \
+} while (false)
+
+#define TRACE_DBG(dbgLevel,traceId,lst,args,...) \
+do { \
+    TraceDebug(traceId,"Regexroute",dbgLevel,args,##__VA_ARGS__); \
+    if (lst) { \
+	String* tmp = new String(); \
+	tmp->printf(args,##__VA_ARGS__); \
+	lst->append(tmp); \
+    } \
+} while (false)
+
+#define TRACE_DBG_ONLY(dbgLevel,traceId,lst,args,...) \
+do { \
+    TraceDebug(traceId,dbgLevel,args,##__VA_ARGS__); \
+    if (lst) { \
+	String* tmp = new String(); \
+	tmp->printf(args,##__VA_ARGS__); \
+	lst->append(tmp); \
+    } \
+} while (false)
+
 // helper function to process one match attempt
-static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& context, unsigned int rule)
+static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& context,
+        unsigned int rule, const String& trace = String::empty(), ObjList* traceLst = 0)
 {
     if (reg.startsWith("${")) {
 	// handle special matching by param ${paramname}regexp
 	int p = reg.find('}');
 	if (p < 3) {
-	    Debug("RegexRoute",DebugWarn,"Invalid parameter match '%s' in rule #%u in context '%s'",
+	    TRACE_DBG(DebugWarn,trace,traceLst,"Invalid parameter match '%s' in rule #%u in context '%s'",
 		reg.c_str(),rule,context.c_str());
 	    return false;
 	}
@@ -567,7 +599,7 @@ static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& con
 	}
 	setDefault(reg);
 	if (match.null() || reg.null()) {
-	    Debug("RegexRoute",DebugWarn,"Missing parameter or rule in rule #%u in context '%s'",
+	    TRACE_DBG(DebugWarn,trace,traceLst,"Missing parameter or rule in rule #%u in context '%s'",
 		rule,context.c_str());
 	    return false;
 	}
@@ -579,7 +611,7 @@ static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& con
 	// handle special matching by param $(function)regexp
 	int p = reg.find(')');
 	if (p < 3) {
-	    Debug("RegexRoute",DebugWarn,"Invalid function match '%s' in rule #%u in context '%s'",
+	    TRACE_DBG(DebugWarn,trace,traceLst,"Invalid function match '%s' in rule #%u in context '%s'",
 		reg.c_str(),rule,context.c_str());
 	    return false;
 	}
@@ -588,7 +620,7 @@ static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& con
 	reg.trimBlanks();
 	setDefault(reg);
 	if (reg.null()) {
-	    Debug("RegexRoute",DebugWarn,"Missing rule in rule #%u in context '%s'",
+	    TRACE_DBG(DebugWarn,trace,traceLst,"Missing rule in rule #%u in context '%s'",
 		rule,context.c_str());
 	    return false;
 	}
@@ -615,14 +647,17 @@ enum BlockState {
 
 // process one context, can call itself recursively
 static bool oneContext(Message &msg, String &str, const String &context, String &ret,
+    const String& trace = String::empty(), int traceLevel = DebugNote, ObjList* traceLst = 0,
     bool warn = false, int depth = 0)
 {
     if (context.null())
 	return false;
     if (depth > s_maxDepth) {
-	Debug("RegexRoute",DebugWarn,"Possible loop detected, current context '%s'",context.c_str());
+	TRACE_DBG(DebugWarn,trace,traceLst,"Possible loop detected, current context '%s'",context.c_str());
 	return false;
     }
+
+    TRACE_RULE(traceLevel,trace,traceLst,"Searching match for %s",str.c_str());
     NamedList *l = s_cfg.getSection(context);
     if (l) {
 	unsigned int blockDepth = 0;
@@ -637,7 +672,7 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 	    Regexp reg(n->name(),s_extended,s_insensitive);
 	    if (reg.startSkip("}",false)) {
 		if (!blockDepth) {
-		    Debug("RegexRoute",DebugWarn,"Got '}' outside block in line #%u in context '%s'",
+		    TRACE_DBG(DebugWarn,trace,traceLst,"Got '}' outside block in line #%u in context '%s'",
 			i+1,context.c_str());
 		    continue;
 		}
@@ -651,7 +686,7 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 	    if (s_blockStart.matches(*n)) {
 		// start of a new block
 		if (blockDepth >= BLOCK_STACK) {
-		    Debug("RegexRoute",DebugWarn,"Block stack overflow in line #%u in context '%s'",
+		    TRACE_DBG(DebugWarn,trace,traceLst,"Block stack overflow in line #%u in context '%s'",
 			i+1,context.c_str());
 		    return false;
 		}
@@ -679,13 +714,13 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 	    bool ok;
 	    do {
 		match = str;
-		ok = oneMatch(msg,reg,match,context,i+1);
+		ok = oneMatch(msg,reg,match,context,i+1,trace,traceLst);
 		if (ok) {
 		    if (val.startSkip("or")) {
 			do {
 			    int p = val.find('=');
 			    if (p < 0) {
-				Debug("RegexRoute",DebugWarn,"Malformed 'or' rule #%u in context '%s'",
+				TRACE_DBG(DebugWarn,trace,traceLst,"Malformed 'or' rule #%u in context '%s'",
 				    i+1,context.c_str());
 				ok = false;
 				break;
@@ -713,11 +748,13 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 			    continue;
 			}
 		    }
-		    Debug("RegexRoute",DebugWarn,"Missing 'if' in rule #%u in context '%s'",
+		    TRACE_DBG(DebugWarn,trace,traceLst,"Missing 'if' in rule #%u in context '%s'",
 			i+1,context.c_str());
 		    ok = false;
 		}
 	    } while (ok);
+	    TRACE_RULE(traceLevel,trace,traceLst,"Matched:%s %s:%d - %s=%s",
+		     String::boolText(ok),context.c_str(),i,n->name().c_str(),n->safe());
 	    if (!ok)
 		continue;
 
@@ -747,7 +784,7 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 		if (blockDepth)
 		    blockStack[blockDepth-1] = BlockRun;
 		else
-		    Debug("RegexRoute",DebugWarn,"Got '{' outside block in line #%u in context '%s'",
+		    TRACE_DBG(DebugWarn,trace,traceLst,"Got '{' outside block in line #%u in context '%s'",
 			i+1,context.c_str());
 		continue;
 	    }
@@ -796,13 +833,13 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 		((val.startSkip("@goto") || val.startSkip("@jump")) && !(warn = false))) {
 		NDebug("RegexRoute",DebugAll,"Jumping to context '%s' by rule #%u '%s'",
 		    val.c_str(),i+1,n->name().c_str());
-		return oneContext(msg,str,val,ret,warn,depth+1);
+		return oneContext(msg,str,val,ret,trace,traceLevel,traceLst,warn,depth+1);
 	    }
 	    else if (val.startSkip("include") || val.startSkip("call") ||
 		((val.startSkip("@include") || val.startSkip("@call")) && !(warn = false))) {
 		NDebug("RegexRoute",DebugAll,"Including context '%s' by rule #%u '%s'",
 		    val.c_str(),i+1,n->name().c_str());
-		if (oneContext(msg,str,val,ret,warn,depth+1)) {
+		if (oneContext(msg,str,val,ret,trace,traceLevel,traceLst,warn,depth+1)) {
 		    DDebug("RegexRoute",DebugAll,"Returning true from context '%s'", context.c_str());
 		    return true;
 		}
@@ -834,15 +871,30 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 	    }
 	}
 	if (blockDepth)
-	    Debug("RegexRoute",DebugWarn,"There are %u blocks still open at end of context '%s'",
+	    TRACE_DBG(DebugWarn,trace,traceLst,"There are %u blocks still open at end of context '%s'",
 		blockDepth,context.c_str());
 	DDebug("RegexRoute",DebugAll,"Returning false at end of context '%s'", context.c_str());
     }
     else if (warn)
-	Debug("RegexRoute",DebugWarn,"Missing target context '%s'",context.c_str());
+	TRACE_DBG(DebugWarn,trace,traceLst,"Missing target context '%s'",context.c_str());
     return false;
 }
 
+static inline void dumpTraceToMsg(Message& msg, ObjList*& lst)
+{
+    if (!lst)
+	return;
+    unsigned int count = msg.getIntValue(YSTRING("trace_msg_count"),0);
+    static String s_tracePref = "trace_msg_";
+    for (ObjList* o = lst->skipNull(); o; o = o->skipNext()) {
+	String* s = static_cast<String*>(o->get());
+	if (TelEngine::null(s))
+	    continue;
+	msg.setParam(s_tracePref + String(count++),*s);
+    }
+    msg.setParam(YSTRING("trace_msg_count"),String(count));
+    TelEngine::destruct(lst);
+}
 
 bool RouteHandler::received(Message &msg)
 {
@@ -851,15 +903,20 @@ bool RouteHandler::received(Message &msg)
     if (called.null())
 	return false;
     const char *context = msg.getValue(YSTRING("context"),"default");
+    const String& traceID = msg[YSTRING("trace_id")];
+    int traceLvl = msg.getIntValue(YSTRING("trace_lvl"),DebugNote,DebugGoOn,DebugAll);
+    ObjList* traceLst = msg.getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0;
     Lock lock(s_mutex);
-    if (oneContext(msg,called,context,msg.retValue())) {
-	Debug(DebugInfo,"Routing %s to '%s' in context '%s' via '%s' in " FMT64U " usec",
+    if (oneContext(msg,called,context,msg.retValue(),traceID,traceLvl,traceLst)) {
+	TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Routing %s to '%s' in context '%s' via '%s' in " FMT64U " usec",
 	    msg.getValue(YSTRING("route_type"),"call"),called.c_str(),context,
 	    msg.retValue().c_str(),Time::now()-tmr);
+	dumpTraceToMsg(msg,traceLst);
 	return true;
     }
-    Debug(DebugInfo,"Could not route %s to '%s' in context '%s', wasted " FMT64U " usec",
+    TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Could not route %s to '%s' in context '%s', wasted " FMT64U " usec",
 	msg.getValue(YSTRING("route_type"),"call"),called.c_str(),context,Time::now()-tmr);
+    dumpTraceToMsg(msg,traceLst);
     return false;
 };
 
@@ -876,18 +933,23 @@ bool PrerouteHandler::received(Message &msg)
 	return false;
 
     String ret;
+    const String& traceID = msg[YSTRING("trace_id")];
+    int traceLvl = msg.getIntValue(YSTRING("trace_lvl"),DebugNote,DebugGoOn,DebugAll);
+    ObjList* traceLst = msg.getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0;
     Lock lock(s_mutex);
-    if (oneContext(msg,caller,"contexts",ret)) {
-	Debug(DebugInfo,"Classifying caller '%s' in context '%s' in " FMT64 " usec",
+    if (oneContext(msg,caller,"contexts",ret,traceID,traceLvl,traceLst)) {
+	TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Classifying caller '%s' in context '%s' in " FMT64 " usec",
 	    caller.c_str(),ret.c_str(),Time::now()-tmr);
 	if (ret == YSTRING("-") || ret == YSTRING("error"))
 	    msg.retValue() = ret;
 	else
 	    msg.setParam("context",ret);
+	dumpTraceToMsg(msg,traceLst);
 	return true;
     }
-    Debug(DebugInfo,"Could not classify call from '%s', wasted " FMT64 " usec",
+    TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Could not classify call from '%s', wasted " FMT64 " usec",
 	caller.c_str(),Time::now()-tmr);
+    dumpTraceToMsg(msg,traceLst);
     return false;
 };
 
@@ -900,10 +962,18 @@ bool GenericHandler::received(Message &msg)
 	what = msg.getValue(what);
     else
 	what = *this;
+    const String& traceID = msg[YSTRING("trace_id")];
+    int traceLvl = msg.getIntValue(YSTRING("trace_lvl"),DebugNote,DebugGoOn,DebugAll);
+    ObjList* traceLst = msg.getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0;
     Lock lock(s_mutex);
-    return oneContext(msg,what,m_context,msg.retValue());
+    bool ok = oneContext(msg,what,m_context,msg.retValue(),traceID,traceLvl,traceLst);
+    dumpTraceToMsg(msg,traceLst);
+    return ok;
 }
 
+#undef TRACE_DBG_ONLY
+#undef TRACE_DBG
+#undef TRACE
 
 bool StatusHandler::received(Message &msg)
 {
