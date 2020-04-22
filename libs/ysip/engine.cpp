@@ -340,7 +340,7 @@ void SIPEngine::processEvent(SIPEvent *event)
 	if (event->isIncoming()) {
 	    if ((event->getState() == SIPTransaction::Trying) &&
 		!event->getMessage()->isAnswer()) {
-		Debug(this,DebugInfo,"Rejecting unhandled request '%s' in event %p [%p]",
+		TraceDebugObj(event,this,DebugInfo,"Rejecting unhandled request '%s' in event %p [%p]",
 		    event->getMessage()->method.c_str(),event,this);
 		event->getTransaction()->setResponse(405);
 	    }

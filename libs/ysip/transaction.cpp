@@ -69,6 +69,13 @@ SIPTransaction::SIPTransaction(SIPMessage* message, SIPEngine* engine, bool outg
     m_invite = (getMethod() == YSTRING("INVITE"));
     m_state = Initial;
     m_transCount = outgoing ? m_engine->getReqTransCount() : m_engine->getRspTransCount();
+    if (!outgoing) {
+	m_engine->allocTraceId(m_traceId);
+	m_firstMessage->msgTraceId = m_traceId;
+	m_engine->traceMsg(m_firstMessage,true);
+    }
+    else
+      m_traceId = m_firstMessage->msgTraceId;
     m_engine->append(this);
 }
 
@@ -81,7 +88,7 @@ SIPTransaction::SIPTransaction(SIPTransaction& original, SIPMessage* answer)
       m_pending(0), m_engine(original.m_engine),
       m_branch(original.m_branch), m_callid(original.m_callid), m_tag(original.m_tag),
       m_private(0), m_autoChangeParty(original.m_autoChangeParty),
-      m_autoAck(original.m_autoAck), m_silent(original.m_silent)
+      m_autoAck(original.m_autoAck), m_silent(original.m_silent), m_traceId(original.traceId())
 {
     DDebug(getEngine(),DebugAll,"SIPTransaction::SIPTransaction(&%p,%p) [%p]",
 	&original,answer,this);
@@ -127,7 +134,7 @@ SIPTransaction::SIPTransaction(const SIPTransaction& original, const String& tag
       m_pending(0), m_engine(original.m_engine),
       m_branch(original.m_branch), m_callid(original.m_callid), m_tag(tag),
       m_private(0), m_autoChangeParty(original.m_autoChangeParty),
-      m_autoAck(original.m_autoAck), m_silent(original.m_silent)
+      m_autoAck(original.m_autoAck), m_silent(original.m_silent), m_traceId(original.traceId())
 {
     if (m_firstMessage)
 	m_firstMessage->ref();
@@ -186,7 +193,7 @@ bool SIPTransaction::changeState(int newstate)
     if ((newstate < 0) || (newstate == m_state))
 	return false;
     if (m_state == Invalid) {
-	Debug(getEngine(),DebugWarn,"SIPTransaction is already invalid [%p]",this);
+	TraceDebugObj(this,getEngine(),DebugWarn,"SIPTransaction is already invalid [%p]",this);
 	return false;
     }
     DDebug(getEngine(),DebugAll,"SIPTransaction state changed from %s to %s [%p]",
@@ -259,7 +266,7 @@ void SIPTransaction::setTimeout(u_int64_t delay, unsigned int count)
     m_timeout = (count && delay) ? Time::now() + delay : 0;
 #ifdef DEBUG
     if (m_timeout)
-	Debug(getEngine(),DebugAll,"SIPTransaction new %d timeouts initially " FMT64U " usec apart [%p]",
+	TraceDebugObj(this,getEngine(),DebugAll,"SIPTransaction new %d timeouts initially " FMT64U " usec apart [%p]",
 	    m_timeouts,m_delay,this);
 #endif
 }
@@ -330,7 +337,7 @@ SIPEvent* SIPTransaction::getEvent(bool pendingOnly, u_int64_t time)
 	    changeState(Invalid);
 	    return e;
 	case Invalid:
-	    Debug(getEngine(),DebugFail,"SIPTransaction::getEvent in invalid state [%p]",this);
+	    TraceDebugObj(this,getEngine(),DebugFail,"SIPTransaction::getEvent in invalid state [%p]",this);
 	    break;
     }
     return e;
@@ -339,7 +346,7 @@ SIPEvent* SIPTransaction::getEvent(bool pendingOnly, u_int64_t time)
 void SIPTransaction::setResponse(SIPMessage* message)
 {
     if (m_outgoing) {
-	Debug(getEngine(),DebugWarn,"SIPTransaction::setResponse(%p) in client mode [%p]",message,this);
+	TraceDebugObj(this,getEngine(),DebugWarn,"SIPTransaction::setResponse(%p) in client mode [%p]",message,this);
 	return;
     }
     Lock lock(m_engine);
@@ -383,7 +390,7 @@ bool SIPTransaction::setResponse() const
 bool SIPTransaction::setResponse(int code, const char* reason)
 {
     if (m_outgoing) {
-	Debug(getEngine(),DebugWarn,"SIPTransaction::setResponse(%d,'%s') in client mode [%p]",code,reason,this);
+	TraceDebugObj(this,getEngine(),DebugWarn,"SIPTransaction::setResponse(%d,'%s') in client mode [%p]",code,reason,this);
 	return false;
     }
     if (!setResponse()) {
@@ -425,7 +432,7 @@ bool SIPTransaction::setAcknowledge(MimeBody* ackBody)
 void SIPTransaction::requestAuth(const String& realm, const String& domain, bool stale, bool proxy)
 {
     if (m_outgoing) {
-	Debug(getEngine(),DebugWarn,"SIPTransaction::requestAuth() in client mode [%p]",this);
+	TraceDebugObj(this,getEngine(),DebugWarn,"SIPTransaction::requestAuth() in client mode [%p]",this);
 	return;
     }
     switch (m_state) {
@@ -484,7 +491,7 @@ SIPTransaction::Processed SIPTransaction::processMessage(SIPMessage* message, co
 #ifdef SIP_STRICT
 		return NoMatch;
 #else
-		Debug(getEngine(),DebugNote,"Received non-branch ACK to non-2xx response! (sender bug)");
+		TraceDebugObj(this,getEngine(),DebugNote,"Received non-branch ACK to non-2xx response! (sender bug)");
 #endif
 	    DDebug(getEngine(),DebugAll,"SIPTransaction found non-branch ACK response to our 2xx");
 	}
@@ -495,7 +502,7 @@ SIPTransaction::Processed SIPTransaction::processMessage(SIPMessage* message, co
 #ifdef SIP_STRICT
 		return NoMatch;
 #else
-		Debug(getEngine(),DebugNote,"Received branch ACK to 2xx response! (sender bug)");
+		TraceDebugObj(this,getEngine(),DebugNote,"Received branch ACK to 2xx response! (sender bug)");
 #endif
 	}
     }
@@ -526,7 +533,7 @@ SIPTransaction::Processed SIPTransaction::processMessage(SIPMessage* message, co
 		if (sc > 0) {
 		    tmp.assign(tmp,sc);
 		    if (tmp == message->uri) {
-			Debug(getEngine(),DebugMild,"Received no-branch ACK with lost URI tags! (sender bug)");
+			TraceDebugObj(this,getEngine(),DebugMild,"Received no-branch ACK with lost URI tags! (sender bug)");
 			break;
 		    }
 		}
@@ -536,7 +543,7 @@ SIPTransaction::Processed SIPTransaction::processMessage(SIPMessage* message, co
 		    tmp.assign(tmp,sc);
 		    sc = message->uri.find('@');
 		    if ((sc > 0) && (tmp == message->uri.substr(0,sc))) {
-			Debug(getEngine(),DebugMild,"Received no-branch ACK with only user matching! (sender bug)");
+			TraceDebugObj(this,getEngine(),DebugMild,"Received no-branch ACK with only user matching! (sender bug)");
 			break;
 		    }
 		}
@@ -568,7 +575,7 @@ SIPTransaction::Processed SIPTransaction::processMessage(SIPMessage* message, co
 			m_tag.c_str(),this);
 		}
 		else
-		    Debug(getEngine(),DebugMild,"Received To tag in 100 answer! (sender bug)");
+		    TraceDebugObj(this,getEngine(),DebugMild,"Received To tag in 100 answer! (sender bug)");
 	    }
 	}
 	else if (!ns) {
@@ -596,6 +603,9 @@ SIPTransaction::Processed SIPTransaction::processMessage(SIPMessage* message, co
 
 void SIPTransaction::processMessage(SIPMessage* message)
 {
+    message->msgTraceId = m_traceId;
+    if (!message->isOutgoing())
+	getEngine()->traceMsg(message,true);
     if (isOutgoing())
 	processClientMessage(message,m_state);
     else
@@ -770,7 +780,7 @@ void SIPTransaction::msgTransmitFailed(SIPMessage* msg)
 	    // Non reliable: terminate if this is the last attempt
 	    if ((msg->getParty() && msg->getParty()->isReliable()) ||
 		    m_timeouts >= getTransCount()) {
-		Debug(getEngine(),DebugInfo,
+		TraceDebugObj(this,getEngine(),DebugInfo,
 		    "SIPTransaction send failed state=%s: clearing [%p]",
 		    stateName(m_state),this);
 		m_response = 500;
@@ -787,7 +797,7 @@ void SIPTransaction::msgTransmitFailed(SIPMessage* msg)
 	    return;
     }
     // Avoid party retry
-    Debug(getEngine(),DebugAll,
+    TraceDebugObj(this,getEngine(),DebugAll,
 	"SIPTransaction send failed state=%s resetting msg %p party [%p]",
 	stateName(m_state),msg,this);
     msg->setParty();

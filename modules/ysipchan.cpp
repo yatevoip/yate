@@ -204,10 +204,10 @@ protected:
 class YateSIPPartyHolder : public ProtocolHolder
 {
 public:
-    inline YateSIPPartyHolder(DebugEnabler* enabler, Mutex* mutex = 0)
+    inline YateSIPPartyHolder(DebugEnabler* enabler, Mutex* mutex = 0, const String& traceId = String::empty())
 	: ProtocolHolder(Udp),
 	m_party(0), m_partyMutex(mutex), m_sips(false),	m_transLocalPort(0), m_transRemotePort(0),
-	m_enabler(enabler)
+	m_enabler(enabler), m_traceId(traceId)
 	{}
     virtual ~YateSIPPartyHolder()
 	{ setParty(); }
@@ -284,6 +284,7 @@ protected:
 
 private:
     DebugEnabler* m_enabler;
+    String m_traceId;
 };
 
 // Base class for listeners (need binding)
@@ -388,7 +389,7 @@ public:
     void printSendMsg(const SIPMessage* msg, const SocketAddr* addr = 0);
     // Print received messages to output
     // For TCP transports the function will assume 'buf' is not null terminated
-    void printRecvMsg(const char* buf, int len);
+    void printRecvMsg(const char* buf, int len, const String& traceId = String::empty());
     // Add transport data yate message
     void fillMessage(Message& msg, bool addRoute = false);
     // Transport descendents
@@ -662,6 +663,8 @@ public:
     // Initialize the engine
     void initialize(NamedList* params);
     virtual bool buildParty(SIPMessage* message);
+    virtual void allocTraceId(String& id);
+    virtual void traceMsg(SIPMessage* message, bool incoming = true);
     virtual bool checkUser(String& username, const String& realm, const String& nonce,
 	const String& method, const String& uri, const String& response,
 	const SIPMessage* message, const MimeHeaderLine* authLine, GenObject* userData);
@@ -691,6 +694,7 @@ private:
     bool m_fork;
     bool m_forkEarly;
     bool m_foreignAuth;
+    uint64_t m_traceIds;
 };
 
 class YateSIPLine : public String, public Mutex, public CallAccount, public YateSIPPartyHolder
@@ -1018,6 +1022,8 @@ public:
 	    tmp << "sip/" << dialog << "/" << fromTag << "/" << toTag;
 	    nl.addParam("callid",tmp);
 	}
+    const String& traceId() const
+        { return m_traceId; }
 
 protected:
     virtual Message* buildChanRtp(RefObject* context);
@@ -1102,6 +1108,7 @@ private:
     NamedList m_revert;
     bool m_silent;                       // Silently discard SIP dialog
     bool m_stopOCall;
+    String m_traceId;
 };
 
 class YateSIPGenerate : public GenObject
@@ -1141,6 +1148,12 @@ public:
 	{ return m_endpoint; }
     inline SDPParser& parser()
         { return m_parser; }
+    inline bool traceActive() const
+    { 
+	return Engine::sharedVars().exists(YSTRING("trace")) ||
+		Engine::sharedVars().exists(YSTRING("trace_sip"));
+    }
+    
     void epTerminated(YateSIPEndPoint* ep);
     YateSIPConnection* findCall(const String& callid, bool incRef = false);
     YateSIPConnection* findDialog(const SIPDialog& dialog, bool incRef = false);
@@ -2435,7 +2448,7 @@ void YateSIPPartyHolder::setParty(SIPParty* party)
 	    extra += " remote=";
 	    party->appendAddr(extra,false);
 	}
-	Debug(m_enabler,DebugAll,"YateSIPPartyHolder set party (%p)%s trans=(%p) [%p]",
+	TraceDebug(m_traceId,m_enabler,DebugAll,"YateSIPPartyHolder set party (%p)%s trans=(%p) [%p]",
 	    party,extra.safe(),party ? party->getTransport() : 0,this);
     }
 #endif
@@ -2472,7 +2485,7 @@ bool YateSIPPartyHolder::setPartyChanged(SIPParty* party)
 	String p;
 	SocketAddr::appendTo(crt,crtAddr,crtPort);
 	SocketAddr::appendTo(p,partyAddr,partyPort);
-	Debug(m_enabler,DebugInfo,"YateSIPPartyHolder party addr changed '%s' -> '%s' [%p]",
+	TraceDebug(m_traceId,m_enabler,DebugInfo,"YateSIPPartyHolder party addr changed '%s' -> '%s' [%p]",
 	    crt.c_str(),p.c_str(),this);
 	setParty(party);
     }
@@ -2550,7 +2563,7 @@ bool YateSIPPartyHolder::buildParty(bool force, bool isTemp)
 			m_transRemoteAddr,m_transRemotePort);
 	    }
 	    else
-		Debug(DebugStub,"YateSIPPartyHolder::buildParty() transport %s not implemented",
+		TraceDebug(m_traceId,DebugStub,"YateSIPPartyHolder::buildParty() transport %s not implemented",
 		    protoName());
 	}
     }
@@ -2581,7 +2594,7 @@ bool YateSIPPartyHolder::buildParty(bool force, bool isTemp)
 	tcpTrans->init(NamedList::empty(),true);
     }
     if (!isTemp || m_party)
-	Debug(m_enabler,m_party ? DebugAll : DebugNote,
+	TraceDebug(m_traceId,m_enabler,m_party ? DebugAll : DebugNote,
 	    "%s party trans_name=%s proto=%s local=%s remote=%s [%p]",
 	    m_party ? "Set" : "Failed to set",m_transId.c_str(),protoName(),
 	    SocketAddr::appendTo(m_transLocalAddr,m_transLocalPort).c_str(),
@@ -2629,7 +2642,7 @@ bool YateSIPPartyHolder::setParty(const NamedList& params, bool force, const Str
     }
     const String& transId = params[prefix + "connection_id"];
     if (change(m_transId,transId))
-	Debug(m_enabler,DebugAll,
+	TraceDebug(m_traceId,m_enabler,DebugAll,
 	    "YateSIPPartyHolder transport id changed to '%s' [%p]",
 	    m_transId.c_str(),this);
     updateProto(params,prefix);
@@ -2663,7 +2676,7 @@ bool YateSIPPartyHolder::updateProto(const NamedList& params, const String& pref
     }
     bool chg = change(m_proto,proto);
     if (chg)
-	Debug(m_enabler,DebugAll,"YateSIPPartyHolder transport proto changed to '%s' [%p]",
+	TraceDebug(m_traceId,m_enabler,DebugAll,"YateSIPPartyHolder transport proto changed to '%s' [%p]",
 	    protoName(),this);
     return chg;
 }
@@ -2681,7 +2694,7 @@ bool YateSIPPartyHolder::updateRemoteAddr(const NamedList& params, const String&
     if (chg && plugin.debugAt(DebugAll)) {
 	String s;
 	SocketAddr::appendTo(s,m_transRemoteAddr,m_transRemotePort);
-	Debug(m_enabler,DebugAll,"YateSIPPartyHolder remote addr changed to '%s' [%p]",
+	TraceDebug(m_traceId,m_enabler,DebugAll,"YateSIPPartyHolder remote addr changed to '%s' [%p]",
 	    s.c_str(),this);
     }
     return chg;
@@ -2696,7 +2709,7 @@ bool YateSIPPartyHolder::updateLocalAddr(const NamedList& params, const String& 
     if (chg && plugin.debugAt(DebugAll)) {
 	String s;
 	SocketAddr::appendTo(s,m_transLocalAddr,m_transLocalPort);
-	Debug(m_enabler,DebugAll,"YateSIPPartyHolder local addr changed to '%s' [%p]",
+	TraceDebug(m_traceId,m_enabler,DebugAll,"YateSIPPartyHolder local addr changed to '%s' [%p]",
 	    s.c_str(),this);
     }
     return chg;
@@ -2989,12 +3002,12 @@ void YateSIPTransport::printSendMsg(const SIPMessage* msg, const SocketAddr* add
     if (addr)
 	raddr = " to " + addr->addr();
     String buf((char*)msg->getBuffer().data(),msg->getBuffer().length());
-    Debug(&plugin,DebugInfo,"'%s' sending %s %p%s [%p]\r\n------\r\n%s------",
+    TraceDebug(msg->traceId(),&plugin,DebugInfo,"'%s' sending %s %p%s [%p]\r\n------\r\n%s------",
 	m_protoAddr.c_str(),tmp.c_str(),msg,raddr.safe(),this,buf.c_str());
 }
 
 // Print received messages to output
-void YateSIPTransport::printRecvMsg(const char* buf, int len)
+void YateSIPTransport::printRecvMsg(const char* buf, int len,const String& traceId)
 {
     if (!buf)
 	return;
@@ -3010,7 +3023,7 @@ void YateSIPTransport::printRecvMsg(const char* buf, int len)
 	tmp.assign(buf,len);
 	buf = tmp;
     }
-    Debug(&plugin,DebugInfo,
+    TraceDebug(traceId,&plugin,DebugInfo,
 	"'%s' received %d bytes SIP message%s [%p]\r\n------\r\n%s------",
 	m_protoAddr.c_str(),len,raddr.safe(),this,buf);
 }
@@ -3376,7 +3389,7 @@ int YateSIPUDPTransport::process()
     }
     char* b = (char*)m_buffer.data();
     b[res] = 0;
-    if (s_printMsg)
+    if (s_printMsg && !plugin.traceActive())
 	printRecvMsg(b,res);
 
     if (s_floodProtection && s_floodEvents && evc >= s_floodEvents) {
@@ -3955,7 +3968,7 @@ bool YateSIPTCPTransport::readData(const Time& time, bool& read)
 	    m_sipBufOffs += m_contentLen;
 	    m_contentLen = 0;
 	}
-	if (s_printMsg)
+	if (s_printMsg && !plugin.traceActive())
 	    printRecvMsg(data,m_sipBufOffs);
 	SIPMessage* msg = m_msg;
 	m_msg = 0;
@@ -4598,7 +4611,8 @@ void YateTCPParty::destroyed()
 
 YateSIPEngine::YateSIPEngine(YateSIPEndPoint* ep)
     : SIPEngine(s_cfg.getValue("general","useragent")),
-      m_ep(ep), m_prack(false), m_info(false), m_foreignAuth(false)
+      m_ep(ep), m_prack(false), m_info(false), m_foreignAuth(false),
+      m_traceIds(0)
 {
     addAllowed("INVITE");
     addAllowed("BYE");
@@ -4726,6 +4740,33 @@ bool YateSIPEngine::buildParty(SIPMessage* message)
     return m_ep->buildParty(message);
 }
 
+void YateSIPEngine::allocTraceId(String& id)
+{
+    if (!plugin.traceActive())
+      return;
+    id << "sip-";
+    Lock l(this);
+    id << m_traceIds++;
+}
+
+void YateSIPEngine::traceMsg(SIPMessage* message, bool incoming)
+{
+    if (!(message && message->traceId() && message->getParty()))
+	return;
+    YateSIPTransport* trans = static_cast<YateSIPTransport*>(message->getParty()->getTransport());
+    if (!trans)
+	return;
+    if (incoming) {
+	DataBlock d(message->getBuffer().data(),message->getBuffer().length(),false,1);
+	*((uint8_t*)d.data() + (d.length() - 1)) = 0;
+	trans->printRecvMsg ((const char*)d.data(),
+		    d.length(),message->traceId());
+	d.clear(false);
+      }
+    else
+	trans->printSendMsg(message);
+}
+
 bool YateSIPEngine::copyAuthParams(NamedList* dest, const NamedList& src, bool ok)
 {
     // we added those and we want to exclude them from copy
@@ -4805,6 +4846,7 @@ bool YateSIPEngine::checkUser(String& username, const String& realm, const Strin
 	hl = message->getHeader("User-Agent");
 	if (hl)
 	    m.addParam("device",*hl);
+	m.addParam("trace_id",message->traceId());
 	s_globalMutex.lock();
 	for (const ObjList* l = message->header.skipNull(); l; l = l->skipNext()) {
 	    hl = static_cast<const MimeHeaderLine*>(l->get());
@@ -5695,7 +5737,7 @@ void YateSIPEndPoint::regRun(const SIPMessage* message, SIPTransaction* t)
 	    }
 	    // Reset transport timeout
 	    resetTransportIdle(r,tmp.toInteger());
-	    Debug(&plugin,DebugNote,"Registered user '%s' expires in %s s%s",
+	    TraceDebugObj(r,&plugin,DebugNote,"Registered user '%s' expires in %s s%s",
 		user.c_str(),tmp.c_str(),natChanged ? " (NAT)" : "");
 	}
     }
@@ -6060,18 +6102,18 @@ void YateSIPRefer::release(bool fromCleanup)
 YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
     : Channel(plugin,0,false),
       SDPSession(&plugin.parser()),
-      YateSIPPartyHolder(this,driver()),
+      YateSIPPartyHolder(this,driver(),tr->traceId()),
       m_tr(tr), m_tr2(0), m_hungup(false), m_byebye(true), m_cancel(false),
       m_state(Incoming), m_port(0), m_route(0), m_routes(0),
       m_authBye(true), m_autoChangeParty(tr->getEngine()->autoChangeParty()),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
       m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
-      m_revert(""), m_silent(false), m_stopOCall(false)
+      m_revert(""), m_silent(false), m_stopOCall(false), m_traceId(tr->traceId())
 {
     m_ipv6 = s_ipv6;
-    setSdpDebug(this,this);
-    Debug(this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,%p) [%p]",ev,tr,this);
+    setSdpDebug(this,this,m_traceId);
+    TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,%p) [%p]",ev,tr,this);
     setReason();
     m_tr->ref();
     m_routes = m_tr->initialMessage()->getRoutes();
@@ -6095,6 +6137,8 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
     Message *m = message("call.preroute");
     decodeIsupBody(*m,m_tr->initialMessage()->body);
     copySipBody(*m,m_tr->initialMessage()->body);
+    if (m_traceId)
+	m->addParam("trace_id",m_traceId);
     m->addParam("caller",m_uri.getUser());
     m->addParam("called",uri.getUser());
     if (m_uri.getDescription())
@@ -6215,7 +6259,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
 	    // guess if the call comes from behind a NAT
 	    bool nat = isNatBetween(m_rtpAddr,m_host);
 	    if (m->getBoolValue(YSTRING("nat_support"),s_auto_nat && nat)) {
-		Debug(this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
+		TraceDebug(m_traceId,this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
 		    m_rtpAddr.c_str(),m_host.c_str());
 		m->addParam("rtp_nat_addr",m_rtpAddr);
 		m_rtpAddr = m_host;
@@ -6251,6 +6295,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
     if (m_user)
 	s->addParam(s_username,m_user);
     s->copyParam(*m,YSTRING("connection_id"));
+    s->copyParam(*m,YSTRING("trace_id"));
     Engine::enqueue(s);
 }
 
@@ -6258,16 +6303,17 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
 YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char* target)
     : Channel(plugin,0,true),
       SDPSession(&plugin.parser()),
-      YateSIPPartyHolder(this,driver()),
+      YateSIPPartyHolder(this,driver(),msg.getValue(YSTRING("trace_id"))),
       m_tr(0), m_tr2(0), m_hungup(false), m_byebye(true), m_cancel(true),
       m_state(Outgoing), m_port(0), m_route(0), m_routes(0),
       m_authBye(false), m_autoChangeParty(true),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
       m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
-      m_revert(""), m_silent(false), m_stopOCall(msg.getBoolValue(YSTRING("stop_call")))
+      m_revert(""), m_silent(false), m_stopOCall(msg.getBoolValue(YSTRING("stop_call"))),
+      m_traceId(msg.getValue(YSTRING("trace_id")))
 {
-    Debug(this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,'%s') [%p]",
+    TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,'%s') [%p]",
 	&msg,uri.c_str(),this);
     setChanParams(msg);
     m_autoChangeParty = msg.getBoolValue(YSTRING("oautochangeparty"),
@@ -6280,7 +6326,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 	    line->setOutboundParams(msg);
     }
     m_ipv6 = msg.getBoolValue(YSTRING("ipv6_support"),s_ipv6);
-    setSdpDebug(this,this);
+    setSdpDebug(this,this,m_traceId);
     setFormatsExtra(msg,true);
     m_targetid = target;
     setReason();
@@ -6335,12 +6381,13 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 	setParty(msg,true,"o",m_uri.getHost(),m_uri.getPort(),this);
     SIPMessage* m = new SIPMessage("INVITE",m_uri);
     m->dontSend(m_stopOCall);
+    m->msgTraceId = m_traceId;
     setSipParty(m,line,true,msg.getValue("host"),msg.getIntValue("port"));
     if (!m->getParty()) {
 	String tmp;
 	if (m_partyInvalidRemote)
 	    tmp << ": invalid remote addr '" << m_partyInvalidRemote << "'";
-	Debug(this,DebugWarn,"Could not create party for '%s'%s [%p]",m_uri.c_str(),tmp.safe(),this);
+	TraceDebug(m_traceId,this,DebugWarn,"Could not create party for '%s'%s [%p]",m_uri.c_str(),tmp.safe(),this);
 	TelEngine::destruct(m);
 	setReason("Failed to create party",500);
 	msg.setParam("reason",m_reason);
@@ -6489,7 +6536,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 
 YateSIPConnection::~YateSIPConnection()
 {
-    Debug(this,DebugAll,"YateSIPConnection::~YateSIPConnection() [%p]",this);
+    TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::~YateSIPConnection() [%p]",this);
 }
 
 void YateSIPConnection::destroyed()
@@ -6572,7 +6619,7 @@ void YateSIPConnection::hangup()
 	return;
     m_hungup = true;
     const char* error = lookup(m_reasonCode,dict_errors);
-    Debug(this,DebugAll,"YateSIPConnection::hangup() state=%d trans=%p error='%s' code=%d reason='%s' [%p]",
+    TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::hangup() state=%d trans=%p error='%s' code=%d reason='%s' [%p]",
 	m_state,m_tr,error,m_reasonCode,m_reason.c_str(),this);
     setMedia(0);
     String res = m_reason;
@@ -6602,7 +6649,7 @@ void YateSIPConnection::hangup()
 		SIPMessage* m = new SIPMessage("CANCEL",m_uri);
 		setSipParty(m,plugin.findLine(m_line),true,m_host,m_port);
 		if (!m->getParty())
-		    Debug(this,DebugWarn,"Could not create party for '%s' [%p]",
+		    TraceDebug(m_traceId,this,DebugWarn,"Could not create party for '%s' [%p]",
 			SocketAddr::appendTo(m_host,m_port).c_str(),this);
 		else {
 		    const SIPMessage* i = m_tr->initialMessage();
@@ -6664,7 +6711,7 @@ SIPMessage* YateSIPConnection::createDlgMsg(const char* method, const char* uri)
     m->addRoutes(m_routes);
     setSipParty(m,plugin.findLine(m_line),true,m_host,m_port);
     if (!m->getParty()) {
-	Debug(this,DebugWarn,"Could not create party for '%s' [%p]",
+	TraceDebug(m_traceId,this,DebugWarn,"Could not create party for '%s' [%p]",
 	    SocketAddr::appendTo(m_host,m_port).c_str(),this);
 	m->destruct();
 	return 0;
@@ -6708,7 +6755,7 @@ void YateSIPConnection::updateTarget(const SIPMessage* msg, bool force, bool chg
 	m_uri.parse();
 	m_dialog.remoteURI = m_uri;
 	if (old != m_uri)
-	    Debug(this,DebugInfo,"Dialog URI changed '%s' -> '%s' [%p]",old.c_str(),m_uri.c_str(),this);
+	    TraceDebug(m_traceId,this,DebugInfo,"Dialog URI changed '%s' -> '%s' [%p]",old.c_str(),m_uri.c_str(),this);
     }
     if (!(m_autoChangeParty && chgParty))
 	return;
@@ -6745,7 +6792,7 @@ bool YateSIPConnection::emitPRACK(const SIPMessage* msg)
     if (seq == m_lastRseq)
 	return false;
     if (seq < m_lastRseq) {
-	Debug(this,DebugMild,"Not sending PRACK for RSeq %d < %d [%p]",
+	TraceDebug(m_traceId,this,DebugMild,"Not sending PRACK for RSeq %d < %d [%p]",
 	    seq,m_lastRseq,this);
 	return false;
     }
@@ -6816,6 +6863,8 @@ void YateSIPConnection::mediaChanged(const SDPMedia& media)
 	m.addParam("call_address",address());
 	m.addParam("call_status",status());
 	m.addParam("call_billid",billid());
+	if (m_traceId)
+	  m.addParam("trace_id",m_traceId);
 	Engine::dispatch(m);
 	const char* stats = m.getValue(YSTRING("stats"));
 	if (stats) {
@@ -6834,7 +6883,7 @@ void YateSIPConnection::dispatchingRtp(Message*& msg, SDPMedia* media)
 	return;
     if (media->formats() || !(media->isAudio() || media->isVideo()))
 	return;
-    Debug(this,DebugInfo,"Not sending %s for empty media %s [%p]",
+    TraceDebug(m_traceId,this,DebugInfo,"Not sending %s for empty media %s [%p]",
 	msg->c_str(),media->c_str(),this);
     TelEngine::destruct(msg);
 }
@@ -6850,7 +6899,7 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	SIPTransaction::stateName(ev->getState()),code,this);
 #ifdef XDEBUG
     if (msg)
-	Debug(this,DebugInfo,"Message %p '%s' %s %s code=%d body=%p",
+	TraceDebug(m_traceId,this,DebugInfo,"Message %p '%s' %s %s code=%d body=%p",
 	    msg,msg->method.c_str(),
 	    msg->isOutgoing() ? "outgoing" : "incoming",
 	    msg->isAnswer() ? "answer" : "request",
@@ -6927,7 +6976,7 @@ bool YateSIPConnection::process(SIPEvent* ev)
 		}
 	    }
 	    else if (code != 387)
-		Debug(this,DebugMild,"Received %d redirect without Contact [%p]",code,this);
+		TraceDebug(m_traceId,this,DebugMild,"Received %d redirect without Contact [%p]",code,this);
 	}
 	paramMutex().unlock();
 	hangup();
@@ -6997,7 +7046,7 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	setMedia(plugin.parser().parse(sdp,m_rtpAddr,m_rtpMedia));
 	// guess if the call comes from behind a NAT
 	if (s_auto_nat && isNatBetween(m_rtpAddr,m_host)) {
-	    Debug(this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
+	    TraceDebug(m_traceId,this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
 		m_rtpAddr.c_str(),m_host.c_str());
 	    natAddr = m_rtpAddr;
 	    m_rtpAddr = m_host;
@@ -7018,7 +7067,7 @@ bool YateSIPConnection::process(SIPEvent* ev)
 		const NamedString* par = hl->getParam("received");
 		if (par && *par) {
 		    getAddrCheckIPv6(m_externalAddr,*par);
-		    Debug(this,DebugInfo,"Detected local address '%s' [%p]",
+		    TraceDebug(m_traceId,this,DebugInfo,"Detected local address '%s' [%p]",
 			m_externalAddr.c_str(),this);
 		}
 	    }
@@ -7055,7 +7104,7 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	    startPendingUpdate();
 	else if (!m_rtpForward) {
 	    MimeSdpBody* sdp = m_rtpMedia ? createRtpSDP(true) : 0;
-	    Debug(this,DebugNote,"Sending ACK %s SDP now since RTP is not forwarded [%p]",
+	    TraceDebug(m_traceId,this,DebugNote,"Sending ACK %s SDP now since RTP is not forwarded [%p]",
 		(sdp ? "with" : "without"),this);
 	    tr->setAcknowledge(sdp);
 	    startPendingUpdate();
@@ -7151,7 +7200,7 @@ bool YateSIPConnection::processTransaction2(SIPEvent* ev, const SIPMessage* msg,
 	    setMedia(plugin.parser().parse(sdp,m_rtpAddr,m_rtpMedia));
 	    // guess if the call comes from behind a NAT
 	    if (s_auto_nat && isNatBetween(m_rtpAddr,m_host)) {
-		Debug(this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
+		TraceDebug(m_traceId,this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
 		    m_rtpAddr.c_str(),m_host.c_str());
 		natAddr = m_rtpAddr;
 		m_rtpAddr = m_host;
@@ -7233,7 +7282,7 @@ bool YateSIPConnection::processTransaction2(SIPEvent* ev, const SIPMessage* msg,
 		m_rtpForward));
 	    // guess if the call comes from behind a NAT
 	    if (s_auto_nat && isNatBetween(m_rtpAddr,m_host)) {
-		Debug(this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
+		TraceDebug(m_traceId,this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
 		    m_rtpAddr.c_str(),m_host.c_str());
 		natAddr = m_rtpAddr;
 		m_rtpAddr = m_host;
@@ -7330,12 +7379,12 @@ bool YateSIPConnection::reInviteForward(SIPTransaction* t, MimeSdpBody* sdp, int
 	    return false;
 	// guess if the call comes from behind a NAT
 	if (s_auto_nat && isNatBetween(addr,m_host)) {
-	    Debug(this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
+	    TraceDebug(m_traceId,this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
 		addr.c_str(),m_host.c_str());
 	    natAddr = addr;
 	    addr = m_host;
 	}
-	Debug(this,DebugAll,"reINVITE RTP addr '%s'",addr.c_str());
+	TraceDebug(m_traceId,this,DebugAll,"reINVITE RTP addr '%s'",addr.c_str());
     }
 
     // for pass-trough RTP we need support from our peer
@@ -7417,7 +7466,7 @@ bool YateSIPConnection::reInviteProxy(SIPTransaction* t, MimeSdpBody* sdp, int i
 	return false;
     // guess if the call comes from behind a NAT
     if (s_auto_nat && isNatBetween(addr,m_host)) {
-	Debug(this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
+	TraceDebug(m_traceId,this,DebugInfo,"RTP NAT detected: private '%s' public '%s'",
 	    addr.c_str(),m_host.c_str());
 	natAddr = addr;
 	addr = m_host;
@@ -7452,7 +7501,7 @@ bool YateSIPConnection::reInviteProxy(SIPTransaction* t, MimeSdpBody* sdp, int i
 
     if (m_rtpAddr != addr) {
 	m_rtpAddr = addr;
-	Debug(this,DebugAll,"New RTP addr '%s'",m_rtpAddr.c_str());
+	TraceDebug(m_traceId,this,DebugAll,"New RTP addr '%s'",m_rtpAddr.c_str());
 	// clear all data endpoints - createRtpSDP will build new ones
 	if (!s_rtp_preserve)
 	    setMedia(0);
@@ -7561,7 +7610,7 @@ void YateSIPConnection::doCancel(SIPTransaction* t)
     // CANCEL cannot be challenged but it may (should?) be authenticated with
     //  an old nonce from the transaction that is being cancelled
     if (m_user && (t->authUser(m_user) < 0))
-	Debug(&plugin,DebugMild,"User authentication failed for user '%s' but CANCELing anyway [%p]",
+	TraceDebug(m_traceId,&plugin,DebugMild,"User authentication failed for user '%s' but CANCELing anyway [%p]",
 	    m_user.c_str(),this);
 #endif
     DDebug(this,DebugAll,"YateSIPConnection::doCancel(%p) [%p]",t,this);
@@ -7765,7 +7814,7 @@ void YateSIPConnection::complete(Message& msg, bool minimal) const
 
 void YateSIPConnection::disconnected(bool final, const char *reason)
 {
-    Debug(this,DebugAll,"YateSIPConnection::disconnected() '%s' [%p]",reason,this);
+    TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::disconnected() '%s' [%p]",reason,this);
     setSilent(reason);
     if (reason) {
 	int code = lookup(reason,dict_errors);
@@ -7883,7 +7932,7 @@ bool YateSIPConnection::msgTone(Message& msg, const char* tone)
 	if (method) {
 	    if (s_warnDtmfMethodChanDtmf) {
 		s_warnDtmfMethodChanDtmf = false;
-		Debug(this,DebugConf,"Deprecated 'method' parameter in '%s'. Use 'methods' instead!",msg.c_str());
+		TraceDebug(m_traceId,this,DebugConf,"Deprecated 'method' parameter in '%s'. Use 'methods' instead!",msg.c_str());
 	    }
 	    int meth = lookup(*method,DtmfMethods::s_methodName,DtmfMethods::MethodCount);
 	    if (meth != DtmfMethods::MethodCount)
@@ -7908,7 +7957,7 @@ bool YateSIPConnection::msgTone(Message& msg, const char* tone)
     if (!ok && debugAt(DebugNote)) {
 	String tmp;
 	methods.buildMethods(tmp);
-	Debug(this,DebugNote,"Failed to send tones '%s' methods=%s [%p]",tone,tmp.c_str(),this);
+	TraceDebug(m_traceId,this,DebugNote,"Failed to send tones '%s' methods=%s [%p]",tone,tmp.c_str(),this);
     }
     return retVal;
 }
@@ -8005,7 +8054,7 @@ bool YateSIPConnection::msgUpdate(Message& msg)
 		case ReinviteRequest:
 		    if (startClientReInvite(msg,(ReinviteRequest == m_reInviting)))
 			return true;
-		    Debug(this,DebugMild,"Failed to start reINVITE, %s: %s [%p]",
+		    TraceDebug(m_traceId,this,DebugMild,"Failed to start reINVITE, %s: %s [%p]",
 			msg.getValue(YSTRING("error"),"unknown"),
 			msg.getValue(YSTRING("reason"),"No reason"),this);
 		    return false;
@@ -8037,7 +8086,7 @@ bool YateSIPConnection::msgUpdate(Message& msg)
 	    return false;
 	}
 	if (m_rtpForward != rtpSave)
-	    Debug(this,DebugInfo,"RTP forwarding changed: %s -> %s",
+	    TraceDebug(m_traceId,this,DebugInfo,"RTP forwarding changed: %s -> %s",
 		String::boolText(rtpSave),String::boolText(m_rtpForward));
 	const SIPMessage* m1 = m_tr2->initialMessage();
 	updateTarget(m1);
@@ -8148,7 +8197,7 @@ bool YateSIPConnection::callRouted(Message& msg)
 	m_tr->setTransCount(msg.getIntValue(YSTRING("isip_trans_count"),-1));
 	String s(msg.retValue());
 	if (s.startSkip("sip/",false) && s && msg.getBoolValue(YSTRING("redirect"))) {
-	    Debug(this,DebugAll,"YateSIPConnection redirecting to '%s' [%p]",s.c_str(),this);
+	    TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection redirecting to '%s' [%p]",s.c_str(),this);
 	    String tmp(msg.getValue(YSTRING("calledname")));
 	    if (tmp) {
 		MimeHeaderLine::addQuotes(tmp);
@@ -8297,12 +8346,12 @@ bool YateSIPConnection::startClientReInvite(NamedList& msg, bool rtpForward)
 	msg.setParam("error","failure");
 	msg.setParam("reason","Could not build the SDP");
 	if (hadRtp) {
-	    Debug(this,DebugWarn,"Could not build SDP for reINVITE, hanging up [%p]",this);
+	    TraceDebug(m_traceId,this,DebugWarn,"Could not build SDP for reINVITE, hanging up [%p]",this);
 	    disconnect("nomedia");
 	}
 	return false;
     }
-    Debug(this,DebugNote,"Initiating reINVITE (%s RTP before) [%p]",
+    TraceDebug(m_traceId,this,DebugNote,"Initiating reINVITE (%s RTP before) [%p]",
 	hadRtp ? "had" : "no",this);
     SIPMessage* m = createDlgMsg("INVITE");
     copySipHeaders(*m,msg);
@@ -8330,12 +8379,12 @@ void YateSIPConnection::startPendingUpdate()
     if (m_hungup || m_tr || m_tr2 || (m_reInviting != ReinvitePending))
 	return;
     if (m_rtpAddr.null()) {
-	Debug(this,DebugWarn,"Cannot start update, remote RTP address unknown [%p]",this);
+	TraceDebug(m_traceId,this,DebugWarn,"Cannot start update, remote RTP address unknown [%p]",this);
 	m_reInviting = ReinviteNone;
 	return;
     }
     if (!m_rtpMedia) {
-	Debug(this,DebugWarn,"Cannot start update, remote media unknown [%p]",this);
+	TraceDebug(m_traceId,this,DebugWarn,"Cannot start update, remote media unknown [%p]",this);
 	m_reInviting = ReinviteNone;
 	return;
     }
@@ -8350,7 +8399,7 @@ void YateSIPConnection::startPendingUpdate()
     putMedia(msg);
     // if peer doesn't support updates fail the reINVITE
     if (!Engine::dispatch(msg)) {
-	Debug(this,DebugWarn,"Cannot start update by '%s', %s: %s [%p]",
+	TraceDebug(m_traceId,this,DebugWarn,"Cannot start update by '%s', %s: %s [%p]",
 	    getPeerId().c_str(),
 	    msg.getValue(YSTRING("error"),"not supported"),
 	    msg.getValue(YSTRING("reason"),"No reason provided"),this);
@@ -8417,7 +8466,7 @@ bool YateSIPConnection::initTransfer(Message*& msg, SIPMessage*& sipNotify,
     //  we won't need it if the transfer fails
     // Set notify party from received REFER?
     // Remember: createDlgMsg() sets the party from channel's party
-    Debug(this,DebugStub,"initTransfer. Possible incomplete NOTIFY party creation [%p]",this);
+    TraceDebug(m_traceId,this,DebugStub,"initTransfer. Possible incomplete NOTIFY party creation [%p]",this);
     if (co) {
 	tmp = *co;
 	static const Regexp r("^[^<]*<\\([^>]*\\)>.*$");
@@ -8475,7 +8524,7 @@ void YateSIPConnection::updateRtpNatAddress(NamedList* params)
 	    TelEngine::destruct(trans);
 	}
     }
-    Debug(this,DebugAll,"NAT address is '%s' [%p]",m_rtpNatAddr.c_str(),this);
+    TraceDebug(m_traceId,this,DebugAll,"NAT address is '%s' [%p]",m_rtpNatAddr.c_str(),this);
 }
 
 // Process allow list. Get INFO support

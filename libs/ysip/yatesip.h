@@ -486,6 +486,13 @@ public:
     void setBody(MimeBody* newbody = 0);
 
     /**
+     * Get trace ID of the message
+     * @return The trace ID
+     */
+    const String& traceId() const 
+        { return msgTraceId; }
+
+    /**
      * Sip Version
      */
     String version;
@@ -520,6 +527,11 @@ public:
      * the parsed body.
      */
     MimeBody* body;
+
+    /**
+     * Trace ID of the message
+     */
+    String msgTraceId;
 
 protected:
     bool parse(const char* buf, int len, unsigned int* bodyLen);
@@ -1070,6 +1082,13 @@ public:
      * Silent this transaction
      */
     void setSilent();
+    
+    /**
+     * Trace ID of the transaction
+     * @return Trace ID associated with this transaction
+     */
+    const String& traceId() const
+        { return m_traceId; }
 
 protected:
     /**
@@ -1179,6 +1198,7 @@ protected:
     bool m_autoChangeParty;
     bool m_autoAck;
     bool m_silent;
+    String m_traceId;
 };
 
 /**
@@ -1258,6 +1278,13 @@ public:
     inline bool isActive() const
 	{ return (SIPTransaction::Invalid < m_state) && (m_state < SIPTransaction::Finish); }
 
+    /**
+     * Retrieve the trace ID associated with this event 
+     * @return The trace ID, it can be empty.
+     */
+    inline const String& traceId() const
+        { return m_transaction ? m_transaction->traceId() : String::empty(); }
+
 protected:
     SIPMessage* m_message;
     SIPTransaction* m_transaction;
@@ -1287,6 +1314,19 @@ public:
      * @return True on success, false if party could not be built
      */
     virtual bool buildParty(SIPMessage* message) = 0;
+
+    /**
+     * Allocate a new trace ID. If tracing is not active, string will not be modified
+     * @param id String where to put allocated ID.
+     */
+    virtual void allocTraceId(String& id) = 0;
+
+    /**
+     * Print a SIP message only if it has a trace ID 
+     * @param message The message to print
+     * @param incoming True if the message is incoming
+     */
+    virtual void traceMsg(SIPMessage* message, bool incoming = true) = 0;
 
     /**
      * Check user credentials for validity

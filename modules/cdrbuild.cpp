@@ -108,6 +108,7 @@ private:
     String m_cdrId;
     bool m_first;
     bool m_write;
+    String m_traceId;
 };
 
 // CDR extra parameter name with an overwrite flag
@@ -372,6 +373,8 @@ void CdrBuilder::emit(const char *operation)
     m->addParam("billtime",printTime(buf,t_hangup - t_answer));
     m->addParam("ringtime",printTime(buf,t_answer - t_ringing));
     m->addParam("status",m_status);
+    if (m_traceId)
+	m->addParam("trace_id",m_traceId);
     String tmp;
 
     if (m_startTime.m_enabled) {
@@ -455,7 +458,7 @@ void CdrBuilder::update(int type, u_int64_t val, const char* status)
 bool CdrBuilder::update(const Message& msg, int type, u_int64_t val)
 {
     if (type == CdrDrop) {
-	Debug("cdrbuild",DebugNote,"%s CDR for '%s'",
+	TraceDebug(m_traceId,"cdrbuild",DebugNote,"%s CDR for '%s'",
 	    (m_first ? "Dropping" : "Closing"),c_str());
 	// if we didn't generate an initialize generate no finalize
 	if (m_first)
@@ -472,8 +475,10 @@ bool CdrBuilder::update(const Message& msg, int type, u_int64_t val)
 	return true;
     }
     // cdrwrite must be consistent over all emitted messages so we read it once
-    if (m_first)
+    if (m_first) {
 	m_write = msg.getBoolValue(YSTRING("cdrwrite"),true);
+	m_traceId = msg.getValue(YSTRING("trace_id"));
+      }
     unsigned int n = msg.length();
     for (unsigned int i = 0; i < n; i++) {
 	const NamedString* s = msg.getParam(i);

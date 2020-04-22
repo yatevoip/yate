@@ -180,7 +180,7 @@ bool SDPSession::dispatchRtp(const char* addr, bool start, RefObject* context)
 	    o = o->skipNext();
 	}
 	else {
-	    Debug(m_enabler,DebugMild,
+	    TraceDebug(m_traceId,m_enabler,DebugMild,
 		"Removing failed SDP media '%s' format '%s' from offer [%p]",
 		m->c_str(),m->format().safe(),m_ptr);
 	    o->remove();
@@ -544,11 +544,11 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 
 	if (frm.null()) {
 	    if (m->isAudio() || !m->fmtList()) {
-		Debug(m_enabler,DebugMild,"No formats for '%s', excluding from SDP [%p]",
+		TraceDebug(m_traceId,m_enabler,DebugMild,"No formats for '%s', excluding from SDP [%p]",
 		    m->c_str(),m_ptr);
 		continue;
 	    }
-	    Debug(m_enabler,DebugInfo,"Assuming formats '%s' for media '%s' [%p]",
+	    TraceDebug(m_traceId,m_enabler,DebugInfo,"Assuming formats '%s' for media '%s' [%p]",
 		m->fmtList(),m->c_str(),m_ptr);
 	    frm << " " << m->fmtList();
 	    // brutal but effective
@@ -682,7 +682,7 @@ void SDPSession::updateFormats(const NamedList& msg, bool changeMedia)
 	    SDPMedia* rtp = static_cast<SDPMedia*>(m_rtpMedia->operator[](tmp));
 	    if (!rtp)
 		continue;
-	    Debug(m_enabler,DebugNote,"Removing disabled media '%s' [%p]",
+	    TraceDebug(m_traceId,m_enabler,DebugNote,"Removing disabled media '%s' [%p]",
 		tmp.c_str(),m_ptr);
 	    m_rtpMedia->remove(rtp,false);
 	    mediaChanged(*rtp);
@@ -710,11 +710,11 @@ void SDPSession::updateFormats(const NamedList& msg, bool changeMedia)
 	SDPMedia* rtp = static_cast<SDPMedia*>(m_rtpMedia->operator[](tmp));
 	if (rtp) {
 	    if (rtp->update(*p))
-		Debug(m_enabler,DebugNote,"Formats for '%s' changed to '%s' [%p]",
+		TraceDebug(m_traceId,m_enabler,DebugNote,"Formats for '%s' changed to '%s' [%p]",
 		    tmp.c_str(),rtp->formats().c_str(),m_ptr);
 	}
 	else if (*p) {
-	    Debug(m_enabler,DebugNote,"Got formats '%s' for absent media '%s' [%p]",
+	    TraceDebug(m_traceId,m_enabler,DebugNote,"Got formats '%s' for absent media '%s' [%p]",
 		p->c_str(),tmp.c_str(),m_ptr);
 	    if (trans) {
 		rtp = new SDPMedia(tmp,trans,p->c_str());
@@ -873,7 +873,7 @@ Message* SDPSession::buildChanRtp(SDPMedia* media, const char* addr, bool start,
 		    m->addParam("crypto_params",sdes.matchString(4));
 	    }
 	    else
-		Debug(m_enabler,DebugWarn,"Invalid SDES: '%s' [%p]",sdes.c_str(),m_ptr);
+		TraceDebug(m_traceId,m_enabler,DebugWarn,"Invalid SDES: '%s' [%p]",sdes.c_str(),m_ptr);
 	}
 	else if (media->securable())
 	    m->addParam("secure",String::boolText(true));
@@ -999,10 +999,11 @@ void SDPSession::dispatchingRtp(Message*& msg, SDPMedia* media)
 }
 
 // Set data used in debug
-void SDPSession::setSdpDebug(DebugEnabler* enabler, void* ptr)
+void SDPSession::setSdpDebug(DebugEnabler* enabler, void* ptr, const String& traceId)
 {
     m_enabler = enabler ? enabler : static_cast<DebugEnabler*>(m_parser);
     m_ptr = ptr ? ptr : (void*)this;
+    m_traceId = traceId;
 }
 
 // Print current media to output
@@ -1017,7 +1018,7 @@ void SDPSession::printRtpMedia(const char* reason)
 	    tmp << " ";
 	tmp << m->c_str() << "=" << m->formats();
     }
-    Debug(m_enabler,DebugAll,"%s: %s [%p]",reason,tmp.c_str(),m_ptr);
+    TraceDebug(m_traceId,m_enabler,DebugAll,"%s: %s [%p]",reason,tmp.c_str(),m_ptr);
 }
 
 // Set extra parameters for formats

@@ -33,7 +33,7 @@ SIPMessage::SIPMessage(const SIPMessage& original)
     : RefObject(),
       version(original.version), method(original.method), uri(original.uri),
       code(original.code), reason(original.reason),
-      body(0), m_ep(0),
+      body(0), msgTraceId(original.msgTraceId), m_ep(0),
       m_valid(original.isValid()), m_answer(original.isAnswer()),
       m_outgoing(original.isOutgoing()), m_ack(original.isACK()),
       m_cseq(-1), m_flags(original.getFlags()), m_dontSend(original.m_dontSend)
@@ -83,7 +83,7 @@ SIPMessage::SIPMessage(SIPParty* ep, const char* buf, int len, unsigned int* bod
     if (m_ep)
 	m_ep->ref();
     if (!(buf && *buf)) {
-	Debug(DebugWarn,"Empty message text in [%p]",this);
+	TraceDebug(msgTraceId,DebugWarn,"Empty message text in [%p]",this);
 	return;
     }
     if (len < 0)
@@ -111,6 +111,7 @@ SIPMessage::SIPMessage(const SIPMessage* message, int _code, const char* _reason
     version = message->version;
     uri = message->uri;
     method = message->method;
+    msgTraceId = message->msgTraceId;
     m_cseq = message->getCSeq();
     copyAllHeaders(message,"Via");
     copyAllHeaders(message,"Record-Route");
@@ -136,6 +137,7 @@ SIPMessage::SIPMessage(const SIPMessage* original, const SIPMessage* answer)
 	m_ep->ref();
     version = original->version;
     uri = original->uri;
+    msgTraceId = original->msgTraceId;
     copyAllHeaders(original,"Via");
     MimeHeaderLine* hl = const_cast<MimeHeaderLine*>(getHeader("Via"));
     if (!hl) {
@@ -213,7 +215,7 @@ void SIPMessage::complete(SIPEngine* engine, const char* user, const char* domai
     if (!getParty()) {
 	engine->buildParty(this);
 	if (!getParty()) {
-	    Debug(engine,DebugCrit,"Could not complete party-less SIP message [%p]",this);
+	    TraceDebug(msgTraceId,engine,DebugCrit,"Could not complete party-less SIP message [%p]",this);
 	    return;
 	}
     }
@@ -315,7 +317,7 @@ void SIPMessage::complete(SIPEngine* engine, const char* user, const char* domai
 		    seq = engine->getSequence();
 #ifdef DEBUG
 		else
-		    Debug(engine,DebugAll,"Using local sequence %p last=%d [%p]",
+		    TraceDebug(msgTraceId,engine,DebugAll,"Using local sequence %p last=%d [%p]",
 			seq,seq->getLastCSeq(),this);
 #endif
 		m_cseq = seq->getNextCSeq();
@@ -413,7 +415,7 @@ bool SIPMessage::parseFirst(String& line)
 		m_ack = true;
 	}
 	else {
-	    Debug(DebugAll,"Invalid SIP line '%s'",line.c_str());
+	    TraceDebug(msgTraceId,DebugAll,"Invalid SIP line '%s'",line.c_str());
 	    return false;
 	}
     }
@@ -487,7 +489,7 @@ bool SIPMessage::parse(const char* buf, int len, unsigned int* bodyLen)
     if (!bodyLen) {
 	if (clen >= 0) {
 	    if (clen > len)
-		Debug("SIPMessage",DebugMild,"Content length is %d but only %d in buffer",clen,len);
+		TraceDebug(msgTraceId,"SIPMessage",DebugMild,"Content length is %d but only %d in buffer",clen,len);
 	    else if (clen < len) {
 		DDebug("SIPMessage",DebugInfo,"Got %d garbage bytes after content",len - clen);
 		len = clen;
@@ -651,7 +653,7 @@ const DataBlock& SIPMessage::getBuffer() const
 #ifdef DEBUG
 	if (debugAt(DebugInfo)) {
 	    String buf((char*)m_data.data(),m_data.length());
-	    Debug(DebugInfo,"SIPMessage::getBuffer() [%p]\r\n------\r\n%s------",
+	    TraceDebug(msgTraceId,DebugInfo,"SIPMessage::getBuffer() [%p]\r\n------\r\n%s------",
 		this,buf.c_str());
 	}
 #endif
