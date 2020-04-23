@@ -4869,6 +4869,7 @@ bool YateSIPEngine::checkUser(String& username, const String& realm, const Strin
 	m.copyParam(*params,"called");
 	m.copyParam(*params,"billid");
 	m.copyParam(*params,"expires");
+	m.copyParam(*params,"trace_id");
     }
     if (authLine && m_foreignAuth) {
 	m.addParam("auth",*authLine);
