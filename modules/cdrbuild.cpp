@@ -560,7 +560,7 @@ bool CdrHandler::received(Message &msg)
 	return false;
     bool rval = false;
     int type = m_type;
-    int level = DebugInfo;
+    int level = DebugAll;
     CdrBuilder *b = CdrBuilder::find(id);
     if (!b) {
 	switch (type) {
