@@ -125,6 +125,27 @@ static const TokenDict s_sdpFmtParamsCheck[] = {
     { 0,              0 },
 };
 
+// Utility used in SDPParser::parse
+// Retrieve a SDP line 'param<payload>' contents
+// Trim contents spaces
+static inline String& getPayloadLine(String& buf, ObjList& list, int payload, const char* param)
+{
+    ObjList* o = list.skipNull();
+    if (!o)
+	return buf;
+    String match;
+    match << param << payload;
+    for (; o; o = o->skipNext()) {
+	const NamedString* ns = static_cast<NamedString*>(o->get());
+	if (!ns->startsWith(match,true))
+	    continue;
+	buf = ns->substr(match.length() + 1);
+	buf.trimSpaces();
+	return buf;
+    }
+    return buf;
+}
+
 // Parse a received SDP body
 ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedia,
     const String& media, bool force)
@@ -192,6 +213,21 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 	bool first = true;
 	int ptime = 0;
 	int rfc2833 = -1;
+	// Remember format related lines
+	ObjList fmtLines;
+	ObjList* fmtA = &fmtLines;
+	ObjList* o = sdp.lines().find(c);
+	for (o ? o = o->skipNext() : 0; o; o = o->skipNext()) {
+	    const NamedString* ns = static_cast<NamedString*>(o->get());
+	    if (ns->name() == YSTRING("a")) {
+		if (ns->startsWith("fmtp:") || ns->startsWith("gpmd:")) {
+		    fmtA = fmtA->append(ns);
+		    fmtA->setDelete(false);
+		}
+	    }
+	    else if (ns->name() == YSTRING("m"))
+		break;
+	}
 	while (tmp[0] == ' ') {
 	    int var = -1;
 	    tmp >> " " >> var;
@@ -208,7 +244,6 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 		fmt = tmp;
 		tmp.clear();
 	    }
-	    ObjList fmtl;
 	    int mode = 0;
 	    bool annexB = m_codecs.getBoolValue("g729_annexb",false);
 	    bool amrOctet = m_codecs.getBoolValue("amr_octet",false);
@@ -231,6 +266,8 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 		    continue;
 		}
 		if (s->name() != "a")
+		    continue;
+		if (s->startsWith("fmtp:") || s->startsWith("gpmd:"))
 		    continue;
 		String line(*s);
 		if (line.startSkip("ptime:",false))
@@ -267,80 +304,6 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 			}
 		    }
 		}
-		else if (line.startSkip("fmtp:",false)) {
-		    if (payload.null())
-			continue;
-		    int num = var - 1;
-		    line >> num;
-		    if ((num == var) && line.trimSpaces()) {
-			bool found = false;
-			ObjList* fmtps = 0;
-			int checkParams = lookup(payload,s_sdpFmtParamsCheck);
-			if (checkParams) {
-			    fmtps = line.split(';',false);
-			    for (ObjList* o = fmtps->skipNull(); o; o = o->skipNext()) {
-				String& s = *static_cast<String*>(o->get());
-				switch (checkParams) {
-				    case SdpIlbc:
-					if (!s.startSkip("mode=",false))
-					    continue;
-					s >> mode;
-					break;
-				    case SdpG729:
-					if (!s.startSkip("annexb=",false))
-					    continue;
-					s >> annexB;
-					break;
-				    case SdpAmr:
-					if (s.startSkip("octet-align=",false)) {
-					    int val = 0;
-					    s >> val;
-					    amrOctet = (0 != val);
-					    if (amrOctet) {
-						if (payload == YSTRING("amr"))
-						    payload = "amr-o";
-						else if (payload == YSTRING("amr/16000"))
-						    payload = "amr-o/16000";
-					    }
-					    else if (payload == YSTRING("amr-o"))
-						payload = "amr";
-					    else if (payload == YSTRING("amr-o/16000"))
-						payload = "amr/16000";
-					    break;
-					}
-					continue;
-				    default:
-					continue;
-				}
-				found = true;
-				o->set(0);
-				// Done: we are searching for a single parameter
-				break;
-			    }
-			}
-			XDebug(this,DebugAll,"%s fmtp '%s' (%d) '%s'",
-			    (checkParams ? (found ? "Found" : "Checked") : "Parsed"),
-			    payload.c_str(),var,line.c_str());
-			if (!found)
-			    fmtl.append(new NamedString("fmtp:" + payload,line));
-			else if (fmtps && fmtps->skipNull()) {
-			    line.clear();
-			    fmtl.append(new NamedString("fmtp:" + payload,line.append(fmtps,";")));
-			}
-			TelEngine::destruct(fmtps);
-		    }
-		}
-		else if (line.startSkip("gpmd:",false)) {
-		    if (payload.null())
-			continue;
-		    int num = var - 1;
-		    line >> num;
-		    if ((num == var) && line.trimSpaces()) {
-			XDebug(this,DebugAll,"Found gpmd '%s' (%d) '%s'",
-			    payload.c_str(),var,line.c_str());
-			fmtl.append(new NamedString("gpmd:" + payload,line));
-		    }
-		}
 		else if (first) {
 		    if (line.startSkip("crypto:",false)) {
 			if (crypto.null())
@@ -361,20 +324,80 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 		break;
 	    first = false;
 
-	    if (payload == "ilbc") {
-		const char* forced = m_hacks.getValue("ilbc_forced");
-		if (forced)
-		    payload = forced;
-		else if (mode == 20)
-		    payload = "ilbc20";
-		else if (mode == 30)
-		    payload = "ilbc30";
-		else if ((ptime % 30) && !(ptime % 20))
-		    payload = "ilbc20";
-		else if ((ptime % 20) && !(ptime % 30))
-		    payload = "ilbc30";
-		else
-		    payload = m_hacks.getValue(YSTRING("ilbc_default"),"ilbc30");
+	    String fmtp;
+	    if (payload) {
+		// Process 'fmtp' lines: they may change payload name
+		if (getPayloadLine(fmtp,fmtLines,var,"fmtp:")) {
+		    bool found = false;
+		    ObjList* fmtps = 0;
+		    int checkParams = lookup(payload,s_sdpFmtParamsCheck);
+		    if (checkParams) {
+			fmtps = fmtp.split(';',false);
+			for (ObjList* o = fmtps->skipNull(); o; o = o->skipNext()) {
+			    String& s = *static_cast<String*>(o->get());
+			    switch (checkParams) {
+				case SdpIlbc:
+				    if (!s.startSkip("mode=",false))
+					continue;
+				    s >> mode;
+				    break;
+				case SdpG729:
+				    if (!s.startSkip("annexb=",false))
+					continue;
+				    s >> annexB;
+				    break;
+				case SdpAmr:
+				    if (s.startSkip("octet-align=",false)) {
+					int val = 0;
+					s >> val;
+					amrOctet = (0 != val);
+					if (amrOctet) {
+					    if (payload == YSTRING("amr"))
+						payload = "amr-o";
+					    else if (payload == YSTRING("amr/16000"))
+						payload = "amr-o/16000";
+					}
+					else if (payload == YSTRING("amr-o"))
+					    payload = "amr";
+					else if (payload == YSTRING("amr-o/16000"))
+					    payload = "amr/16000";
+					break;
+				    }
+				    continue;
+				default:
+				    continue;
+			    }
+			    found = true;
+			    o->set(0);
+			    // Done: we are searching for a single parameter
+			    break;
+			}
+		    }
+		    XDebug(this,DebugAll,"%s fmtp '%s' (%d) '%s'",
+			(checkParams ? (found ? "Found" : "Checked") : "Parsed"),
+			payload.c_str(),var,fmtp.c_str());
+		    if (found) {
+			fmtp.clear();
+			if (fmtps && fmtps->skipNull())
+			    fmtp.append(fmtps,";");
+		    }
+		    TelEngine::destruct(fmtps);
+		}
+		if (payload == YSTRING("ilbc")) {
+		    const char* forced = m_hacks.getValue(YSTRING("ilbc_forced"));
+		    if (forced)
+			payload = forced;
+		    else if (mode == 20)
+			payload = "ilbc20";
+		    else if (mode == 30)
+			payload = "ilbc30";
+		    else if ((ptime % 30) && !(ptime % 20))
+			payload = "ilbc20";
+		    else if ((ptime % 20) && !(ptime % 30))
+			payload = "ilbc30";
+		    else
+			payload = m_hacks.getValue(YSTRING("ilbc_default"),"ilbc30");
+		}
 	    }
 
 	    XDebug(this,DebugAll,"Payload %d format '%s'%s",var,payload.c_str(),
@@ -391,8 +414,14 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 			mappings << ",";
 		    mappings << payload << "=" << var;
 		}
-		while (NamedString* par = static_cast<NamedString*>(fmtl.remove(false)))
-		    dest = dest->append(par);
+		String gpmd;
+		if (getPayloadLine(gpmd,fmtLines,var,"gpmd:")) {
+		    XDebug(this,DebugAll,"Found 'gpmd:%d' format='%s' value='%s'",
+			var,payload.c_str(),gpmd.c_str());
+		    dest = dest->append(new NamedString("gpmd:" + payload,gpmd));
+		}
+		if (fmtp)
+		    dest = dest->append(new NamedString("fmtp:" + payload,fmtp));
 		if ((payload == "g729") && m_hacks.getBoolValue(YSTRING("g729_annexb"),annexB))
 		    aux << ",g729b";
 	    }
