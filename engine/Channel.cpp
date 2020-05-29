@@ -385,6 +385,9 @@ static const String s_disconnected("chan.disconnected");
 // Mutex used to lock disconnect parameters during access
 static Mutex s_paramMutex(true,"ChannelParams");
 
+// Mutex used to protect channel data
+Mutex Channel::s_chanDataMutex(false,"ChannelData");
+
 Channel::Channel(Driver* driver, const char* id, bool outgoing)
     : CallEndpoint(id),
       m_parameters(""), m_chanParams(0), m_driver(driver), m_outgoing(outgoing),
@@ -582,7 +585,7 @@ Message* Channel::getDisconnect(const char* reason)
 
 void Channel::status(const char* newstat)
 {
-    Lock lock(mutex());
+    Lock lck(chanDataMutex());
     m_status = newstat;
     if (!m_answered && (m_status == YSTRING("answered"))) {
 	m_answered = true;
@@ -657,8 +660,9 @@ void Channel::complete(Message& msg, bool minimal) const
     if (minimal)
 	return;
 
-    if (m_status)
-	msg.setParam("status",m_status);
+    String tmp;
+    if (getStatus(tmp,false))
+	msg.setParam(YSTRING("status"),tmp);
     if (m_address)
 	msg.setParam("address",m_address);
     if (m_targetid)
@@ -778,6 +782,7 @@ bool Channel::msgMasquerade(Message& msg)
 	TraceDebug(traceId(),this,DebugInfo,"Masquerading answer operation [%p]",this);
 	m_maxcall = 0;
 	maxPDD(0);
+	Lock lck(chanDataMutex());
 	m_status = "answered";
     }
     else if (msg == YSTRING("call.progress")) {
@@ -832,7 +837,8 @@ void Channel::statusParams(String& str)
     String peer;
     if (getPeerId(peer))
 	str.append("peerid=",",") << peer;
-    str.append("status=",",") << m_status;
+    str.append("status=",",");
+    getStatus(str);
     str << ",direction=" << direction();
     str << ",answered=" << m_answered;
     str << ",targetid=" << m_targetid;
@@ -1648,8 +1654,9 @@ void Driver::statusDetail(String& str)
     ObjList* l = m_chans.skipNull();
     for (; l; l=l->skipNext()) {
 	Channel* c = static_cast<Channel*>(l->get());
-	str.append(c->id(),",") << "=" << c->status()
-	    << "|" << String::uriEscape(c->address(),",;|"," +?&")
+	str.append(c->id(),",") << "=";
+	c->getStatus(str);
+	str << "|" << String::uriEscape(c->address(),",;|"," +?&")
 	    << "|" << c->getPeerId();
     }
 }

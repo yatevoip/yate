@@ -576,7 +576,8 @@ void AnalyzerChan::destroyed()
     RefPointer<AnalyzerCons> cons = YOBJECT(AnalyzerCons,getConsumer());
     char buf[32];
     printTime(buf,(unsigned int)(Time::now() - m_timeStart));
-    String str(status());
+    String str;
+    getStatus(str);
     Message* msg = message("call.analyzer");
     localParams(str,msg);
     str.append("totaltime=",",") << buf;

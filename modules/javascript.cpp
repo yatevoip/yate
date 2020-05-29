@@ -4859,8 +4859,11 @@ bool JsChannel::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	if (ja)
 	    cp = ja->locate();
 	Channel* ch = YOBJECT(Channel,cp);
-	if (ch)
-	    ExpEvaluator::pushOne(stack,new ExpOperation(ch->status()));
+	if (ch) {
+	    String tmp;
+	    ch->getStatus(tmp);
+	    ExpEvaluator::pushOne(stack,new ExpOperation(tmp));
+	}
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }

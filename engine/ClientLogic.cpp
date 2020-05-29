@@ -9286,7 +9286,9 @@ bool DefaultLogic::handleClientChanUpdate(Message& msg, bool& stopLogic)
 	p.addParam("format",fmt);
     }
     if (setStatus && chan) {
-	String s = chan->status().substr(0,1).toUpper() + chan->status().substr(1);
+	String s;
+	chan->getStatus(s);
+	s = s.substr(0,1).toUpper() + s.substr(1);
 	p.setParam("status",s);
     }
     if (!slave)

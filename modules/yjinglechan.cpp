@@ -934,7 +934,7 @@ YJGConnection::YJGConnection(Message& msg, const char* caller, const char* calle
 	Time::now(),maxcall(),this);
     // Startup
     Message* m = message("chan.startup",msg);
-    m->setParam("direction",status());
+    m->setParam("direction",getStatus());
     m_targetid = msg.getValue("id");
     m->copyParams(msg,"caller,callername,called,billid,callto,username");
     Engine::enqueue(m);
@@ -1072,7 +1072,6 @@ YJGConnection::YJGConnection(JGEvent* event)
 
     // Startup
     Message* m = message("chan.startup");
-    m->setParam("direction",status());
     m->setParam("caller",m_remote.bare());
     m->setParam("called",m_local.node());
     Engine::enqueue(m);

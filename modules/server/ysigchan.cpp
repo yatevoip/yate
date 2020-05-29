@@ -1076,7 +1076,6 @@ SigChannel::SigChannel(SignallingEvent* event)
 	m_sdpForward = cic->getBoolParam("sdp_forward");
     }
     Message* m = message("chan.startup");
-    m->setParam("direction",status());
     m->addParam("caller",m_caller);
     m->addParam("called",m_called);
     if (msg)
@@ -1204,7 +1203,7 @@ bool SigChannel::startCall(Message& msg, String& trunks)
     setMaxcall(msg);
     setMaxPDD(msg);
     Message* m = message("chan.startup",msg);
-    m->setParam("direction",status());
+    m->setParam("direction",getStatus());
     m_targetid = msg.getValue("id");
     m->copyParams(msg,"caller,callername,called,billid,callto,username");
     // TODO: Add call control parameter ?
@@ -1643,7 +1642,7 @@ void SigChannel::hangup(const char* reason, SignallingEvent* event, const NamedL
     if (ev)
 	ev->sendEvent();
     Message* m = message("chan.hangup",true);
-    m->setParam("status",status());
+    putStatus(*m);
     m->setParam("reason",m_reason);
     Engine::enqueue(m);
 }
@@ -1706,7 +1705,7 @@ void SigChannel::evInfo(SignallingEvent* event)
 	m->addParam("text",tmp);
 	m->addParam("detected",inband ? "inband" : "signal");
 	m->copyParams(event->message()->params(),"dialing");
-	if (status() != "incoming")
+	if ((*m)[YSTRING("status")] != YSTRING("incoming"))
 	    dtmfEnqueue(m);
 	else {
 	    Lock lock(m_mutex);

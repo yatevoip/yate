@@ -1388,7 +1388,6 @@ AnalogChannel::AnalogChannel(ModuleLine* line, Message* msg, RecordTrigger recor
 	setMaxPDD(*msg);
     // Startup
     Message* m = message("chan.startup");
-    m->setParam("direction",status());
     if (msg)
 	m->copyParams(*msg,"caller,callername,called,billid,callto,username");
     m_line->copyCall(*m);
@@ -1693,7 +1692,7 @@ void AnalogChannel::hangup(bool local, const char* status, const char* reason)
     setConsumer();
 
     Message* m = message("chan.hangup",true);
-    m->setParam("status",this->status());
+    putStatus(*m);
     m->setParam("reason",m_reason);
     Engine::enqueue(m);
 
@@ -2026,11 +2025,15 @@ bool AnalogChannel::setStatus(const char* newStat)
 {
     if (newStat)
 	status(newStat);
-    if (m_reason)
-	Debug(this,DebugCall,"status=%s reason=%s [%p]",
-	    status().c_str(),m_reason.c_str(),this);
-    else
-	Debug(this,DebugCall,"status=%s [%p]",status().c_str(),this);
+    if (debugAt(DebugCall)) {
+	String tmp;
+	getStatus(tmp);
+	if (m_reason)
+	    Debug(this,DebugCall,"status=%s reason=%s [%p]",
+		tmp.c_str(),m_reason.c_str(),this);
+	else
+	    Debug(this,DebugCall,"status=%s [%p]",tmp.c_str(),this);
+    }
     return true;
 }
 

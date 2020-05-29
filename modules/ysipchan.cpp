@@ -6843,7 +6843,7 @@ Message* YateSIPConnection::buildChanRtp(RefObject* context)
 	complete(*m,true);
 	m->addParam("call_direction",direction());
 	m->addParam("call_address",address());
-	m->addParam("call_status",status());
+	putStatus(*m,"call_status");
 	m->addParam("call_billid",billid());
 	m->userData(static_cast<CallEndpoint*>(this));
     }
@@ -6862,7 +6862,7 @@ void YateSIPConnection::mediaChanged(const SDPMedia& media)
 	m.addParam("terminate",String::boolText(true));
 	m.addParam("call_direction",direction());
 	m.addParam("call_address",address());
-	m.addParam("call_status",status());
+	putStatus(m,"call_status");
 	m.addParam("call_billid",billid());
 	if (m_traceId)
 	  m.addParam("trace_id",m_traceId);

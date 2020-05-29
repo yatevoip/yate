@@ -1868,10 +1868,35 @@ public:
 
     /**
      * Get the current status of the channel
-     * @return The current status as String
+     * This method is thread safe
+     * @param buf Destination buffer
+     * @param append True to append to destination buffer, false to set (replace contents)
+     * @return Destination buffer reference
      */
-    inline const String& status() const
-	{ return m_status; }
+    inline String& getStatus(String& buf, bool append = true) const {
+	    Lock lck(chanDataMutex());
+	    if (append)
+		buf += m_status;
+	    else
+		buf = m_status;
+	    return buf;
+	}
+
+    /**
+     * Get the current status of the channel. Add it in list parameters
+     * This method is thread safe
+     * @param list Destination list
+     * @param param Parameter name
+     * @param append True to append parameter to list, false to replace
+     */
+    inline void putStatus(NamedList& list, const char* param = "status", bool append = true) const {
+	    NamedString* ns = new NamedString(param);
+	    getStatus(*ns);
+	    if (append)
+		list.addParam(ns);
+	    else
+		list.setParam(ns);
+	}
 
     /**
      * Get the current link address of the channel
@@ -2137,6 +2162,14 @@ protected:
     void status(const char* newstat);
 
     /**
+     * Retrieve Channel status
+     * This method is not thread safe
+     * @return Channel status
+     */
+    inline const String& getStatus() const
+	{ return m_status; }
+
+    /**
      * Build the parameter reporting part of the status answer
      * @param str String variable to fill up
      */
@@ -2189,6 +2222,10 @@ protected:
 private:
     void init();
     Channel(); // no default constructor please
+    static Mutex s_chanDataMutex;
+    // Just in case we are going to (re)move the channel data mutex!
+    static inline Mutex* chanDataMutex()
+	{ return &s_chanDataMutex; }
 };
 
 /**
