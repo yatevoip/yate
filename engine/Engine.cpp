@@ -139,6 +139,11 @@ using namespace TelEngine;
 #define MAX_STOP 5
 #endif
 
+// How many microseconds a worker sleeps on semaphore
+#ifndef WORKER_SLEEP
+#define WORKER_SLEEP 500000
+#endif
+
 // Supervisor control constants
 
 // Minimum configurable size of child's sanity pool
@@ -292,6 +297,7 @@ static String s_startMsg;
 static SharedVars s_vars;
 static Mutex s_hooksMutex(true,"HooksList");
 static ObjList s_hooks;
+static Semaphore* s_semWorkers = 0;
 static NamedCounter* s_counter = 0;
 static NamedCounter* s_workCnt = 0;
 
@@ -933,8 +939,17 @@ void EnginePrivate::run()
     setCurrentObjCounter(s_workCnt);
     for (;;) {
 	s_makeworker = false;
+	Semaphore* s = s_semWorkers;
+	if (s && Engine::self()->m_dispatcher.hasMessages())
+	    s->unlock();
 	Engine::self()->m_dispatcher.dequeue();
-	Thread::idle(true);
+	s = s_semWorkers;
+	if (s) {
+	    s->lock(WORKER_SLEEP);
+	    Thread::yield(true);
+	}
+	else
+	    Thread::idle(true);
     }
 }
 
@@ -1513,8 +1528,8 @@ int Engine::engineInit()
     const char *modPath = s_cfg.getValue("general","modpath");
     if (modPath)
 	s_modpath = modPath;
-    s_minworkers = s_cfg.getIntValue("general","minworkers",s_minworkers,1,100);
-    s_maxworkers = s_cfg.getIntValue("general","maxworkers",s_maxworkers,s_minworkers,500);
+    s_minworkers = s_cfg.getIntValue("general","minworkers",s_minworkers,1,500);
+    s_maxworkers = s_cfg.getIntValue("general","maxworkers",s_maxworkers,s_minworkers,1000);
     s_addworkers = s_cfg.getIntValue("general","addworkers",s_addworkers,1,10);
     s_maxmsgrate = s_cfg.getIntValue("general","maxmsgrate",s_maxmsgrate,0,50000);
     s_maxmsgage = s_cfg.getIntValue("general","maxmsgage",s_maxmsgage,0,5000);
@@ -1768,14 +1783,22 @@ int Engine::run()
 	    }
 	    else {
 		build = s_minworkers;
-		Debug(DebugInfo,"Creating first %d message dispatching threads",build);
+		if (!s_semWorkers && s_cfg.getBoolValue("general","semworkers",Semaphore::efficientTimedLock()))
+		    s_semWorkers = new Semaphore(build,"Workers",0);
+		Debug(DebugInfo,"Creating first %d message dispatching threads%s",build,
+		    (s_semWorkers ? " and semaphore" : ""));
 	    }
 	    do {
 		(new EnginePrivate)->startup();
 	    } while (--build > 0);
 	}
-	else
+	else {
 	    s_makeworker = true;
+	    // Wake at least one worker into action
+	    Semaphore* s = s_semWorkers;
+	    if (s)
+		s->unlock();
+	}
 
 	uint64_t now = Time::now();
 	if (last) {
@@ -1865,6 +1888,12 @@ int Engine::engineCleanup()
     myLock.drop();
     dispatch("engine.halt",true);
     checkPoint();
+    Semaphore* s = s_semWorkers;
+    s_semWorkers = 0;
+    if (s) {
+	for (int i = EnginePrivate::count; i > 0; i--)
+	    s->unlock();
+    }
     Thread::msleep(200);
     m_dispatcher.dequeue();
     checkPoint();
@@ -1886,6 +1915,7 @@ int Engine::engineCleanup()
     plugins.clear();
     if (mux || cnt)
 	Debug(DebugWarn,"Exiting with %d locked mutexes and %u plugins loaded!",mux,cnt);
+    delete s;
     if (GenObject::getObjCounting()) {
 	String str;
 	int obj = EngineStatusHandler::objects(str);
@@ -2243,7 +2273,13 @@ bool Engine::enqueue(Message* msg, bool skipHooks)
 	    return true;
 	}
     }
-    return s_self ? s_self->m_dispatcher.enqueue(msg) : false;
+    if (s_self && s_self->m_dispatcher.enqueue(msg)) {
+	Semaphore*s = s_semWorkers;
+	if (s)
+	    s->unlock();
+	return true;
+    }
+    return false;
 }
 
 bool Engine::dispatch(Message* msg)

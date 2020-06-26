@@ -34,6 +34,10 @@
 ; Valid range 1 to 10, default 1
 ;addworkers=1
 
+; semworkers: boolean: Use a timed semaphore to reduce idle CPU usage
+; Default true if the software platform supports timed semaphores efficiently
+;semworkers=
+
 ; maxmsgrate: int: Message rate threshold to declare engine congestion
 ; This parameter is reloadable
 ; Valid range 0 to 50000, default 0 (disable message rate check)

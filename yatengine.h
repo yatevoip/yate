@@ -790,6 +790,27 @@ public:
 	{ m_handlers.clear(); m_hookAppend = &m_hooks; m_hooks.clear(); }
 
     /**
+     * Check if there is at least one message in the queue
+     * @return True if the queue holds at least one message
+     */
+    inline bool hasMessages() const
+	{ return m_messages.get() || m_messages.next(); }
+
+    /**
+     * Check if there is at least one handler installed
+     * @return True if at least one handler is installed
+     */
+    inline bool hasHandlers() const
+	{ return m_handlers.get() || m_handlers.next(); }
+
+    /**
+     * Check if there is at least one message hook installed
+     * @return True if at least one hook is installed
+     */
+    inline bool hasHooks() const
+	{ return m_hooks.get() || m_hooks.next(); }
+
+    /**
      * Get the number of messages waiting in the queue
      * @return Count of messages in the queue
      */
