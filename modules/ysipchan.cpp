@@ -7273,6 +7273,7 @@ bool YateSIPConnection::processTransaction2(SIPEvent* ev, const SIPMessage* msg,
     Message* m = message("call.update");
     decodeIsupBody(*m,msg->body);
     copySipBody(*m,msg->body);
+    copySipHeaders(*m,*msg);
     if (code < 300) {
 	m->addParam("operation","notify");
 	String natAddr;
@@ -8093,6 +8094,7 @@ bool YateSIPConnection::msgUpdate(Message& msg)
 	updateTarget(m1);
 	SIPMessage* m = new SIPMessage(m1,200);
 	m->setBody(sdp);
+	copySipHeaders(*m,msg);
 	m_tr2->setResponse(m);
 	if (m_tr2->autoAck())
 	    detachTransaction2();
