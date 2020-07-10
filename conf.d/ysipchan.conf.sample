@@ -519,7 +519,9 @@
 
 
 ;[listener name]
-; This section configures a listener named 'name' ('general' is reserved and will be ignored)
+; This section configures a listener named 'name'
+; If a listener named 'general' is configured (section 'listener general' exists) no listener
+;  will be setup from the 'general' section.
 ; The following parameters can be overridden from 'general' section:
 ;   UDP: maxpkt, buffer
 ;   TCP/TLS: tcp_maxpkt
