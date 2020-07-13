@@ -270,6 +270,21 @@ void AccFilePlugin::initialize()
 	Engine::install(new CmdHandler);
 	Engine::install(new HelpHandler);
     }
+    else {
+	String oper = s_cfg.getValue("general","auto_oper");
+	if (oper) {
+	    s_mutex.lock();
+	    s_cfg.load();
+	    oper = s_cfg.getValue("general","auto_oper");
+	    s_mutex.unlock();
+	    ObjList* list = oper.split(',',false);
+	    for (ObjList* l = list->skipNull(); l; l = l->skipNext()) {
+		oper = *static_cast <const String*>(l->get());
+		if (oper.trimSpaces())
+		    emitAccounts(oper);
+	    }
+	}
+    }
 }
 
 }; // anonymous namespace

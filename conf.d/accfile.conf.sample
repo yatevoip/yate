@@ -84,6 +84,10 @@
 ;   addr: Local address for H323 listener (leave it empty to listen on all interfaces)
 ;   port: Local port for H323 listener
 
+;[general]
+; Only in [general] if auto_oper is not empty on initialize the file is reloaded and each operation executed
+;auto_oper=logout,login
+
 [test_sip]
 enabled=no
 protocol=sip
