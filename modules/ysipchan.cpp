@@ -1150,10 +1150,9 @@ public:
         { return m_parser; }
     inline bool traceActive() const
     { 
-	return Engine::sharedVars().exists(YSTRING("trace")) ||
-		Engine::sharedVars().exists(YSTRING("trace_sip"));
+	return s_trace || Engine::sharedVars().exists(YSTRING("trace")) ||
+	    Engine::sharedVars().exists(YSTRING("trace_sip"));
     }
-    
     void epTerminated(YateSIPEndPoint* ep);
     YateSIPConnection* findCall(const String& callid, bool incRef = false);
     YateSIPConnection* findDialog(const SIPDialog& dialog, bool incRef = false);
@@ -1175,6 +1174,9 @@ public:
     // Send a SIP method
     bool sendMethod(Message& msg, const char* method, bool msgExec = false,
 	const char* target = 0);
+
+    static bool s_trace;
+
 protected:
     virtual void genUpdate(Message& msg);
     // Setup a listener from config
@@ -1291,6 +1293,7 @@ static const String s_username = "username";
 static u_int64_t s_printFloodTime = 0;
 
 int YateSIPEndPoint::s_evCount = 0;
+bool SIPDriver::s_trace = false;
 
 // DTMF methods
 static bool s_checkAllowInfo = true;         // Check Allow in INVITE and OK for INFO support
@@ -3389,16 +3392,22 @@ int YateSIPUDPTransport::process()
     }
     char* b = (char*)m_buffer.data();
     b[res] = 0;
-    if (s_printMsg && !plugin.traceActive())
+    bool print = true;
+    if (s_printMsg && !plugin.traceActive()) {
+	print = false;
 	printRecvMsg(b,res);
+    }
 
     if (s_floodProtection && s_floodEvents && evc >= s_floodEvents) {
 	if (!s_printFloodTime)
 	    Alarm(&plugin,"performance",DebugWarn,
 		"Flood detected, dropping INVITE/REGISTER/SUBSCRIBE/OPTIONS, allowing reINVITES");
 	s_printFloodTime = Time::now() + 10000000;
-	if (!msgIsAllowed(b,res))
+	if (!msgIsAllowed(b,res)) {
+	    if (s_printMsg && print)
+		printRecvMsg(b,res);
 	    return 0;
+	}
     }
     else if (s_printFloodTime && s_printFloodTime < Time::now()) {
 	s_printFloodTime = 0;
@@ -3406,6 +3415,7 @@ int YateSIPUDPTransport::process()
     }
 
     SIPMessage* msg = SIPMessage::fromParsing(0,b,res);
+    msg->msgPrint = print;
     receiveMsg(msg);
     return 0;
 }
@@ -3968,9 +3978,13 @@ bool YateSIPTCPTransport::readData(const Time& time, bool& read)
 	    m_sipBufOffs += m_contentLen;
 	    m_contentLen = 0;
 	}
-	if (s_printMsg && !plugin.traceActive())
+	bool print = true;
+	if (s_printMsg && !plugin.traceActive()) {
+	    print = false;
 	    printRecvMsg(data,m_sipBufOffs);
+	}
 	SIPMessage* msg = m_msg;
+	msg->msgPrint = print;
 	m_msg = 0;
 	receiveMsg(msg);
 	data += m_sipBufOffs;
@@ -4751,7 +4765,7 @@ void YateSIPEngine::allocTraceId(String& id)
 
 void YateSIPEngine::traceMsg(SIPMessage* message, bool incoming)
 {
-    if (!(message && message->traceId() && message->getParty()))
+    if (!(message && message->msgPrint && s_printMsg && message->getParty()))
 	return;
     YateSIPTransport* trans = static_cast<YateSIPTransport*>(message->getParty()->getTransport());
     if (!trans)
@@ -9479,6 +9493,7 @@ void SIPDriver::initialize()
     s_changeParty2xx = s_cfg.getBoolValue("general","change_party_2xx",false);
     s_initialHeaders = s_cfg.getBoolValue("general","initial_headers");
     m_parser.initialize(s_cfg.getSection("codecs"),s_cfg.getSection("hacks"),s_cfg.getSection("general"));
+    s_trace = s_cfg.getBoolValue("general","trace");
     if (!m_endpoint) {
 	Thread::Priority prio = Thread::priority(s_cfg.getValue("general","thread"));
 	unsigned int partyMutexCount = s_cfg.getIntValue("general","party_mutexcount",47,13,101);

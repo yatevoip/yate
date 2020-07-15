@@ -533,6 +533,11 @@ public:
      */
     String msgTraceId;
 
+    /**
+     * Message print in debug
+     */
+    bool msgPrint;
+
 protected:
     bool parse(const char* buf, int len, unsigned int* bodyLen);
     bool parseFirst(String& line);
