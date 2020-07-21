@@ -137,21 +137,22 @@ void RTPGroup::setMinSleep(int msec)
 }
 
 
-RTPProcessor::RTPProcessor()
-    : m_wrongSrc(0), m_group(0)
+RTPProcessor::RTPProcessor(DebugEnabler* dbg, const char* traceId)
+    : RTPDebug(dbg,traceId),
+    m_wrongSrc(0), m_group(0)
 {
-    DDebug(DebugAll,"RTPProcessor::RTPProcessor() [%p]",this);
+    DDebug(this->dbg(),DebugAll,"RTPProcessor::RTPProcessor() [%p]",this);
 }
 
 RTPProcessor::~RTPProcessor()
 {
-    DDebug(DebugAll,"RTPProcessor::~RTPProcessor() [%p]",this);
+    DDebug(dbg(),DebugAll,"RTPProcessor::~RTPProcessor() [%p]",this);
     group(0);
 }
 
 void RTPProcessor::group(RTPGroup* newgrp)
 {
-    DDebug(DebugAll,"RTPProcessor::group(%p) old=%p [%p]",newgrp,m_group,this);
+    DDebug(dbg(),DebugAll,"RTPProcessor::group(%p) old=%p [%p]",newgrp,m_group,this);
     if (newgrp == m_group)
 	return;
     if (m_group)
@@ -174,20 +175,20 @@ void RTPProcessor::getStats(String& stats) const
 }
 
 
-RTPTransport::RTPTransport(RTPTransport::Type type)
-    : RTPProcessor(),
+RTPTransport::RTPTransport(RTPTransport::Type type, DebugEnabler* dbg, const char* traceId)
+    : RTPProcessor(dbg,traceId),
       m_type(type), m_processor(0), m_monitor(0), m_autoRemote(false),
       m_warnSendErrorRtp(true), m_warnSendErrorRtcp(true)
 {
-    DDebug(DebugAll,"RTPTransport::RTPTransport(%d) [%p]",type,this);
+    DDebug(this->dbg(),DebugAll,"RTPTransport::RTPTransport(%d) [%p]",type,this);
 }
 
 RTPTransport::~RTPTransport()
 {
-    DDebug(DebugAll,"RTPTransport::~RTPTransport() [%p]",this);
+    DDebug(dbg(),DebugAll,"RTPTransport::~RTPTransport() [%p]",this);
     RTPGroup* g = group();
     if (g)
-	Debug(DebugCrit,"RTPTransport destroyed while in RTPGroup %p [%p]",g,this);
+	TraceDebug(m_traceId,dbg(),DebugCrit,"RTPTransport destroyed while in RTPGroup %p [%p]",g,this);
     group(0);
     setProcessor();
     setMonitor();
@@ -203,12 +204,12 @@ void RTPTransport::destruct()
 
 void RTPTransport::timerTick(const Time& when)
 {
-    XDebug(DebugAll,"RTPTransport::timerTick() group=%p [%p]",group(),this);
+    XDebug(dbg(),DebugAll,"RTPTransport::timerTick() group=%p [%p]",group(),this);
     if (m_rtpSock.valid()) {
 	char buf[BUF_SIZE];
 	int len;
 	while ((len = m_rtpSock.recvFrom(buf,sizeof(buf),m_rxAddrRTP)) > 0) {
-	    XDebug(DebugAll,"RTP/UDPTL from '%s:%d' length %d [%p]",
+	    XDebug(dbg(),DebugAll,"RTP/UDPTL from '%s:%d' length %d [%p]",
 		m_rxAddrRTP.host().c_str(),m_rxAddrRTP.port(),len,this);
 	    switch (m_type) {
 		case RTP:
@@ -229,7 +230,7 @@ void RTPTransport::timerTick(const Time& when)
 	    // looks like it's RTP or UDPTL, at least by length and version
 	    bool preferred = false;
 	    if ((m_autoRemote || (preferred = (m_rxAddrRTP == m_remotePref))) && (m_rxAddrRTP != m_remoteAddr)) {
-		Debug(DebugInfo,"Auto changing RTP address from %s:%d to%s %s:%d",
+		TraceDebug(m_traceId,dbg(),DebugInfo,"Auto changing RTP address from %s:%d to%s %s:%d",
 		    m_remoteAddr.host().c_str(),m_remoteAddr.port(),
 		    (preferred ? " preferred" : ""),
 		    m_rxAddrRTP.host().c_str(),m_rxAddrRTP.port());
@@ -254,7 +255,7 @@ void RTPTransport::timerTick(const Time& when)
 	char buf[BUF_SIZE];
 	int len;
 	while (((len = m_rtcpSock.recvFrom(buf,sizeof(buf),m_rxAddrRTCP)) >= 8) && (m_rxAddrRTCP == m_remoteRTCP)) {
-	    XDebug(DebugAll,"RTCP from '%s:%d' length %d [%p]",
+	    XDebug(dbg(),DebugAll,"RTCP from '%s:%d' length %d [%p]",
 		m_rxAddrRTCP.host().c_str(),m_rxAddrRTCP.port(),len,this);
 	    if (m_processor)
 		m_processor->rtcpData(buf,len);
@@ -268,7 +269,7 @@ void RTPTransport::timerTick(const Time& when)
 // Send data to remote party
 // Put a debug message on failure
 // Return true if all bytes were sent
-static bool sendData(Socket& sock, const SocketAddr& to, const void* data, int len,
+bool RTPTransport::sendData(Socket& sock, const SocketAddr& to, const void* data, int len,
     const char* what, bool& flag)
 {
     if (!sock.valid())
@@ -278,7 +279,7 @@ static bool sendData(Socket& sock, const SocketAddr& to, const void* data, int l
 	    flag = false;
 	    SocketAddr local;
 	    sock.getSockName(local);
-	    Debug(DebugNote,"%s send failed (local=%s): invalid remote address",
+	    TraceDebug(m_traceId,dbg(),DebugNote,"%s send failed (local=%s): invalid remote address",
 		what,local.addr().c_str());
 	}
 	return false;
@@ -292,7 +293,7 @@ static bool sendData(Socket& sock, const SocketAddr& to, const void* data, int l
 	Thread::errorString(s,e);
 	SocketAddr local;
 	sock.getSockName(local);
-	Debug(DebugNote,"%s send failed (local=%s remote=%s): %d %s",
+	TraceDebug(m_traceId,dbg(),DebugNote,"%s send failed (local=%s remote=%s): %d %s",
 	    what,local.addr().c_str(),to.addr().c_str(),e,s.c_str());
     }
     return wr == len;
@@ -374,7 +375,7 @@ bool RTPTransport::localAddr(SocketAddr& addr, bool rtcp)
 		    setScopeId(m_localAddr,m_remoteAddr,m_remoteRTCP,&m_remotePref);
 		    return true;
 		}
-		DDebug(DebugMild,"RTP Socket failed with code %d",m_rtpSock.error());
+		DDebug(dbg(),DebugMild,"RTP Socket failed with code %d",m_rtpSock.error());
 		m_rtpSock.terminate();
 		m_rtcpSock.terminate();
 		return false;
@@ -390,12 +391,12 @@ bool RTPTransport::localAddr(SocketAddr& addr, bool rtcp)
 	}
 #ifdef DEBUG
 	else
-	    Debug(DebugMild,"RTCP Socket failed with code %d",m_rtcpSock.error());
+	    Debug(dbg(),DebugMild,"RTCP Socket failed with code %d",m_rtcpSock.error());
 #endif
     }
 #ifdef DEBUG
     else
-	Debug(DebugMild,"RTP Socket failed with code %d",m_rtpSock.error());
+	Debug(dbg(),DebugMild,"RTP Socket failed with code %d",m_rtpSock.error());
 #endif
     m_rtpSock.terminate();
     m_rtcpSock.terminate();

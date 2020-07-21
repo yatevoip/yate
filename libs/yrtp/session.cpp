@@ -33,6 +33,14 @@ using namespace TelEngine;
 // How many packets in a row will resync sequence
 #define SEQ_RESYNC_COUNT 5
 
+RTPDebug::RTPDebug(RTPSession* session)
+    : m_dbg(0)
+{
+    if (session)
+	setDebug(session->dbg(),session->dbgTraceId());
+}
+
+
 RTPBaseIO::~RTPBaseIO()
 {
     security(0);
@@ -78,7 +86,7 @@ unsigned int RTPBaseIO::ssrcInit()
 
 void RTPBaseIO::security(RTPSecure* secure)
 {
-    DDebug(DebugInfo,"RTPBaseIO::security(%p) old=%p [%p]",secure,m_secure,this);
+    DDebug(dbg(),DebugInfo,"RTPBaseIO::security(%p) old=%p [%p]",secure,m_secure,this);
     if (secure == m_secure)
 	return;
     RTPSecure* tmp = m_secure;
@@ -92,6 +100,22 @@ void RTPBaseIO::security(RTPSecure* secure)
     TelEngine::destruct(tmp);
 }
 
+void RTPBaseIO::initDebugData(bool recv, const NamedList& params)
+{
+    const String* p = params.getParam(YSTRING("debug_rtp"));
+    if (!p)
+	return;
+    bool on = p->toBoolean();
+    String suff(recv ? "_recv" : "_send");
+    m_debugData = params.getBoolValue("debug_rtp_data" + suff,
+	params.getBoolValue(YSTRING("debug_rtp_data"),on));
+    m_debugEvent = params.getBoolValue("debug_rtp_event" + suff,
+	params.getBoolValue(YSTRING("debug_rtp_event"),on));
+    m_debugDataLevel = params.getIntValue(YSTRING("debug_rtp_level"),DebugAll);
+    if (m_debugDataLevel <= DebugFail)
+	m_debugDataLevel = 1 + DebugFail;
+}
+
 
 RTPReceiver::~RTPReceiver()
 {
@@ -102,7 +126,7 @@ void RTPReceiver::setDejitter(RTPDejitter* dejitter)
 {
     if (dejitter == m_dejitter)
 	return;
-    DDebug(DebugInfo,"RTP setting new dejitter %p [%p]",dejitter,this);
+    DDebug(dbg(),DebugInfo,"RTP setting new dejitter %p [%p]",dejitter,this);
     RTPDejitter* tmp = m_dejitter;
     m_dejitter = 0;
     if (tmp) {
@@ -172,6 +196,9 @@ void RTPReceiver::rtpData(const void* data, int len)
 	m_seq = seq-1;
 	m_seqCount = 0;
 	m_warn = true;
+	if (m_debugData)
+	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,"RTP recv INIT SEQ=%u TS=%u TS_LAST=%u [%p]",
+		seq,ts,m_tsLast,this);
 	if (m_dejitter)
 	    m_dejitter->clear();
     }
@@ -182,7 +209,7 @@ void RTPReceiver::rtpData(const void* data, int len)
 	if (ss != m_ssrc) {
 	    if (m_warn) {
 		m_warn = false;
-		Debug(DebugWarn,"RTP Received SSRC %08X but expecting %08X [%p]",
+		TraceDebug(m_traceId,dbg(),DebugWarn,"RTP Received SSRC %08X but expecting %08X [%p]",
 		    ss,m_ssrc,this);
 	    }
 	    m_wrongSSRC++;
@@ -192,6 +219,10 @@ void RTPReceiver::rtpData(const void* data, int len)
 	m_seq = seq;
 	m_ts = ts - m_tsLast;
 	m_seqCount = 0;
+	if (m_debugData)
+	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+		"RTP recv SEQ=%u TS=%u TS_LAST=%u new SSRC accepted, dropping [%p]",
+		seq,ts,m_tsLast,this);
 	if (m_dejitter)
 	    m_dejitter->clear();
 	// drop this packet, next packet will come in correctly
@@ -206,15 +237,25 @@ void RTPReceiver::rtpData(const void* data, int len)
     seq48 = (seq48 << 16) | seq;
 
     // if some security data is present authenticate the packet now
-    if (secPtr && !rtpCheckIntegrity((const unsigned char*)data,len + padding + 12,secPtr + m_mkiLen,ss,seq48))
+    if (secPtr && !rtpCheckIntegrity((const unsigned char*)data,len + padding + 12,secPtr + m_mkiLen,ss,seq48)) {
+	if (m_debugData)
+	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+		"RTP recv SEQ=%u TS=%u TS_LAST=%u integrity check failed, dropping [%p]",
+		seq,ts,m_tsLast,this);
 	return;
+    }
 
     // substraction with overflow to compute sequence difference
     int16_t ds = seq - m_seq;
     if (ds != 1)
 	m_seqLost++;
-    if (ds == 0)
+    if (ds == 0) {
+	if (m_debugData)
+	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+		"RTP recv SEQ=%u TS=%u TS_LAST=%u same as our last seq, dropping [%p]",
+		seq,ts,m_tsLast,this);
 	return;
+    }
 
     // check if we received a packet too much out of sequence
     // be much more tolerant when authenticating as we cannot resync
@@ -226,7 +267,12 @@ void RTPReceiver::rtpData(const void* data, int len)
 		if (seq == ++m_seqSync) {
 		    // good - packets numbers still in sequence
 		    if (m_seqCount >= SEQ_RESYNC_COUNT) {
-			Debug(DebugNote,"RTP sequence resync: %u -> %u [%p]",m_seq,seq,this);
+			if (m_debugData)
+			    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+				"RTP recv SEQ=%u TS=%u TS_LAST=%u sequence resync from current %u [%p]",
+				seq,ts,m_tsLast,m_seq,this);
+			else
+			    TraceDebug(m_traceId,dbg(),DebugNote,"RTP sequence resync: %u -> %u [%p]",m_seq,seq,this);
 			// sync sequence and resync the timestamp offset
 			m_seq = seq;
 			m_ts = ts - m_tsLast;
@@ -248,15 +294,17 @@ void RTPReceiver::rtpData(const void* data, int len)
 	    else
 		m_seqSync = seq;
 	}
+	if (m_debugData)
+	    m_warnSeq = -1;
 	if (m_warnSeq > 0) {
 	    if (m_warn) {
 		m_warn = false;
-		Debug(DebugWarn,"RTP received SEQ %u while current is %u [%p]",seq,m_seq,this);
+		TraceDebug(m_traceId,dbg(),DebugWarn,"RTP received SEQ %u while current is %u [%p]",seq,m_seq,this);
 	    }
 	}
 	else if (m_warnSeq < 0) {
 	    m_warnSeq = 0;
-	    Debug(DebugInfo,"RTP received SEQ %u while current is %u [%p]",seq,m_seq,this);
+	    TraceDebug(m_traceId,dbg(),DebugInfo,"RTP received SEQ %u while current is %u [%p]",seq,m_seq,this);
 	}
 	return;
     }
@@ -264,6 +312,16 @@ void RTPReceiver::rtpData(const void* data, int len)
     if (!rtpDecipher(const_cast<unsigned char*>(pc),len + padding,secPtr,ss,seq48))
 	return;
 
+    if (m_debugData) {
+	const char* extra = "";
+	if (m_dejitter)
+	    extra = " [DEJITTER]";
+	else if (ds < 1)
+	    extra = ", dropping";
+	TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+	    "RTP recv payload=%d SEQ=%u (delta=%d) TS=%u TS_LAST %u -> %u%s [%p]",
+	    typ,seq,ds,ts,m_tsLast,(ts - m_ts),extra,this);
+    }
     m_tsLast = ts - m_ts;
     m_seqCount = 0;
     m_ioPackets++;
@@ -335,10 +393,26 @@ bool RTPReceiver::decodeEvent(bool marker, unsigned int timestamp, const void* d
 	bool end = (pc[1] & 0x80) != 0;
 	int duration = ((int)pc[2] << 8) | pc[3];
 	if (m_evTs && (m_evNum >= 0)) {
-	    if ((m_evNum != event) && (m_evTs <= timestamp))
+	    if ((m_evNum != event) && (m_evTs <= timestamp)) {
+		if (m_debugEvent)
+		    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+			"RTP recv ending current event (event/ts changed) event=%d (received=%d) "
+			"ts=%u event_ts=%u duration=%u [%p]",
+			m_evNum,event,timestamp,m_evTs,timestamp - m_evTs,this);
 		pushEvent(m_evNum,timestamp - m_evTs,m_evVol,m_evTs);
+	    }
 	}
 	m_evVol = vol;
+	if (m_debugEvent) {
+	    const char* oper = "start";
+	    if (end)
+		oper = "end";
+	    else if (m_evNum >= 0)
+		oper = "update";
+	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+		"RTP recv event oper=%s event=%d (old=%d) ts=%u event_ts=%u duration=%u [%p]",
+		oper,event,m_evNum,timestamp,m_evTs,duration,this);
+	}
 	if (!end) {
 	    m_evTs = timestamp;
 	    m_evNum = event;
@@ -366,6 +440,10 @@ void RTPReceiver::finishEvent(unsigned int timestamp)
     int duration = timestamp - m_evTs;
     if (duration < 10000)
 	return;
+    if (m_debugEvent)
+	TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+	    "RTP recv finishing event=%d ts=%u event_ts=%u duration=%u [%p]",
+	    m_evNum,timestamp,m_evTs,duration,this);
     timestamp = m_evTs;
     m_evTs = 0;
     pushEvent(m_evNum,duration,m_evVol,timestamp);
@@ -419,6 +497,15 @@ RTPSender::RTPSender(RTPSession* session, bool randomTs)
 
 bool RTPSender::rtpSend(bool marker, int payload, unsigned int timestamp, const void* data, int len)
 {
+    if (m_debugData) {
+	const char* oper = "send";
+	if (!(m_session && m_session->UDPSession::transport()))
+	    oper = "not sending";
+	TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+	    "RTP %s seq=%u payload=%d ts=%u len=%u  [%p]",
+	    oper,(m_seq + 1),payload,timestamp,(data ? len : 0),this);
+    }
+
     if (!(m_session && m_session->UDPSession::transport()))
 	return false;
 
@@ -491,7 +578,7 @@ bool RTPSender::rtpSendEvent(int event, int duration, int volume, unsigned int t
     if (!timestamp)
 	timestamp = m_tsLast;
     if (m_evTs) {
-	Debug(DebugNote,"RFC 2833 overlapped in RTP event %d, session %p, fixing.",
+	TraceDebug(m_traceId,dbg(),DebugNote,"RFC 2833 overlapped in RTP event %d, session %p, fixing.",
 	    event,m_session);
 	// the timestamp must always advance to avoid misdetections
 	if (timestamp == m_evTs)
@@ -504,6 +591,7 @@ bool RTPSender::rtpSendEvent(int event, int duration, int volume, unsigned int t
     m_evNum = event;
     m_evVol = volume;
     m_evTime = duration;
+    m_evSeq = 0;
     return sendEventData(timestamp);
 }
 
@@ -534,15 +622,33 @@ bool RTPSender::sendEventData(unsigned int timestamp)
 	    m_evTs = 0;
 	    return false;
 	}
+	if (timestamp <= m_tsLast && m_evSeq) {
+	    if (m_debugEvent)
+		TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+		    "RTP send event %d timestamp=%u before last ts=%u - ignoring [%p]",
+		    m_evNum,timestamp,m_evTs,this);
+	    else
+		DDebug(dbg(),DebugNote,
+		    "RTP send event %d timestamp=%u before last ts=%u - ignoring [%p]",
+		    m_evNum,timestamp,m_evTs,this);
+	    return true;
+	}
+	m_evSeq++;
 	int duration = timestamp - m_evTs;
+	char end = (duration >= m_evTime) ? 0x80 : 0x00;
+	if (m_debugEvent)
+	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
+		"RTP send event=%d ts=%u event_ts=%u duration=%u ev_duration=%u ev_seq=%u end=%s [%p]",
+		m_evNum,timestamp,m_evTs,duration,m_evTime,m_evSeq,String::boolText(end),this);
+	if (end)
+	    duration = m_evTime;
 	char buf[4];
 	buf[0] = m_evNum;
-	buf[1] = m_evVol & 0x7f;
+	buf[1] = (m_evVol & 0x7f) | end;
 	buf[2] = duration >> 8;
 	buf[3] = duration & 0xff;
 	unsigned int tstamp = m_evTs;
-	if (duration >= m_evTime) {
-	    buf[1] |= 0x80;
+	if (end) {
 	    m_evTs = 0;
 	    // repeat the event end packet to increase chances it gets seen
 	    if (rtpSend(!duration,eventPayload(),tstamp,buf,sizeof(buf)))
@@ -585,27 +691,28 @@ void RTPSender::stats(NamedList& stat) const
 }
 
 
-UDPSession::UDPSession()
-    : m_transport(0), m_timeoutTime(0), m_timeoutInterval(0)
+UDPSession::UDPSession(DebugEnabler* dbg, const char* traceId)
+    : RTPProcessor(dbg,traceId),
+    m_transport(0), m_timeoutTime(0), m_timeoutInterval(0)
 {
-    DDebug(DebugAll,"UDPSession::UDPSession() [%p]",this);
+    DDebug(this->dbg(),DebugAll,"UDPSession::UDPSession() [%p]",this);
 }
 
 UDPSession::~UDPSession()
 {
-    DDebug(DebugAll,"UDPSession::~UDPSession() [%p]",this);
+    DDebug(dbg(),DebugAll,"UDPSession::~UDPSession() [%p]",this);
     group(0);
     transport(0);
 }
 
 void UDPSession::timeout(bool initial)
 {
-    DDebug(DebugNote,"UDPSession::timeout(%s) [%p]",String::boolText(initial),this);
+    DDebug(dbg(),DebugNote,"UDPSession::timeout(%s) [%p]",String::boolText(initial),this);
 }
 
 void UDPSession::transport(RTPTransport* trans)
 {
-    DDebug(DebugInfo,"UDPSession::transport(%p) old=%p [%p]",trans,m_transport,this);
+    DDebug(dbg(),DebugInfo,"UDPSession::transport(%p) old=%p [%p]",trans,m_transport,this);
     if (trans == m_transport)
 	return;
     TelEngine::destruct(m_transport);
@@ -616,7 +723,7 @@ void UDPSession::transport(RTPTransport* trans)
 
 RTPTransport* UDPSession::createTransport()
 {
-    RTPTransport* trans = new RTPTransport();
+    RTPTransport* trans = new RTPTransport(RTPTransport::RTP,dbg(),m_traceId);
     trans->group(group());
     return trans;
 }
@@ -661,19 +768,19 @@ void UDPSession::setTimeout(int interval)
 }
 
 
-RTPSession::RTPSession()
-    : Mutex(true,"RTPSession"),
+RTPSession::RTPSession(DebugEnabler* dbg, const char* traceId)
+    : UDPSession(dbg,traceId), Mutex(true,"RTPSession"),
       m_direction(FullStop),
       m_send(0), m_recv(0), m_secure(0),
       m_reportTime(0), m_reportInterval(0),
       m_warnSeq(1)
 {
-    DDebug(DebugInfo,"RTPSession::RTPSession() [%p]",this);
+    DDebug(this->dbg(),DebugInfo,"RTPSession::RTPSession() [%p]",this);
 }
 
 RTPSession::~RTPSession()
 {
-    DDebug(DebugInfo,"RTPSession::~RTPSession() [%p]",this);
+    DDebug(dbg(),DebugInfo,"RTPSession::~RTPSession() [%p]",this);
     direction(FullStop);
     group(0);
     transport(0);
@@ -730,27 +837,27 @@ void RTPSession::rtcpData(const void* data, int len)
 
 bool RTPSession::rtpRecvData(bool marker, unsigned int timestamp, const void* data, int len)
 {
-    XDebug(DebugAll,"RTPSession::rtpRecv(%s,%u,%p,%d) [%p]",
+    XDebug(dbg(),DebugAll,"RTPSession::rtpRecv(%s,%u,%p,%d) [%p]",
 	String::boolText(marker),timestamp,data,len,this);
     return false;
 }
 
 bool RTPSession::rtpRecvEvent(int event, char key, int duration, int volume, unsigned int timestamp)
 {
-    XDebug(DebugAll,"RTPSession::rtpRecvEvent(%d,%02x,%d,%d,%u) [%p]",
+    XDebug(dbg(),DebugAll,"RTPSession::rtpRecvEvent(%d,%02x,%d,%d,%u) [%p]",
 	event,key,duration,volume,timestamp,this);
     return false;
 }
 
 void RTPSession::rtpNewPayload(int payload, unsigned int timestamp)
 {
-    XDebug(DebugAll,"RTPSession::rtpNewPayload(%d,%u) [%p]",
+    XDebug(dbg(),DebugAll,"RTPSession::rtpNewPayload(%d,%u) [%p]",
 	payload,timestamp,this);
 }
 
 void RTPSession::rtpNewSSRC(u_int32_t newSsrc,bool marker)
 {
-    XDebug(DebugAll,"RTPSession::rtpNewSSRC(%08X,%s) [%p]",
+    XDebug(dbg(),DebugAll,"RTPSession::rtpNewSSRC(%08X,%s) [%p]",
 	newSsrc,String::boolText(marker),this);
 }
 
@@ -785,7 +892,7 @@ void RTPSession::transport(RTPTransport* trans)
 
 void RTPSession::sender(RTPSender* send)
 {
-    DDebug(DebugInfo,"RTPSession::sender(%p) old=%p [%p]",send,m_send,this);
+    DDebug(dbg(),DebugInfo,"RTPSession::sender(%p) old=%p [%p]",send,m_send,this);
     if (send == m_send)
 	return;
     sendRtcpBye();
@@ -802,7 +909,7 @@ void RTPSession::sender(RTPSender* send)
 
 void RTPSession::receiver(RTPReceiver* recv)
 {
-    DDebug(DebugInfo,"RTPSession::receiver(%p) old=%p [%p]",recv,m_recv,this);
+    DDebug(dbg(),DebugInfo,"RTPSession::receiver(%p) old=%p [%p]",recv,m_recv,this);
     if (recv == m_recv)
 	return;
     RTPReceiver* tmp = m_recv;
@@ -825,7 +932,7 @@ void RTPSession::security(RTPSecure* secure)
 
 bool RTPSession::direction(Direction dir)
 {
-    DDebug(DebugInfo,"RTPSession::direction(%d) old=%d [%p]",dir,m_direction,this);
+    DDebug(dbg(),DebugInfo,"RTPSession::direction(%d) old=%d [%p]",dir,m_direction,this);
     if ((dir != FullStop) && !m_transport)
 	return false;
 
@@ -850,7 +957,7 @@ bool RTPSession::direction(Direction dir)
 bool RTPSession::dataPayload(int type)
 {
     if (m_recv || m_send) {
-	DDebug(DebugInfo,"RTPSession::dataPayload(%d) [%p]",type,this);
+	DDebug(dbg(),DebugInfo,"RTPSession::dataPayload(%d) [%p]",type,this);
 	bool ok = (!m_recv) || m_recv->dataPayload(type);
 	return ((!m_send) || m_send->dataPayload(type)) && ok;
     }
@@ -860,7 +967,7 @@ bool RTPSession::dataPayload(int type)
 bool RTPSession::eventPayload(int type)
 {
     if (m_recv || m_send) {
-	DDebug(DebugInfo,"RTPSession::eventPayload(%d) [%p]",type,this);
+	DDebug(dbg(),DebugInfo,"RTPSession::eventPayload(%d) [%p]",type,this);
 	bool ok = (!m_recv) || m_recv->eventPayload(type);
 	return ((!m_send) || m_send->eventPayload(type)) && ok;
     }
@@ -870,7 +977,7 @@ bool RTPSession::eventPayload(int type)
 bool RTPSession::silencePayload(int type)
 {
     if (m_recv || m_send) {
-	DDebug(DebugInfo,"RTPSession::silencePayload(%d) [%p]",type,this);
+	DDebug(dbg(),DebugInfo,"RTPSession::silencePayload(%d) [%p]",type,this);
 	bool ok = (!m_recv) || m_recv->silencePayload(type);
 	return ((!m_send) || m_send->silencePayload(type)) && ok;
     }
@@ -879,7 +986,7 @@ bool RTPSession::silencePayload(int type)
 
 void RTPSession::getStats(String& stats) const
 {
-    DDebug(DebugInfo,"RTPSession::getStats() tx=%p rx=%p [%p]",m_send,m_recv,this);
+    DDebug(dbg(),DebugInfo,"RTPSession::getStats() tx=%p rx=%p [%p]",m_send,m_recv,this);
     if (m_send) {
 	stats.append("PS=",",") << m_send->ioPackets();
 	stats << ",OS=" << m_send->ioOctets();
@@ -959,7 +1066,7 @@ void RTPSession::sendRtcpReport(const Time& when)
     // Don't send a RR with no receiver report blocks...
     if (len <= 8)
 	return;
-    DDebug(DebugInfo,"RTPSession sending RTCP Report [%p]",this);
+    DDebug(dbg(),DebugInfo,"RTPSession sending RTCP Report [%p]",this);
     unsigned int lptr = 4;
     store32(buf,lptr,(m_send ? m_send->ssrcInit() : 0));
     buf[3] = (len - 1) / 4; // same as ((len + 3) / 4) - 1
@@ -973,7 +1080,7 @@ void RTPSession::sendRtcpBye()
     u_int32_t ssrc = m_send->ssrc();
     if (!ssrc)
 	return;
-    DDebug(DebugInfo,"RTPSession sending RTCP Bye [%p]",this);
+    DDebug(dbg(),DebugInfo,"RTPSession sending RTCP Bye [%p]",this);
     // SSRC was initialized if we sent at least one RTP or RTCP packet
     unsigned char buf[8];
     buf[0] = 0x81;
@@ -989,18 +1096,18 @@ void RTPSession::sendRtcpBye()
 
 void RTPSession::incWrongSrc()
 {
-    XDebug(DebugAll,"RTPSession::incWrongSrc() [%p]",this);
+    XDebug(dbg(),DebugAll,"RTPSession::incWrongSrc() [%p]",this);
     m_wrongSrc++;
 }
 
 
-UDPTLSession::UDPTLSession(u_int16_t maxLen, u_int8_t maxSec)
-    : Mutex(true,"UDPTLSession"),
+UDPTLSession::UDPTLSession(u_int16_t maxLen, u_int8_t maxSec, DebugEnabler* dbg, const char* traceId)
+    : UDPSession(dbg,traceId), Mutex(true,"UDPTLSession"),
       m_rxSeq(0xffff), m_txSeq(0xffff),
       m_maxLen(maxLen), m_maxSec(maxSec),
       m_warn(true)
 {
-    DDebug(DebugInfo,"UDPTLSession::UDPTLSession(%u,%u) [%p]",maxLen,maxSec,this);
+    DDebug(this->dbg(),DebugInfo,"UDPTLSession::UDPTLSession(%u,%u) [%p]",maxLen,maxSec,this);
     if (m_maxLen < 96)
 	m_maxLen = 96;
     else if (m_maxLen > 1492)
@@ -1009,7 +1116,7 @@ UDPTLSession::UDPTLSession(u_int16_t maxLen, u_int8_t maxSec)
 
 UDPTLSession::~UDPTLSession()
 {
-    DDebug(DebugInfo,"UDPTLSession::~UDPTLSession() [%p]",this);
+    DDebug(dbg(),DebugInfo,"UDPTLSession::~UDPTLSession() [%p]",this);
 }
 
 void UDPTLSession::timerTick(const Time& when)
@@ -1029,7 +1136,7 @@ void UDPTLSession::timerTick(const Time& when)
 
 RTPTransport* UDPTLSession::createTransport()
 {
-    RTPTransport* trans = new RTPTransport(RTPTransport::UDPTL);
+    RTPTransport* trans = new RTPTransport(RTPTransport::UDPTL,dbg(),m_traceId);
     trans->group(group());
     return trans;
 }
@@ -1045,7 +1152,7 @@ void UDPTLSession::rtpData(const void* data, int len)
 	// primary IFP does not fit in packet
 	if ((m_rxSeq == 0xffff) && ((pd[0] & 0xc0) == 0x80) && m_warn) {
 	    m_warn = false;
-	    Debug(DebugWarn,"Receiving RTP instead of UDPTL [%p]",this);
+	    TraceDebug(m_traceId,dbg(),DebugWarn,"Receiving RTP instead of UDPTL [%p]",this);
 	}
 	return;
     }
@@ -1057,7 +1164,7 @@ void UDPTLSession::rtpData(const void* data, int len)
 	if ((pd[0] & 0xc0) == 0x80) {
 	    if (m_warn) {
 		m_warn = false;
-		Debug(DebugWarn,"Receiving RTP instead of UDPTL [%p]",this);
+		TraceDebug(m_traceId,dbg(),DebugWarn,"Receiving RTP instead of UDPTL [%p]",this);
 	    }
 	    return;
 	}
@@ -1067,7 +1174,7 @@ void UDPTLSession::rtpData(const void* data, int len)
 	// received old packet
 	if (m_warn) {
 	    m_warn = false;
-	    Debug(DebugWarn,"UDPTL received SEQ %u while current is %u [%p]",seq,m_rxSeq,this);
+	    TraceDebug(m_traceId,dbg(),DebugWarn,"UDPTL received SEQ %u while current is %u [%p]",seq,m_rxSeq,this);
 	}
 	return;
     }
@@ -1098,13 +1205,13 @@ void UDPTLSession::recoverSec(const unsigned char* data, int len, u_int16_t seq,
 	case 1:
 	    break;
 	case 2:
-	    Debug(DebugMild,"UDPTL lost IFP with SEQ %u [%p]",m_rxSeq+1,this);
+	    TraceDebug(m_traceId,dbg(),DebugMild,"UDPTL lost IFP with SEQ %u [%p]",m_rxSeq+1,this);
 	    break;
 	default:
-	    Debug(DebugWarn,"UDPTL lost IFPs with SEQ %u-%u [%p]",m_rxSeq+1,seq-1,this);
+	    TraceDebug(m_traceId,dbg(),DebugWarn,"UDPTL lost IFPs with SEQ %u-%u [%p]",m_rxSeq+1,seq-1,this);
 	    break;
     }
-    Debug(DebugInfo,"UDPTL recovered IFP with SEQ %u [%p]",seq,this);
+    TraceDebug(m_traceId,dbg(),DebugInfo,"UDPTL recovered IFP with SEQ %u [%p]",seq,this);
     m_rxSeq = seq;
     udptlRecv(data+1,sLen,seq,true);
 }
@@ -1116,7 +1223,7 @@ bool UDPTLSession::udptlSend(const void* data, int len, u_int16_t seq)
     Lock lck(this);
     int pl = len + 5;
     if ((len > 255) || (pl > m_maxLen)) {
-	Debug(DebugWarn,"UDPTL could not send IFP with len=%d [%p]",len,this);
+	TraceDebug(m_traceId,dbg(),DebugWarn,"UDPTL could not send IFP with len=%d [%p]",len,this);
 	m_txQueue.clear();
 	return false;
     }
@@ -1124,7 +1231,7 @@ bool UDPTLSession::udptlSend(const void* data, int len, u_int16_t seq)
     int16_t ds = seq - m_txSeq;
     if (ds != 0) {
 	if (ds != 1) {
-	    Debug(DebugInfo,"UDPTL sending SEQ %u while current is %u [%p]",seq,m_txSeq,this);
+	    TraceDebug(m_traceId,dbg(),DebugInfo,"UDPTL sending SEQ %u while current is %u [%p]",seq,m_txSeq,this);
 	    m_txQueue.clear();
 	}
 	if (m_maxSec)

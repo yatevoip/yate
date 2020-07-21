@@ -52,10 +52,62 @@ class RTPReceiver;
 class RTPSecure;
 
 /**
+ * Object holding RTP debug
+ * @short RTP debug holder
+ */
+class YRTP_API RTPDebug
+{
+public:
+    /**
+     * Constructor
+     * @param dbg DebugEnabler
+     * @param traceId Trace ID
+     */
+    inline RTPDebug(DebugEnabler* dbg, const char* traceId)
+	: m_dbg(dbg), m_traceId(traceId)
+	{}
+
+    /**
+     * Constructor from RTP session
+     * @param session RTP session to take debug from
+     */
+    RTPDebug(RTPSession* session);
+
+    /**
+     * Retrieve DebugEnabler
+     * @return DebugEnabler pointer
+     */
+    inline DebugEnabler* dbg() const
+	{ return m_dbg; }
+
+    /**
+     * Retrieve trace ID
+     * @return Trace ID
+     */
+    inline const String& dbgTraceId() const
+	{ return m_traceId; }
+
+protected:
+    /**
+     * Setup debug data
+     * @param dbg DebugEnabler
+     * @param traceId Trace ID
+     */
+    inline void setDebug(DebugEnabler* dbg, const char* traceId) {
+	    m_dbg = dbg;
+	    if (!m_traceId)
+		m_traceId = traceId;
+	}
+
+    DebugEnabler* m_dbg;
+    String m_traceId;
+};
+
+/**
  * A base class that contains just placeholders to process raw RTP and RTCP packets.
  * @short Base class to ease creation of RTP forwarders
  */
-class YRTP_API RTPProcessor : public GenObject
+class YRTP_API RTPProcessor : public GenObject, public RTPDebug
 {
     friend class UDPSession;
     friend class UDPTLSession;
@@ -67,8 +119,10 @@ class YRTP_API RTPProcessor : public GenObject
 public:
     /**
      * Constructor - processor should be later inserted in a RTP group
+     * @param dbg Processor DebugEnabler
+     * @param traceId Processor trace ID
      */
-    RTPProcessor();
+    RTPProcessor(DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Destructor - removes itself from the RTP group
@@ -218,8 +272,10 @@ public:
     /**
      * Constructor, creates an unconnected transport
      * @param type Type of check to apply to the data
+     * @param dbg Transport DebugEnabler
+     * @param traceId Transport trace ID
      */
-    RTPTransport(Type type = RTP);
+    RTPTransport(Type type = RTP, DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Destructor
@@ -330,6 +386,8 @@ protected:
     virtual void rtcpData(const void* data, int len);
 
 private:
+    bool sendData(Socket& sock, const SocketAddr& to, const void* data, int len,
+	const char* what, bool& flag);
     Type m_type;
     RTPProcessor* m_processor;
     RTPProcessor* m_monitor;
@@ -360,8 +418,11 @@ public:
      * @param receiver RTP receiver which gets the delayed packets
      * @param mindelay Minimum length of the dejitter buffer in microseconds
      * @param maxdelay Maximum length of the dejitter buffer in microseconds
+     * @param dbg Dejitter DebugEnabler
+     * @param traceId Dejitter trace ID
      */
-    RTPDejitter(RTPReceiver* receiver, unsigned int mindelay, unsigned int maxdelay);
+    RTPDejitter(RTPReceiver* receiver, unsigned int mindelay, unsigned int maxdelay,
+	DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Destructor - drops the packets and shows statistics
@@ -408,7 +469,7 @@ private:
  * Base class that holds common sender and receiver methods
  * @short Common send/recv variables holder
  */
-class YRTP_API RTPBaseIO
+class YRTP_API RTPBaseIO: public RTPDebug
 {
     friend class RTPSession;
     friend class RTPSecure;
@@ -417,11 +478,13 @@ public:
      * Default constructor.
      */
     inline RTPBaseIO(RTPSession* session = 0)
-	: m_session(session), m_secure(0),
+	: RTPDebug(session),
+	  m_session(session), m_secure(0),
 	  m_ssrcInit(true), m_ssrc(0), m_ts(0),
 	  m_seq(0), m_rollover(0), m_secLen(0), m_mkiLen(0),
-	  m_evTs(0), m_evNum(-1), m_evVol(-1),
+	  m_evTs(0), m_evNum(-1), m_evVol(-1), m_evSeq(0),
 	  m_ioPackets(), m_ioOctets(0), m_tsLast(0),
+	  m_debugDataLevel(0), m_debugData(false), m_debugEvent(false),
 	  m_dataType(-1), m_eventType(-1), m_silenceType(-1)
 	{ }
 
@@ -560,6 +623,13 @@ public:
      */
     void security(RTPSecure* secure);
 
+    /**
+     * Initialize data debug
+     * @param recv True if receiving, false if sending
+     * @param params Parameters list
+     */
+    void initDebugData(bool recv, const NamedList& params);
+
 protected:
     /**
      * Method called periodically to keep the data flowing
@@ -587,9 +657,14 @@ protected:
     u_int32_t m_evTs;
     int m_evNum;
     int m_evVol;
+    unsigned int m_evSeq;
     u_int32_t m_ioPackets;
     u_int32_t m_ioOctets;
     unsigned int m_tsLast;
+    // Debug data
+    int m_debugDataLevel;
+    bool m_debugData;
+    bool m_debugEvent;
 
 private:
     int m_dataType;
@@ -641,7 +716,7 @@ public:
      * @param maxdelay Maximum length of the dejitter buffer in microseconds
      */
     inline void setDejitter(unsigned int mindelay, unsigned int maxdelay)
-	{ setDejitter(new RTPDejitter(this,mindelay,maxdelay)); }
+	{ setDejitter(new RTPDejitter(this,mindelay,maxdelay,dbg(),m_traceId)); }
 
     /**
      * Process one RTP payload packet.
@@ -963,8 +1038,10 @@ public:
 protected:
     /**
      * Default constructor
+     * @param dbg Session DebugEnabler
+     * @param traceId Session trace ID
      */
-    UDPSession();
+    UDPSession(DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Method called when the receiver timed out
@@ -996,8 +1073,10 @@ public:
 
     /**
      * Default constructor, creates a detached session
+     * @param dbg Session DebugEnabler
+     * @param traceId Session trace ID
      */
-    RTPSession();
+    RTPSession(DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Destructor - shuts down the session and destroys the transport
@@ -1304,6 +1383,17 @@ public:
     inline void setWarnSeq(bool on)
 	{ m_warnSeq = on ? 1 : -1; }
 
+    /**
+     * Initialize data debug
+     * @param params Parameters list
+     */
+    inline void initDebugData(const NamedList& params) {
+	if (m_recv)
+		m_recv->initDebugData(true,params);
+	    if (m_send)
+		m_send->initDebugData(false,params);
+	}
+
 protected:
     /**
      * Method called periodically to push any asynchronous data or statistics
@@ -1387,8 +1477,11 @@ protected:
      * UDPTL Session constructor
      * @param maxLen Maximum length of UDPTL packet, at least longest primary IFP + 5 bytes
      * @param maxSec Maximum number of secondary IFPs, set to zero to disable
+     * @param dbg Session DebugEnabler
+     * @param traceId Session trace ID
      */
-    UDPTLSession(u_int16_t maxLen = 250, u_int8_t maxSec = 2);
+    UDPTLSession(u_int16_t maxLen = 250, u_int8_t maxSec = 2,
+	DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Method called periodically to push any asynchronous data or statistics
@@ -1426,7 +1519,7 @@ private:
  * Security and integrity implementation
  * @short SRTP implementation
  */
-class YRTP_API RTPSecure : public GenObject
+class YRTP_API RTPSecure : public GenObject, public RTPDebug
 {
     friend class RTPReceiver;
     friend class RTPSender;
@@ -1434,14 +1527,18 @@ class YRTP_API RTPSecure : public GenObject
 public:
     /**
      * Default constructor, builds an inactive implementation
+     * @param dbg DebugEnabler
+     * @param traceId Trace ID
      */
-    RTPSecure();
+    RTPSecure(DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Constructor that creates an active implementation
      * @param suite Cryptographic suite to use by default
+     * @param dbg DebugEnabler
+     * @param traceId Trace ID
      */
-    RTPSecure(const String& suite);
+    RTPSecure(const String& suite, DebugEnabler* dbg = 0, const char* traceId = 0);
 
     /**
      * Constructor that copies the basic crypto lengths

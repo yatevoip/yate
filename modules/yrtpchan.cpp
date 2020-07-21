@@ -208,10 +208,7 @@ private:
 class YRTPSession : public RTPSession
 {
 public:
-    inline YRTPSession(YRTPWrapper* wrap)
-	: m_wrap(wrap), m_lastLost(0), m_newPayload(-1),
-	  m_resync(false), m_anyssrc(false), m_getFax(true)
-	{ }
+    YRTPSession(YRTPWrapper* wrap);
     virtual ~YRTPSession();
     virtual bool rtpRecvData(bool marker, unsigned int timestamp,
 	const void* data, int len);
@@ -671,6 +668,7 @@ bool YRTPWrapper::startRTP(const char* raddr, unsigned int rport, Message& msg)
 	setRemote(raddr,rport,msg);
 	m_rtp->resync();
 	setTimeout(msg,-1);
+	m_rtp->initDebugData(msg);
 	return true;
     }
 
@@ -741,6 +739,7 @@ bool YRTPWrapper::startRTP(const char* raddr, unsigned int rport, Message& msg)
 	 m_rtp->direction(m_dir)))
 	return false;
 
+    m_rtp->initDebugData(msg);
     bool secure = false;
     const String* sec = msg.getParam(YSTRING("crypto_suite"));
     if (sec && *sec) {
@@ -827,7 +826,7 @@ bool YRTPWrapper::setupSRTP(Message& msg, bool buildMaster)
 	if (srtp)
 	    srtp = new RTPSecure(*srtp);
 	else
-	    srtp = new RTPSecure(msg[YSTRING("crypto_suite")]);
+	    srtp = new RTPSecure(msg[YSTRING("crypto_suite")],&splugin,m_traceId);
     }
     else
 	buildMaster = false;
@@ -852,7 +851,7 @@ bool YRTPWrapper::startSRTP(const String& suite, const String& keyParams, const 
 	suite.c_str(),keyParams.c_str(),paramList,this);
     if (!(m_rtp && m_rtp->receiver()))
 	return false;
-    RTPSecure* srtp = new RTPSecure;
+    RTPSecure* srtp = new RTPSecure(&splugin,m_traceId);
     if (srtp->supported(m_rtp) && srtp->setup(suite,keyParams,paramList)) {
 	m_rtp->receiver()->security(srtp);
 	TraceDebug(m_traceId,&splugin,DebugCall,"Started SRTP suite '%s' [%p]",suite.c_str(),this);
@@ -998,6 +997,13 @@ void YRTPWrapper::setFaxDivert(const Message& msg)
     }
 }
 
+
+YRTPSession::YRTPSession(YRTPWrapper* wrap)
+    : RTPSession(&splugin,wrap ? wrap->traceId().c_str() : (const char*)0),
+    m_wrap(wrap), m_lastLost(0), m_newPayload(-1),
+    m_resync(false), m_anyssrc(false), m_getFax(true)
+{
+}
 
 YRTPSession::~YRTPSession()
 {

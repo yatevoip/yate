@@ -50,8 +50,10 @@ private:
 }; // anonymous namespace
 
 
-RTPDejitter::RTPDejitter(RTPReceiver* receiver, unsigned int mindelay, unsigned int maxdelay)
-    : m_receiver(receiver), m_minDelay(mindelay), m_maxDelay(maxdelay),
+RTPDejitter::RTPDejitter(RTPReceiver* receiver, unsigned int mindelay, unsigned int maxdelay,
+    DebugEnabler* dbg, const char* traceId)
+    : RTPProcessor(dbg,traceId),
+      m_receiver(receiver), m_minDelay(mindelay), m_maxDelay(maxdelay),
       m_headStamp(0), m_tailStamp(0), m_headTime(0), m_sampRate(125000), m_fastRate(10)
 {
     if (m_maxDelay > 1000000)
@@ -66,7 +68,7 @@ RTPDejitter::RTPDejitter(RTPReceiver* receiver, unsigned int mindelay, unsigned 
 
 RTPDejitter::~RTPDejitter()
 {
-    DDebug(DebugInfo,"Dejitter destroyed with %u packets [%p]",m_packets.count(),this);
+    DDebug(dbg(),DebugInfo,"Dejitter destroyed with %u packets [%p]",m_packets.count(),this);
 }
 
 void RTPDejitter::clear()
@@ -86,7 +88,7 @@ bool RTPDejitter::rtpRecv(bool marker, int payload, unsigned int timestamp, cons
 	if (dTs == 0)
 	    return true;
 	else if (dTs < 0) {
-	    DDebug(DebugNote,"Dejitter dropping TS %u, last delivered was %u [%p]",
+	    DDebug(dbg(),DebugNote,"Dejitter dropping TS %u, last delivered was %u [%p]",
 		timestamp,m_headStamp,this);
 	    return false;
 	}
@@ -106,7 +108,7 @@ bool RTPDejitter::rtpRecv(bool marker, int payload, unsigned int timestamp, cons
 	    else if (rate < 20000)
 		rate = 20000; // 50 kHz
 	    m_sampRate = rate;
-	    XDebug(DebugAll,"Time per sample " FMT64, rate);
+	    XDebug(dbg(),DebugAll,"Time per sample " FMT64, rate);
 	}
 	else
 	    rate = m_sampRate;
@@ -120,7 +122,7 @@ bool RTPDejitter::rtpRecv(bool marker, int payload, unsigned int timestamp, cons
 	    if (((int)(timestamp - m_tailStamp)) < 0)
 		insert = true;
 	    else if (when > now + m_maxDelay) {
-		DDebug(DebugNote,"Packet with TS %u falls after max buffer [%p]",timestamp,this);
+		DDebug(dbg(),DebugNote,"Packet with TS %u falls after max buffer [%p]",timestamp,this);
 		return false;
 	    }
 	}
@@ -128,7 +130,7 @@ bool RTPDejitter::rtpRecv(bool marker, int payload, unsigned int timestamp, cons
     else {
 	if (m_tailStamp && ((int)(timestamp - m_tailStamp)) < 0) {
 	    // until we get some statistics don't attempt to reorder packets
-	    DDebug(DebugNote,"Dejitter got TS %u while last queued was %u [%p]",timestamp,m_tailStamp,this);
+	    DDebug(dbg(),DebugNote,"Dejitter got TS %u while last queued was %u [%p]",timestamp,m_tailStamp,this);
 	    return false;
 	}
 	// we got no packets out yet so use a fixed interval
@@ -180,7 +182,7 @@ void RTPDejitter::timerTick(const Time& when)
 	count++;
     }
     if (count)
-	Debug((count > 1) ? DebugMild : DebugNote,
+	TraceDebug(m_traceId,dbg(),(count > 1) ? DebugMild : DebugNote,
 	    "Dropped %u delayed packet%s from buffer [%p]",count,((count > 1) ? "s" : ""),this);
 }
 

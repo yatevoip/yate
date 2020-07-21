@@ -28,18 +28,20 @@ using namespace TelEngine;
 static const DataBlock s_16bit(0,2);
 
 
-RTPSecure::RTPSecure()
-    : m_owner(0), m_rtpCipher(0),
+RTPSecure::RTPSecure(DebugEnabler* dbg, const char* traceId)
+    : RTPDebug(dbg,traceId),
+      m_owner(0), m_rtpCipher(0),
       m_rtpAuthLen(0), m_rtpEncrypted(false)
 {
-    DDebug(DebugAll,"RTPSecure::RTPSecure() [%p]",this);
+    DDebug(this->dbg(),DebugAll,"RTPSecure::RTPSecure() [%p]",this);
 }
 
-RTPSecure::RTPSecure(const String& suite)
-    : m_owner(0), m_rtpCipher(0),
+RTPSecure::RTPSecure(const String& suite, DebugEnabler* dbg, const char* traceId)
+    : RTPDebug(dbg,traceId),
+      m_owner(0), m_rtpCipher(0),
       m_rtpAuthLen(4), m_rtpEncrypted(true)
 {
-    DDebug(DebugAll,"RTPSecure::RTPSecure('%s') [%p]",suite.c_str(),this);
+    DDebug(this->dbg(),DebugAll,"RTPSecure::RTPSecure('%s') [%p]",suite.c_str(),this);
     if (suite == YSTRING("NULL")) {
 	m_rtpAuthLen = 0;
 	m_rtpEncrypted = false;
@@ -51,16 +53,16 @@ RTPSecure::RTPSecure(const String& suite)
 }
 
 RTPSecure::RTPSecure(const RTPSecure& other)
-    : GenObject(),
+    : GenObject(), RTPDebug(other.dbg(),other.m_traceId),
       m_owner(0), m_rtpCipher(0),
       m_rtpAuthLen(other.m_rtpAuthLen), m_rtpEncrypted(other.m_rtpEncrypted)
 {
-    DDebug(DebugAll,"RTPSecure::~RTPSecure(%p) [%p]",&other,this);
+    DDebug(dbg(),DebugAll,"RTPSecure::~RTPSecure(%p) [%p]",&other,this);
 }
 
 RTPSecure::~RTPSecure()
 {
-    DDebug(DebugAll,"RTPSecure::~RTPSecure() [%p]",this);
+    DDebug(dbg(),DebugAll,"RTPSecure::~RTPSecure() [%p]",this);
     TelEngine::destruct(m_rtpCipher);
 }
 
@@ -81,7 +83,7 @@ void RTPSecure::init()
 {
     if (!m_owner)
 	return;
-    Debug(DebugInfo,"RTPSecure::init() encrypt=%s authlen=%d [%p]",
+    TraceDebug(m_traceId,dbg(),DebugInfo,"RTPSecure::init() encrypt=%s authlen=%d [%p]",
 	String::boolText(m_rtpEncrypted),m_rtpAuthLen,this);
     m_owner->secLength(m_rtpAuthLen);
     if ((m_rtpEncrypted || m_rtpAuthLen) && !m_rtpCipher && m_owner->session()) {
@@ -112,13 +114,13 @@ void RTPSecure::init()
 	// finally, prepare the cipher for RTP processing
 	cipher->setKey(m_cipherKey);
 	m_rtpCipher = cipher;
-	DDebug(DebugInfo,"RTPSecure::init() got cipher=%p [%p]",cipher,this);
+	DDebug(dbg(),DebugInfo,"RTPSecure::init() got cipher=%p [%p]",cipher,this);
     }
 }
 
 bool RTPSecure::setup(const String& cryptoSuite, const String& keyParams, const ObjList* paramList)
 {
-    Debug(DebugInfo,"RTPSecure::setup('%s','%s',%p) [%p]",
+    TraceDebug(m_traceId,dbg(),DebugInfo,"RTPSecure::setup('%s','%s',%p) [%p]",
 	cryptoSuite.c_str(),keyParams.c_str(),paramList,this);
     m_rtpEncrypted = !paramList || (0 == paramList->find("UNENCRYPTED_SRTP"));
     if (cryptoSuite.null() || cryptoSuite == YSTRING("NULL")) {
@@ -130,7 +132,7 @@ bool RTPSecure::setup(const String& cryptoSuite, const String& keyParams, const 
     else if (cryptoSuite == YSTRING("AES_CM_128_HMAC_SHA1_80"))
 	m_rtpAuthLen = 10;
     else {
-	Debug(DebugMild,"Unknown SRTP crypto suite '%s'",cryptoSuite.c_str());
+	TraceDebug(m_traceId,dbg(),DebugMild,"Unknown SRTP crypto suite '%s'",cryptoSuite.c_str());
 	return false;
     }
     if (paramList && (0 != paramList->find("UNAUTHENTICATED_SRTP")))
@@ -285,7 +287,7 @@ bool RTPSecure::rtpCheckIntegrity(const unsigned char* data, int len, const void
 	String s1,s2;
 	s1.hexify((void*)authData,m_rtpAuthLen);
 	s2.hexify((void*)hmac.rawDigest(),m_rtpAuthLen);
-	Debug(DebugMild,"SRTP HMAC recv: %s calc: %s seq: " FMT64U " [%p]",
+	Debug(dbg(),DebugMild,"SRTP HMAC recv: %s calc: %s seq: " FMT64U " [%p]",
 	    s1.c_str(),s2.c_str(),seq,this);
 	return false;
     }
