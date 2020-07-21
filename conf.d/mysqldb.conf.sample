@@ -4,8 +4,16 @@
 ; priority: int: Handler priority
 ;priority=100
 
+; query_retry: integer: Retry query when error is returned by mysql query function
+; Applicable for the following error(s):
+; - ER_LOCK_DEADLOCK: Deadlock found when trying to get lock; try restarting transaction 
+; This parameter is applied on account creation. It not applied on reload
+; This parameter can be overridden in account sections
+; Allowed interval: 1..10
+;query_retry=1
 
 ; Each other section in this file describes a database connection
+
 
 ;[default]
 ; The section name is used as the database connection name

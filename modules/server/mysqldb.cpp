@@ -23,6 +23,7 @@
 
 #include <stdio.h>
 #include <mysql.h>
+#include <mysqld_error.h>
 
 #ifndef CLIENT_MULTI_STATEMENTS
 #define CLIENT_MULTI_STATEMENTS 0
@@ -125,6 +126,8 @@ public:
 	{ return m_retryTime && m_connections.count() < (unsigned int)m_poolSize; }
     inline int poolSize()
 	{ return m_poolSize; }
+    inline unsigned int queryRetry() const
+	{ return m_queryRetry; }
     virtual const String& toString() const
 	{ return m_name; }
 
@@ -144,6 +147,7 @@ private:
     unsigned int m_port;
     bool m_compress;
     String m_encoding;
+    unsigned int m_queryRetry;
 
     int m_poolSize;
     ObjList m_connections;
@@ -253,6 +257,7 @@ private:
 static MyModule module;
 static Mutex s_libMutex(false,"MySQL::lib");
 static int s_libCounter = 0;
+static unsigned int s_queryRetry = 1;
 
 
 /**
@@ -336,13 +341,26 @@ int MyConn::queryDbInternal(DbQuery* query)
     m_owner->resetConn();
     u_int64_t start = Time::now();
 
-    if (mysql_real_query(m_conn,query->safe(),query->length())) {
-	Debug(&module,DebugWarn,"Query for '%s' failed: %s",c_str(),mysql_error(m_conn));
+    int retry = m_owner->queryRetry();
+    do {
+	int err = mysql_real_query(m_conn,query->safe(),query->length());
+	if (!err)
+	    break;
+#ifdef ER_LOCK_DEADLOCK
+	if (err == ER_LOCK_DEADLOCK && retry-- > 0) {
+	    Debug(&module,DebugInfo,"Query '%s' for '%s' failed code=%d. Retrying (remaining=%u)",
+		query->c_str(),c_str(),err,retry);
+	    continue;
+	}
+#endif
+	Debug(&module,DebugWarn,"Query '%s' for '%s' failed: code=%d %s",
+	    query->c_str(),c_str(),err,mysql_error(m_conn));
 	u_int64_t duration = Time::now() - start;
 	m_owner->incQueryTime(duration);
 	m_owner->incErrorred();
 	return -1;
     }
+    while (true);
 
 #ifdef DEBUG
     u_int64_t inter = Time::now();
@@ -435,6 +453,8 @@ int MyConn::queryDbInternal(DbQuery* query)
 MyAcct::MyAcct(const NamedList* sect)
     : Mutex(true,"MySQL::acct"),
       m_name(*sect),
+      m_compress(false),
+      m_queryRetry(s_queryRetry),
       m_poolSize(sect->getIntValue("poolsize",1,1)),
       m_queueSem(m_poolSize,"MySQL::queue"),
       m_queueMutex(false,"MySQL::queue"),
@@ -455,6 +475,7 @@ MyAcct::MyAcct(const NamedList* sect)
     m_port = sect->getIntValue("port");
     m_unix = sect->getValue("socket");
     m_compress = sect->getBoolValue("compress");
+    m_queryRetry = sect->getIntValue(YSTRING("query_retry"),m_queryRetry,1,10);
     m_encoding = sect->getValue("encoding");
 
     Debug(&module, DebugNote, "For account '%s' connection pool size is %d",
@@ -822,8 +843,10 @@ void MyModule::initialize()
     Output("Initializing module MySQL");
     Module::initialize();
     Configuration cfg(Engine::configFile("mysqldb"));
+    NamedList* general = cfg.createSection(YSTRING("general"));
     if (m_init)
 	Engine::install(new MyHandler(cfg.getIntValue("general","priority",100)));
+    s_queryRetry = general->getIntValue(YSTRING("query_retry"),1,1,10);
     installRelay(Halt);
     m_init = false;
     s_failedConns = 0;
