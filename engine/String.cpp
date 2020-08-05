@@ -821,6 +821,27 @@ int64_t String::toInt64(int64_t defvalue, int base, int64_t minvalue, int64_t ma
     return defvalue;
 }
 
+uint64_t String::toUInt64(uint64_t defvalue, int base, uint64_t minvalue, uint64_t maxvalue,
+    bool clamp) const
+{
+    if (!m_string)
+	return defvalue;
+    char *eptr = 0;
+
+    errno = 0;
+    uint64_t val = ::strtoull(m_string,&eptr,base);
+    // on overflow/underflow mark the entire string as unreadable
+    if ((errno == ERANGE) && eptr)
+	eptr = m_string;
+    if (!eptr || *eptr)
+	return defvalue;
+    if (val >= minvalue && val <= maxvalue)
+	return val;
+    if (clamp)
+	return (val < minvalue) ? minvalue : maxvalue;
+    return defvalue;
+}
+
 double String::toDouble(double defvalue) const
 {
     if (!m_string)
