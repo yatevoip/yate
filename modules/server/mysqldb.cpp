@@ -343,9 +343,9 @@ int MyConn::queryDbInternal(DbQuery* query)
 
     int retry = m_owner->queryRetry();
     do {
-	int err = mysql_real_query(m_conn,query->safe(),query->length());
-	if (!err)
+	if (!mysql_real_query(m_conn,query->safe(),query->length()))
 	    break;
+	int err = mysql_errno(m_conn);
 #ifdef ER_LOCK_DEADLOCK
 	if (err == ER_LOCK_DEADLOCK && retry-- > 0) {
 	    Debug(&module,DebugInfo,"Query '%s' for '%s' failed code=%d. Retrying (remaining=%u)",
