@@ -295,8 +295,7 @@ public:
 
     /**
      * Copy RTP related data from old media
-     * @param msg Destination list
-     * @param putPort True to add remote media port
+     * @param other Source media
      */
     void keepRtp(const SDPMedia& other);
 
