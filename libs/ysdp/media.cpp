@@ -66,6 +66,54 @@ const char* SDPMedia::fmtList() const
     return 0;
 }
 
+// Compare this media with another one
+bool SDPMedia::sameAs(const SDPMedia* other, bool ignorePort, bool checkStarted) const
+{
+    if (!other)
+	return false;
+    const SDPMedia& m = *other;
+    if (m.transport() != m_transport)
+	return false;
+    if (m.remotePort() != m_rPort)
+	return false;
+    checkStarted = checkStarted && isStarted();
+    if (!checkStarted) {
+	return (m.formats() == m_formats) &&
+	    ((ignorePort && m.remotePort() && m_rPort) || (m.remotePort() == m_rPort));
+    }
+
+    // Check format
+    ObjList* lst = m.formats().split(',',false);
+    bool found = lst->find(m_format);
+    TelEngine::destruct(lst);
+    if (!found) {
+	XDebug(DebugAll,"SDPMedia::sameAs(%p) format='%s' other_formats='%s': not found [%p]",
+	    other,m_format.c_str(),m.formats().c_str(),this);
+	return false;
+    }
+
+    // Check payload format
+    int pLoad = SDPMedia::payloadMapping(mappings(),m_format);
+    int oPLoad = SDPMedia::payloadMapping(m.mappings(),m_format);
+    if (pLoad == -1 || oPLoad == -1 || pLoad != oPLoad) {
+	XDebug(DebugAll,
+	    "SDPMedia::sameAs(%p) format='%s' pload=%d (%s) other_pload=%d (%s): not matched [%p]",
+	    other,m_format.c_str(),pLoad,mappings().c_str(),oPLoad,m.mappings().c_str(),this);
+	return false;
+    }
+
+    // Check RFC 2833
+    if (m_rfc2833 != m.m_rfc2833) {
+	XDebug(DebugAll,
+	    "SDPMedia::sameAs(%p) rfc2833=%s other_rfc2833=%s: not matched [%p]",
+	    other,m_rfc2833.c_str(),m.m_rfc2833.c_str(),this);
+	return false;
+    }
+
+    // TODO: Check crypto
+    return true;
+}
+
 // Update members with data taken from a SDP, return true if something changed
 bool SDPMedia::update(const char* formats, int rport, int lport, bool force)
 {
@@ -208,6 +256,40 @@ void SDPMedia::putMedia(NamedList& msg, bool putPort)
 	if (param)
 	    msg.addParam("sdp" + suffix() + "_" + param->name(),*param);
     }
+}
+
+// Copy RTP related data from old media
+void SDPMedia::keepRtp(const SDPMedia& other)
+{
+    m_formats = other.m_formats;
+    m_format = other.m_format;
+    m_rfc2833 = other.m_rfc2833;
+    m_id = other.m_id;
+    m_rPort = other.m_rPort;
+    m_lPort = other.m_lPort;
+    crypto(other.m_rCrypto,true);
+    crypto(other.m_lCrypto,false);
+}
+
+int SDPMedia::payloadMapping(const String& mappings, const String& fmt)
+{
+    if (!(mappings && fmt))
+	return -2;
+    String tmp = fmt;
+    tmp << "=";
+    ObjList* lst = mappings.split(',',false);
+    int payload = -2;
+    for (ObjList* pl = lst; pl; pl = pl->next()) {
+	String* mapping = static_cast<String*>(pl->get());
+	if (!mapping)
+	    continue;
+	if (mapping->startsWith(tmp)) {
+	    payload = mapping->substr(tmp.length()).toInteger(-1);
+	    break;
+	}
+    }
+    TelEngine::destruct(lst);
+    return payload;
 }
 
 };   // namespace TelEngine

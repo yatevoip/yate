@@ -7490,6 +7490,7 @@ bool YateSIPConnection::reInviteProxy(SIPTransaction* t, MimeSdpBody* sdp, int i
     bool audioChg = (getMedia(YSTRING("audio")) != 0);
     audioChg ^= ((*lst)[YSTRING("audio")] != 0);
 
+    bool keepExisting = true;
     Message ver("call.update");
     if (s_update_verify) {
 	complete(ver);
@@ -7513,6 +7514,7 @@ bool YateSIPConnection::reInviteProxy(SIPTransaction* t, MimeSdpBody* sdp, int i
 	    m_reInviting = invite;
 	    return true;
 	}
+	keepExisting = ver.getBoolValue(YSTRING("keep_media"),keepExisting);
     }
 
     if (m_rtpAddr != addr) {
@@ -7522,7 +7524,7 @@ bool YateSIPConnection::reInviteProxy(SIPTransaction* t, MimeSdpBody* sdp, int i
 	if (!s_rtp_preserve)
 	    setMedia(0);
     }
-    setMedia(lst);
+    setMedia(lst,keepExisting);
 
     m_mediaStatus = MediaMissing;
     // let RTP guess again the local interface or use the enforced address

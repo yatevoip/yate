@@ -56,7 +56,7 @@ SDPSession::~SDPSession()
 }
 
 // Set new media list. Return true if changed
-bool SDPSession::setMedia(ObjList* media)
+bool SDPSession::setMedia(ObjList* media, bool preserveExisting)
 {
     if (media == m_rtpMedia)
 	return false;
@@ -68,8 +68,19 @@ bool SDPSession::setMedia(ObjList* media)
 	chg = false;
 	for (ObjList* o = tmp->skipNull(); o; o = o->skipNext()) {
 	    SDPMedia* m = static_cast<SDPMedia*>(o->get());
-	    if (media && m->sameAs(static_cast<SDPMedia*>((*media)[*m]),m_parser->ignorePort()))
-		continue;
+	    if (media) {
+		ObjList* l = media->find(*m);
+		SDPMedia* newMedia = l ? static_cast<SDPMedia*>(l->get()) : 0;
+		if (newMedia && m->sameAs(newMedia,m_parser->ignorePort(),preserveExisting)) {
+		    if (preserveExisting && m->isStarted()) {
+			XDebug(m_enabler,DebugAll,
+			    "SDPSession::setMedia(%p) keeping existing media='%s' format='%s' [%p]",
+			    media,m->c_str(),m->format().c_str(),m_ptr);
+			newMedia->keepRtp(*m);
+		    }
+		    continue;
+		}
+	    }
 	    chg = true;
 	    mediaChanged(*m);
 	}
@@ -843,22 +854,10 @@ Message* SDPSession::buildChanRtp(SDPMedia* media, const char* addr, bool start,
     m->addParam("remoteip",addr);
     if (start) {
 	m->addParam("remoteport",media->remotePort());
-	String tmp = media->format();
-	tmp << "=";
-	ObjList* mappings = media->mappings().split(',',false);
-	for (ObjList* pl = mappings; pl; pl = pl->next()) {
-	    String* mapping = static_cast<String*>(pl->get());
-	    if (!mapping)
-		continue;
-	    if (mapping->startsWith(tmp)) {
-		tmp = *mapping;
-		tmp >> "=";
-		m->addParam("payload",tmp);
-		break;
-	    }
-	}
+	int payload = SDPMedia::payloadMapping(media->mappings(),media->format());
+	if (payload >= 0)
+	    m->addParam("payload",String(payload));
 	m->addParam("evpayload",media->rfc2833());
-	TelEngine::destruct(mappings);
     }
     if (m_secure) {
 	if (media->remoteCrypto()) {

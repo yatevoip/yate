@@ -113,6 +113,13 @@ public:
 	{ return m_suffix; }
 
     /**
+     * Check if media is started
+     * @return True if started, false otherwise
+     */
+    inline bool isStarted() const
+	{ return m_id && m_transport && m_format && m_lPort; }
+
+    /**
      * Retrieve the media transport name
      * @return The media transport name
      */
@@ -213,13 +220,10 @@ public:
      * Compare this media with another one
      * @param other The media to compare with
      * @param ignorePort Ignore differences caused only by port number
+     * @param checkStarted Check started related parameters: true when media should be kept if started and matched
      * @return True if both media have the same formats, transport and remote port
      */
-    inline bool sameAs(const SDPMedia* other, bool ignorePort = false) const
-	{ return other && (other->formats() == m_formats) &&
-	  (other->transport() == m_transport) &&
-	  ((ignorePort && other->remotePort() && m_rPort) ||
-	   (other->remotePort() == m_rPort)); }
+    bool sameAs(const SDPMedia* other, bool ignorePort = false, bool checkStarted = false) const;
 
     /**
      * Check if local part of this media changed
@@ -288,6 +292,21 @@ public:
      * @param putPort True to add remote media port
      */
     void putMedia(NamedList& msg, bool putPort = true);
+
+    /**
+     * Copy RTP related data from old media
+     * @param msg Destination list
+     * @param putPort True to add remote media port
+     */
+    void keepRtp(const SDPMedia& other);
+
+    /**
+     * Retrieve format mapping to payload
+     * @param mappings Mappings list
+     * @param fmt Format name
+     * @return -1:incorrect mapping value, -2:format not found, payload number otherwise (>=0)
+     */
+    static int payloadMapping(const String& mappings, const String& fmt);
 
 private:
     bool m_audio;
@@ -373,9 +392,10 @@ public:
     /**
      * Set a new media list
      * @param media New media list
+     * @param preserveExisting Try to preserve existing started media
      * @return True if media changed
      */
-    bool setMedia(ObjList* media);
+    bool setMedia(ObjList* media, bool preserveExisting = false);
 
     /**
      * Put specified media parameters into a list of parameters
