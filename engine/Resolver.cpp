@@ -103,7 +103,7 @@ static int printResult(int type, int code, const char* dname, ObjList& result, S
 	    error = &dummy;
 #ifdef _WINDOWS
 	    Thread::errorString(dummy,code);
-#elif defined(__NAMESER)
+#elif defined(__RES)
 	    dummy = hstrerror(code);
 #endif
 	}
@@ -376,7 +376,7 @@ bool Resolver::available(Type t)
 #endif
     }
     return true;
-#elif defined(__NAMESER)
+#elif defined(__RES)
     return true;
 #endif
     return false;
@@ -389,7 +389,7 @@ bool Resolver::init(int timeout, int retries)
 	return false;
 #ifdef _WINDOWS
     return true;
-#elif defined(__NAMESER)
+#elif defined(__RES)
     if ((_res.options & RES_INIT) == 0) {
 	// need to initialize in current thread
 	if (res_init())
@@ -446,7 +446,7 @@ int Resolver::srvQuery(const char* dname, ObjList& result, String* error)
 	Thread::errorString(*error,code);
     if (srv)
 	::DnsRecordListFree(srv,DnsFreeRecordList);
-#elif defined(__NAMESER)
+#elif defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_srv,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {
@@ -557,7 +557,7 @@ int Resolver::naptrQuery(const char* dname, ObjList& result, String* error)
 	Thread::errorString(*error,code);
     if (naptr)
 	::DnsRecordListFree(naptr,DnsFreeRecordList);
-#elif defined(__NAMESER)
+#elif defined(__RES)
     unsigned char buf[2048];
     int r,q,a;
     unsigned char *p, *e;
@@ -642,7 +642,7 @@ int Resolver::a4Query(const char* dname, ObjList& result, String* error)
 	Thread::errorString(*error,code);
     if (adr)
 	::DnsRecordListFree(adr,DnsFreeRecordList);
-#elif defined(__NAMESER)
+#elif defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_a,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {
@@ -718,7 +718,7 @@ int Resolver::a6Query(const char* dname, ObjList& result, String* error)
 	Thread::errorString(*error,code);
     if (adr)
 	::DnsRecordListFree(adr,DnsFreeRecordList);
-#elif defined(__NAMESER)
+#elif defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_aaaa,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {
@@ -793,7 +793,7 @@ int Resolver::txtQuery(const char* dname, ObjList& result, String* error)
 	Thread::errorString(*error,code);
     if (adr)
 	::DnsRecordListFree(adr,DnsFreeRecordList);
-#elif defined(__NAMESER)
+#elif defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_txt,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {

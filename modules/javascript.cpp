@@ -4636,6 +4636,10 @@ bool JsDNS::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 
 void JsDNS::runQuery(ObjList& stack, const String& name, Resolver::Type type, GenObject* context)
 {
+    if (!Resolver::init()) {
+	ExpEvaluator::pushOne(stack,JsParser::nullClone());
+	return;
+    }
     JsArray* jsa = 0;
     ObjList res;
     if (Resolver::query(type,name,res) == 0) {
