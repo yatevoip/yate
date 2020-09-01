@@ -532,7 +532,9 @@ class Yate
 /* Internal error handler callback - output plain text to stderr */
 function _yate_error_handler($errno, $errstr, $errfile, $errline)
 {
-    $str = " [$errno] $errstr in $errfile line $errline\n";
+    if (0 === error_reporting())
+	return;
+    $str = "[$errno] $errstr in $errfile line $errline\n";
     switch ($errno) {
 	case E_USER_ERROR:
 	    Yate::Output("PHP fatal: $str");
