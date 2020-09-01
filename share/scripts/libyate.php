@@ -346,8 +346,14 @@ class Yate
 	if ($yate_socket) {
 	    $line = @socket_read($yate_socket,$yate_buffer,PHP_NORMAL_READ);
 	    // check for error
-	    if ($line == false)
+	    if ($line == false) {
+		switch (socket_last_error($yate_socket)) {
+		    case 4:  // EINTR
+		    case 11: // EAGAIN
+			return true;
+		}
 		return false;
+	    }
 	    // check for EOF
 	    if ($line === "")
 		return false;
@@ -549,10 +555,35 @@ function _yate_error_handler($errno, $errstr, $errfile, $errline)
 function _yate_print($str)
 {
     global $yate_stdout, $yate_socket;
-    if ($yate_socket)
-	@socket_write($yate_socket, $str);
-    else if ($yate_stdout)
-	fputs($yate_stdout, $str);
+    $max = 10;
+    while ("" != $str) {
+	if ($max-- <= 0)
+	    return;
+	// handle partial writes and check errors
+	if ($yate_socket) {
+	    $w = @socket_write($yate_socket, $str);
+	    if (false === $w) {
+		switch (socket_last_error($yate_socket)) {
+		    case 4:  // EINTR
+		    case 11: // EAGAIN
+			break;
+		    default:
+			return;
+		}
+	    }
+	}
+	else if ($yate_stdout)
+	    $w = fputs($yate_stdout, $str);
+	else
+	    return;
+	if ($w) {
+	    $str = substr($str,$w);
+	    if (false === $str)
+		return;
+	}
+	else
+	    usleep(1000);
+    }
 }
 
 /* Internal function */
