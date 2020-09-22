@@ -553,9 +553,15 @@ public:
 	{ return m_filter; }
 
     /**
+     * Retrieve the Regexp filter (if installed) associated to this handler
+     */
+    inline const Regexp* filterRegexp() const
+	{ return m_filterRegexp; }
+
+    /**
      * Set a filter for this handler
      * @param filter Pointer to the filter to install, will be owned and
-     *  destroyed by the handler
+     *  destroyed by the handler. The filter may be a NamedPointer carrying a Regexp
      */
     void setFilter(NamedString* filter);
 
@@ -597,6 +603,7 @@ private:
     int m_unsafe;
     MessageDispatcher* m_dispatcher;
     NamedString* m_filter;
+    Regexp* m_filterRegexp;
     NamedCounter* m_counter;
 };
 
