@@ -2302,8 +2302,13 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	JsHandler* h = new JsHandler(*name,priority,*func,context);
 	ExpOperation* filterName = static_cast<ExpOperation*>(args[3]);
 	ExpOperation* filterValue = static_cast<ExpOperation*>(args[4]);
-	if (filterName && filterValue && *filterName)
-	    h->setFilter(*filterName,*filterValue);
+	if (filterName && filterValue && *filterName) {
+	    JsRegExp* rexp = YOBJECT(JsRegExp,filterValue);
+	    if (rexp)
+		h->setFilter(new NamedPointer(*filterName,new Regexp(rexp->regexp())));
+	    else
+		h->setFilter(*filterName,*filterValue);
+	}
 	if (m_trackName) {
 	    if (m_trackPrio)
 		h->trackName(m_trackName + ":" + String(priority));
@@ -2358,7 +2363,10 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    const NamedString* f = h->filter();
 	    if (f) {
 		jso->params().setParam(new ExpOperation(f->name(),"filterName"));
-		jso->params().setParam(new ExpOperation(*f,"filterValue"));
+		if (h->filterRegexp())
+		    jso->params().setParam(new ExpWrapper(new JsRegExp(mutex(),*(h->filterRegexp())),"filterValue"));
+		else
+		    jso->params().setParam(new ExpOperation(*f,"filterValue"));
 	    }
 	    if (h->trackName())
 		jso->params().setParam(new ExpOperation(h->trackName(),"trackName"));
