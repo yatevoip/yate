@@ -3232,6 +3232,7 @@ YATE_API bool controlReturn(NamedList* params, bool ret, const char* retVal = 0)
  */
 class YATE_API Regexp : public String
 {
+    YCLASS(Regexp,String)
     friend class String;
 public:
     /**
