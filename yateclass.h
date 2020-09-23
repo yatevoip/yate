@@ -87,6 +87,7 @@ typedef unsigned long in_addr_t;
 #define snprintf _snprintf
 #define strdup _strdup
 #define strtoll _strtoi64
+#define strtoull _strtoui64
 #define open _open
 #define dup2 _dup2
 #define read _read
@@ -96,6 +97,7 @@ typedef unsigned long in_addr_t;
 #define chdir _chdir
 #define mkdir(p,m) _mkdir(p)
 #define unlink _unlink
+#define llabs _abs64
 
 #define O_RDWR   _O_RDWR
 #define O_RDONLY _O_RDONLY
