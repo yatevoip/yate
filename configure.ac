@@ -345,6 +345,46 @@ fi
 AC_MSG_RESULT([$have_pthread_kill])
 AC_SUBST(THREAD_KILL)
 
+THREAD_AFFINITY=""
+AC_MSG_CHECKING([for pthread_setaffinity_np declaration])
+AC_LANG_SAVE
+AC_LANG_C
+SAVE_CFLAGS="$CFLAGS"
+CFLAGS="$CFLAGS -Wall -Werror"
+AC_TRY_COMPILE([
+#define _GNU_SOURCE
+#include <pthread.h>
+],[
+    cpu_set_t cpuset;
+    pthread_setaffinity_np(pthread_self(),sizeof(cpuset),&cpuset);
+],
+    have_pthread_affinity="yes",
+    have_pthread_affinity="no"
+)
+AC_MSG_RESULT([$have_pthread_affinity])
+if [[ "x$have_pthread_affinity" = "xyes" ]]; then
+    THREAD_AFFINITY="-DTHREAD_AFFINITY"
+else
+    AC_MSG_CHECKING([for sched_setaffinity declaration])
+    AC_TRY_COMPILE([
+    #define _GNU_SOURCE
+    #include <sched.h>
+    ],[
+	cpu_set_t cpuset;
+	sched_setaffinity(0,sizeof(cpuset),&cpuset);
+    ],
+	have_sched_affinity="yes",
+	have_sched_affinity="no"
+    )
+    if [[ "x$have_sched_affinity" = "xyes" ]]; then
+	THREAD_AFFINITY="-DSCHED_AFFINITY"
+    fi
+    AC_MSG_RESULT([$have_sched_affinity])
+fi
+CFLAGS="$SAVE_CFLAGS"
+AC_LANG_RESTORE
+AC_SUBST(THREAD_AFFINITY)
+
 # Check for compile options
 INLINE_FLAGS=""
 AC_ARG_ENABLE(inline,AC_HELP_STRING([--enable-inline],[Enable inlining of functions]),want_inline=$enableval,want_inline=auto)

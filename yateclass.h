@@ -5974,6 +5974,31 @@ public:
     bool running() const;
 
     /**
+     * Get the affinity mask of this thread
+     * @param outCpuMask Bit mask specifying CPUs  on which the thread is running on. Bit 0 of octet 0 in DataBlock is CPU 0,
+     *   bit 1 in octet 0 is CPU 1,..., bit 0 in octet 2 is CPU 8, etc.
+     * @return 0 on success, error otherwise
+     */
+    int getAffinity(DataBlock& outCpuMask);
+
+    /**
+     * Set the affinity of this thread by using a string that specifies the
+     * allowed CPUs by listing them separated with commas or as ranges.
+     * Mixing ranges with list is allowed (e.g. 0,2,5-6,10)
+     * @param cpus String specifying CPUs on which this thread should run.
+     * @return 0 on success, error otherwise
+     */
+    int setAffinity(const String& cpus);
+
+    /**
+     * Set the affinity of this thread
+     * @param mask Bit mask specifying allowed CPUs kept in a DataBlock. Bit 0 of octet 0 in DataBlock is CPU 0,
+     *   bit 1 in octet 0 is CPU 1,..., bit 0 in octet 1 is CPU 8, etc.
+     * @return 0 on success, error otherwise
+     */
+    int setAffinity(const DataBlock& mask);
+
+    /**
      * Count how many Yate mutexes are kept locked by this thread
      * @return Number of Mutex locks held by this thread
      */
@@ -5998,6 +6023,57 @@ public:
      * @return The pointer that was passed in the thread's constructor
      */
     static const char* currentName();
+
+    /**
+     * Get the affinity mask of current thread
+     * @param outCpuMask Bit mask specifying CPUs  on which the current thread is running on. Bit 0 of octet 0 in DataBlock is CPU 0,
+     *   bit 1 in octet 0 is CPU 1,..., bit 0 in octet 1 is CPU 8, etc.
+     * @return 0 on success, error otherwise
+     */
+    static int getCurrentAffinity(DataBlock& outCpuMask);
+
+    /**
+     * Get the affinity mask of current thread
+     * @param outCpus String into which to put the affinity
+     * @param hex True to put it as octet string, false as comma-separated list of CPUs
+     * @return 0 on success, error otherwise
+     */
+    static int getCurrentAffinity(String& outCpus, bool hex = false);
+
+    /**
+     * Set the affinity of the current thread by using a string that specifies the
+     * allowed CPUs by listing them separated with commas or as ranges.
+     * Mixing ranges with list is allowed (e.g. 0,2,5-6,10)
+     * @param cpus String specifying CPUs on which this thread should run.
+     * @return 0 on success, error otherwise
+     */
+    static int setCurrentAffinity(const String& cpus);
+
+    /**
+     * Set the affinity of the current thread
+     * @param mask Bit mask specifying allowed CPUs kept in a DataBlock. Bit 0 of octet 0 in DataBlock is CPU 0,
+     *   bit 1 in octet 0 is CPU 1,..., bit 0 in octet 1 is CPU 8, etc.
+     * @return 0 on success, error otherwise
+     */
+    static int setCurrentAffinity(const DataBlock& mask);
+
+    /**
+     * Parse a CPU list into a bitmask held in a DataBlock.
+     * String is formated as a list of integers or integer ranges separated by commas..
+     * Mixing ranges with list is allowed (e.g. 0,2,5-6,10)
+     * @param cpus String specifying CPUs
+     * @param mask Output bitmask resulted from parsing.
+     * @return True if parsing succeeded, false otherwise
+     */
+    static bool parseCPUMask(const String& cpus, DataBlock& mask);
+
+    /**
+     * Stringify the CPU mask
+     * @param mask Mask to stringify
+     * @param str Output string
+     * @param hexa Output as hexadecimal string if set, otherwise build a list of comma separated CPUs
+     */
+    static void printCPUMask(const DataBlock& mask, String& str, bool hexa = true);
 
     /**
      * Give up the currently running timeslice. Note that on some platforms
@@ -6390,7 +6466,7 @@ public:
      * Retrieve address family name
      * @return Address family name
      */
-    inline const char* familyName()
+    inline const char* familyName() const
 	{ return lookupFamily(family()); }
 
     /**
