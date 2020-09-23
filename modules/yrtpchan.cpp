@@ -97,6 +97,7 @@ static bool s_rtcp  = true;
 static bool s_drill = false;
 
 static Thread::Priority s_priority = Thread::Normal;
+static String s_affinity;
 static int s_tos     = Socket::Normal;
 static int s_udpbuf  = 0;
 static int s_sleep   = 5;
@@ -735,7 +736,7 @@ bool YRTPWrapper::startRTP(const char* raddr, unsigned int rport, Message& msg)
 	    m_consumer->deref();
 	}
     }
-    if (!(m_rtp->initGroup(msec,Thread::priority(msg.getValue(YSTRING("thread")),s_priority)) &&
+    if (!(m_rtp->initGroup(msec,Thread::priority(msg.getValue(YSTRING("thread")),s_priority),msg.getValue(YSTRING("affinity"),s_affinity)) &&
 	 m_rtp->direction(m_dir)))
 	return false;
 
@@ -796,7 +797,8 @@ bool YRTPWrapper::startUDPTL(const char* raddr, unsigned int rport, Message& msg
     int msec = msg.getIntValue(YSTRING("msleep"),s_sleep);
     if (!setRemote(raddr,rport,msg))
 	return false;
-    if (!m_udptl->initGroup(msec,Thread::priority(msg.getValue(YSTRING("thread")),s_priority)))
+    if (!m_udptl->initGroup(msec,Thread::priority(msg.getValue(YSTRING("thread")),s_priority),
+				msg.getValue(YSTRING("affinity"),s_affinity)))
 	return false;
 
     m_udptl->setTOS(tos);
@@ -1914,6 +1916,7 @@ void YRTPPlugin::initialize()
     s_sleep = cfg.getIntValue("general","defsleep",5);
     RTPGroup::setMinSleep(cfg.getIntValue("general","minsleep"));
     s_priority = Thread::priority(cfg.getValue("general","thread"));
+    s_affinity = cfg.getValue("general","affinity");
     s_rtpWarnSeq = cfg.getBoolValue("general","rtp_warn_seq",true);
     s_timeout = cfg.getIntValue("timeouts","timeout",3000);
     s_udptlTimeout = cfg.getIntValue("timeouts","udptl_timeout",25000);

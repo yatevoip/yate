@@ -19,6 +19,7 @@
  */
 
 #include <yatertp.h>
+#include <string.h>
 
 #define BUF_SIZE 1500
 
@@ -42,7 +43,7 @@ static inline void setScopeId(const SocketAddr& local, SocketAddr& sa1,
 }
 
 
-RTPGroup::RTPGroup(int msec, Priority prio)
+RTPGroup::RTPGroup(int msec, Priority prio, const String& affinity)
     : Mutex(true,"RTPGroup"),
       Thread("RTP Group",prio), m_listChanged(false)
 {
@@ -52,6 +53,12 @@ RTPGroup::RTPGroup(int msec, Priority prio)
     if (msec > 50)
 	msec = 50;
     m_sleep = msec;
+    if (affinity) {
+	int err = setAffinity(affinity);
+	if (err)
+	    Debug(DebugWarn,"Failed to set affinity to '%s', error=%s(%d) [%p]",
+		    affinity.c_str(),::strerror(err),err,this);
+    }
 }
 
 RTPGroup::~RTPGroup()

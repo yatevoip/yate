@@ -202,8 +202,9 @@ public:
      * Constructor
      * @param msec Minimum time to sleep in loop in milliseconds
      * @param prio Thread priority to run this group
+     * @param affinity Comma-separated list of CPUs and/or CPU range on which the thread should run on
      */
-    RTPGroup(int msec = 0, Priority prio = Normal);
+    RTPGroup(int msec = 0, Priority prio = Normal, const String& affinity = String::empty());
 
     /**
      * Group destructor, removes itself from all remaining processors
@@ -973,9 +974,10 @@ public:
      * Initialize the RTP session, attach a group if none is present
      * @param msec Minimum time to sleep in group loop in milliseconds
      * @param prio Thread priority to run the new group
+     * @param affinity Comma-separated list of CPUs and/or CPU range on which the thread should run on
      * @return True if initialized, false on some failure
      */
-    bool initGroup(int msec = 0, Thread::Priority prio = Thread::Normal);
+    bool initGroup(int msec = 0, Thread::Priority prio = Thread::Normal, const String& affinity = String::empty());
 
     /**
      * Set the remote network address of the RTP transport of this session

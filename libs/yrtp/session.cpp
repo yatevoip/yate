@@ -728,15 +728,15 @@ RTPTransport* UDPSession::createTransport()
     return trans;
 }
 
-bool UDPSession::initGroup(int msec, Thread::Priority prio)
+bool UDPSession::initGroup(int msec, Thread::Priority prio, const String& affinity)
 {
     if (m_group)
 	return true;
-    // try to pick the grop from the transport if it has one
+    // try to pick the group from the transport if it has one
     if (m_transport)
 	group(m_transport->group());
     if (!m_group)
-	group(new RTPGroup(msec,prio));
+	group(new RTPGroup(msec,prio,affinity));
     if (!m_group)
 	return false;
     if (m_transport)

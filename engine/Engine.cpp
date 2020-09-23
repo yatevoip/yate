@@ -275,6 +275,7 @@ int Engine::s_haltcode = -1;
 int EnginePrivate::count = 0;
 static String s_cfgpath(CFG_PATH);
 static String s_usrpath;
+static String s_affinity;
 static bool s_createusr = true;
 static bool s_init = false;
 static bool s_dynplugin = false;
@@ -1571,6 +1572,8 @@ int Engine::engineInit()
     s_params.addParam("maxmsgage",String(s_maxmsgage));
     s_params.addParam("maxqueued",String(s_maxqueued));
     s_params.addParam("maxevents",String(s_maxevents));
+    if (s_affinity)
+	s_params.addParam("affinity",s_affinity);
 
     int nodeBits = s_cfg.getIntValue("general","nodebits",0,0,10);
     if (nodeBits) {
@@ -2527,6 +2530,7 @@ static void usage(bool client, FILE* f)
 "   -x dirpath     Absolute or relative path to extra modules directory (can be repeated)\n"
 "   -w directory   Change working directory\n"
 "   -N nodename    Set the name of this node in a cluster\n"
+"   -A cpus        Set affinity from comma separated list of CPUs (e.g 1-4,7,8)\n"
 #ifdef RLIMIT_CORE
 "   -C             Enable core dumps if possible\n"
 #endif
@@ -2756,6 +2760,10 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 		    case 'N':
 			GET_PARAM;
 			s_node = param;
+			break;
+		    case 'A':
+			GET_PARAM;
+			s_affinity = param;
 			break;
 #ifdef RLIMIT_CORE
 		    case 'C':
@@ -3021,6 +3029,13 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
     }
 #endif
 
+    if (s_affinity) {
+	int err = Thread::setCurrentAffinity(s_affinity);
+	if (err) {
+	    Debug(DebugWarn,"Failed to set affinity to '%s', error=%s(%d)",s_affinity.c_str(),strerror(err),err);
+	    s_affinity.clear();
+	}
+    }
     int retcode = -1;
 #ifndef _WINDOWS
     if (supervised)
