@@ -1042,7 +1042,7 @@ void RTPSession::sendRtcpReport(const Time& when)
 	// Include a sender report
 	buf[1] = 0xc8; // SR
 	// NTP timestamp
-	store32(buf,len,(uint32_t)(2208988800 + (when.usec() / 1000000)));
+	store32(buf,len,(uint32_t)(2208988800ULL + (when.usec() / 1000000)));
 	store32(buf,len,(uint32_t)(((when.usec() % 1000000) << 32) / 1000000));
 	// RTP timestamp
 	store32(buf,len,m_send->tsLast());
