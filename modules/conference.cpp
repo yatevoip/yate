@@ -26,15 +26,6 @@
 using namespace TelEngine;
 namespace { // anonymous
 
-// size of the outgoing data blocks in bytes - divide by 2 to get samples
-#define DATA_CHUNK 320
-
-// minimum amount of buffered data when we start mixing
-#define MIN_BUFFER 480
-
-// maximum size we allow the buffer to grow
-#define MAX_BUFFER 960
-
 // minimum notification interval in msec
 #define MIN_INTERVAL 1000
 
@@ -111,6 +102,10 @@ public:
 	{ return m_expire && m_expire < time; }
     inline bool created()
 	{ return m_created && !(m_created = false); }
+    inline unsigned int minBuffer() const
+	{ return m_minBuffer; }
+    inline unsigned int maxBuffer() const
+	{ return m_maxBuffer; }
     void mix(ConfConsumer* cons = 0);
     void addChannel(ConfChan* chan, bool player = false);
     void delChannel(ConfChan* chan);
@@ -148,6 +143,9 @@ private:
     int m_trackInterval;
     u_int64_t m_nextNotify;
     u_int64_t m_nextSpeakers;
+    unsigned int m_minBuffer;
+    unsigned int m_maxBuffer;
+    unsigned int m_dataChunk;
 };
 
 // A conference channel is just a dumb holder of its data channels
@@ -333,10 +331,10 @@ ConfRoom::ConfRoom(const String& name, const NamedList& params)
       m_rate(8000), m_users(0), m_maxusers(10), m_maxLock(200),
       m_expire(0), m_lonelyInterval(0), m_nextNotify(0), m_nextSpeakers(0)
 {
-    DDebug(&__plugin,DebugAll,"ConfRoom::ConfRoom('%s',%p) [%p]",
-	name.c_str(),&params,this);
-    m_rate = params.getIntValue("rate",m_rate);
+    m_rate = params.getIntValue("rate",m_rate,8000,48000);
     m_maxusers = params.getIntValue("maxusers",m_maxusers);
+    DDebug(&__plugin,DebugInfo,"ConfRoom::ConfRoom('%s',%p) rate=%d maxusers=%d [%p]",
+	name.c_str(),&params,m_rate,m_maxusers,this);
     m_maxLock = params.getIntValue("waitlock",m_maxLock);
     m_notify = params.getValue("notify");
     m_trackSpeakers = params.getIntValue("speakers",0);
@@ -354,6 +352,11 @@ ConfRoom::ConfRoom(const String& name, const NamedList& params)
     setLonelyTimeout(params["lonely"]);
     if (m_rate != 8000)
 	m_format << "/" << m_rate;
+    // size of the data blocks in bytes - divide by 2 to get samples
+    unsigned int tenMs = sizeof(int16_t) * m_rate / 100;
+    m_dataChunk = 2 * tenMs;
+    m_minBuffer = 3 * tenMs;
+    m_maxBuffer = 6 * tenMs;
     for (int i = 0; i < MAX_SPEAKERS; i++)
 	m_speakers[i] = 0;
     s_rooms.append(this);
@@ -366,6 +369,7 @@ ConfRoom::ConfRoom(const String& name, const NamedList& params)
 	m->addParam("targetid",m_notify);
 	m->addParam("event","created");
 	m->addParam("room",m_name);
+	m->addParam("rate",String(m_rate));
 	m->addParam("maxusers",String(m_maxusers));
 	m->addParam("caller",params.getValue("caller"));
 	m->addParam("called",params.getValue("called"));
@@ -652,7 +656,7 @@ bool ConfRoom::setParams(NamedList& params)
 // Mix in buffered data from all channels, only if we have enough in buffer
 void ConfRoom::mix(ConfConsumer* cons)
 {
-    unsigned int len = MAX_BUFFER;
+    unsigned int len = m_maxBuffer;
     unsigned int mlen = 0;
     Lock mylock(this);
     // find out the minimum and maximum amount of data in buffers
@@ -668,17 +672,19 @@ void ConfRoom::mix(ConfConsumer* cons)
 		mlen = buffered;
 	}
     }
-    XDebug(DebugAll,"ConfRoom::mix() buffer %u - %u [%p]",len,mlen,this);
-    mlen += MIN_BUFFER;
-    // do we have at least minimum amount of data in buffer?
-    if (mlen <= MAX_BUFFER)
-	return;
-    mlen -= MAX_BUFFER;
-    // make sure we mix in enough data to prevent channels from overflowing
-    if (len < mlen)
-	len = mlen;
-    unsigned int chunks = len / DATA_CHUNK;
-    if (!chunks)
+    XDebug(&__plugin,DebugAll,"ConfRoom::mix() buffer %u - %u [%p]",len,mlen,this);
+    // this many full chunks are in all buffers and we can safely mix
+    len = len / m_dataChunk;
+    // try to leave at least m_minBuffer free space
+    // mix: m_minBuffer - (m_maxBuffer - mlen) = mlen + m_minBuffer - m_maxBuffer
+    mlen += m_minBuffer;
+    if (mlen > m_maxBuffer) {
+	// at least this much data we need to consume so round up chunks
+	mlen = (mlen - m_maxBuffer + m_dataChunk - 1) / m_dataChunk;
+	if (len < mlen)
+	    len = mlen;
+    }
+    if (!len)
 	return;
     int speakVol[MAX_SPEAKERS];
     ConfChan* speakChan[MAX_SPEAKERS];
@@ -687,7 +693,7 @@ void ConfRoom::mix(ConfConsumer* cons)
 	speakVol[spk] = 0;
 	speakChan[spk] = 0;
     }
-    len = chunks * DATA_CHUNK / sizeof(int16_t);
+    len = len * m_dataChunk / sizeof(int16_t);
     DataBlock mixbuf(0,len*sizeof(int));
     int* buf = (int*)mixbuf.data();
     for (l = m_chans.skipNull(); l; l = l->skipNext()) {
@@ -930,10 +936,20 @@ unsigned long ConfConsumer::Consume(const DataBlock& data, unsigned long tStamp,
 	    m_muted = true;
 	return 0;
     }
-    if (m_buffer.length()+data.length() <= MAX_BUFFER)
-	m_buffer += data;
+
+    int len = m_room->maxBuffer() - m_buffer.length();
+    if (len >= (int)data.length())
+	len = data.length();
+#ifdef DEBUG
+    else
+	Debug(&__plugin,DebugInfo,"Dropping %d from %u new data [%p]",
+	    data.length() - len,data.length(),this);
+#endif
+    if (len > 0)
+	m_buffer.append(data.data(),len);
+
     m_room->unlock();
-    if (m_buffer.length() >= MIN_BUFFER)
+    if (m_buffer.length() >= m_room->minBuffer())
 	m_room->mix(this);
     return invalidStamp();
 }
