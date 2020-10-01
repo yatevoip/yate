@@ -1106,13 +1106,19 @@ static void superhandler(int signal)
 	::kill(s_childpid,signal);
 }
 
+#define SUPER_MSG(msg,...) \
+{ \
+    time_t t = ::time(0); \
+    ::fprintf(stderr,msg " on %s",##__VA_ARGS__,TelEngine::c_safe(::ctime(&t))); \
+}
+
 static void rotatelogs()
 {
     if (s_rotatenow) {
 	s_rotatenow = false;
-	::fprintf(stderr,"Supervisor (%d) closing the log file\n",s_superpid);
+	SUPER_MSG("Supervisor (%d) closing the log file",s_superpid);
 	logFileOpen();
-	::fprintf(stderr,"Supervisor (%d) reopening the log file\n",s_superpid);
+	SUPER_MSG("Supervisor (%d) reopening the log file",s_superpid);
     }
 }
 
@@ -1131,7 +1137,7 @@ static void copystream(int dest, int src)
 static int supervise(int initDelay)
 {
     s_superpid = ::getpid();
-    ::fprintf(stderr,"Supervisor (%d) is starting, max sanity %d\n",s_superpid,s_max_sanity);
+    SUPER_MSG("Supervisor (%d) is starting, max sanity %d",s_superpid,s_max_sanity);
     ::signal(SIGINT,superhandler);
     ::signal(SIGTERM,superhandler);
     ::signal(SIGHUP,superhandler);
@@ -1141,7 +1147,7 @@ static int supervise(int initDelay)
     ::signal(SIGUSR2,superhandler);
     ::signal(SIGALRM,SIG_IGN);
     if (initDelay > 0) {
-	::fprintf(stderr,"Supervisor (%d) delaying initial start by %u.%02u seconds\n",
+	SUPER_MSG("Supervisor (%d) delaying initial start by %u.%02u seconds",
 		s_superpid,(initDelay + 5) / 1000,((initDelay + 5) / 10) % 100);
 	::usleep(initDelay * 1000);
     }
@@ -1150,7 +1156,7 @@ static int supervise(int initDelay)
 	int wdogfd[2];
 	if (::pipe(wdogfd)) {
 	    int err = errno;
-	    ::fprintf(stderr,"Supervisor: watchdog pipe failed: %s (%d)\n",::strerror(err),err);
+	    SUPER_MSG("Supervisor: watchdog pipe failed: %s (%d)",::strerror(err),err);
 	    return err;
 	}
 	::fcntl(wdogfd[0],F_SETFL,O_NONBLOCK);
@@ -1159,7 +1165,7 @@ static int supervise(int initDelay)
 	if (s_logrotator) {
 	    if (::pipe(logfd)) {
 		int err = errno;
-		::fprintf(stderr,"Supervisor: log pipe failed: %s (%d)\n",::strerror(err),err);
+		SUPER_MSG("Supervisor: log pipe failed: %s (%d)",::strerror(err),err);
 		return err;
 	    }
 	    ::fcntl(logfd[0],F_SETFL,O_NONBLOCK);
@@ -1172,7 +1178,7 @@ static int supervise(int initDelay)
 	s_childpid = ::fork();
 	if (s_childpid < 0) {
 	    int err = errno;
-	    ::fprintf(stderr,"Supervisor: fork failed: %s (%d)\n",::strerror(err),err);
+	    SUPER_MSG("Supervisor: fork failed: %s (%d)",::strerror(err),err);
 	    return err;
 	}
 	if (s_childpid == 0) {
@@ -1205,7 +1211,7 @@ static int supervise(int initDelay)
 		// Child exited for some reason
 		if (WIFEXITED(status)) {
 		    retcode = WEXITSTATUS(status);
-		    ::fprintf(stderr,"Supervisor: child %d exited with code %d\n",s_childpid,retcode);
+		    SUPER_MSG("Supervisor: child %d exited with code %d",s_childpid,retcode);
 		    if (retcode <= 127)
 			s_runagain = false;
 		    else
@@ -1214,7 +1220,7 @@ static int supervise(int initDelay)
 		}
 		else if (WIFSIGNALED(status)) {
 		    retcode = WTERMSIG(status);
-		    ::fprintf(stderr,"Supervisor: child %d died on signal %d\n",s_childpid,retcode);
+		    SUPER_MSG("Supervisor: child %d died on signal %d",s_childpid,retcode);
 		    s_childsig = retcode;
 		}
 		s_childpid = -1;
@@ -1247,7 +1253,7 @@ static int supervise(int initDelay)
 	::close(wdogfd[0]);
 	if (s_childpid > 0) {
 	    // Child failed to proof sanity. Kill it - no need to be gentle.
-	    ::fprintf(stderr,"Supervisor: killing unresponsive child %d\n",s_childpid);
+	    SUPER_MSG("Supervisor: killing unresponsive child %d",s_childpid);
 #ifdef RLIMIT_CORE
 	    // If -Da or -C were specified try to get a corefile
 	    if (s_sigabrt || s_coredump) {
@@ -1276,7 +1282,7 @@ static int supervise(int initDelay)
 	}
 	if (s_runagain) {
 	    if (s_rundelay > RUNDELAY_MIN)
-		::fprintf(stderr,"Supervisor (%d) delaying child start by %u.%02u seconds\n",
+		SUPER_MSG("Supervisor (%d) delaying child start by %u.%02u seconds",
 		    s_superpid,s_rundelay / 1000000,(s_rundelay / 10000) % 100);
 	    ::usleep(s_rundelay);
 	    // Exponential backoff, double run delay each time we restart child
@@ -1285,9 +1291,12 @@ static int supervise(int initDelay)
 		s_rundelay = RUNDELAY_MAX;
 	}
     }
-    ::fprintf(stderr,"Supervisor (%d) exiting with code %d\n",s_superpid,retcode);
+    SUPER_MSG("Supervisor (%d) exiting with code %d",s_superpid,retcode);
     return retcode;
 }
+
+#undef SUPER_MSG
+
 #endif /* _WINDOWS */
 
 
