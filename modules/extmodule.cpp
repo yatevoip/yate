@@ -1997,7 +1997,9 @@ void ExtListener::run()
 {
     SocketAddr addr;
     for (;;) {
-	Thread::idle(true);
+	Thread::idle();
+	if (Thread::check(false))
+	    break;
 	Socket* skt = m_socket.accept(addr);
 	if (!skt) {
 	    if (m_socket.canRetry())
