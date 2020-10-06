@@ -437,6 +437,9 @@ const DataBlock& MimeBody::getBody() const
     return m_body;
 }
 
+static const Regexp s_appStringFull("^dtmf\\|json\\|yaml\\|x-yaml$");
+static const Regexp s_appStringPlusEnd("+\\(xml\\|json\\)$");
+
 // Method to build a MIME body from a type and data buffer
 MimeBody* MimeBody::build(const char* buf, int len, const MimeHeaderLine& type)
 {
@@ -445,24 +448,32 @@ MimeBody* MimeBody::build(const char* buf, int len, const MimeHeaderLine& type)
 	return 0;
     String what = type;
     what.toLower();
-    if (what == YSTRING("application/sdp"))
-	return new MimeSdpBody(type,buf,len);
-    if ((what == YSTRING("application/dtmf-relay")) || (what == YSTRING("message/sipfrag")))
-	return new MimeLinesBody(type,buf,len);
-    if (what.startsWith("text/") || (what == YSTRING("application/dtmf")))
-	return new MimeStringBody(type,buf,len);
-    if (what.startsWith("multipart/"))
-	return new MimeMultipartBody(type,buf,len);
-    // Remove any spurious leading CRLF
-    if (len >= 2 && buf[0] == '\r' && buf[1] == '\n') {
-	len -= 2;
-	if (!len)
-	    return 0;
-	buf += 2;
+    if (what.startSkip("application/",false)) {
+	if (what == YSTRING("sdp"))
+	    return new MimeSdpBody(type,buf,len);
+	if (s_appStringFull.matches(what) || s_appStringPlusEnd.matches(what))
+	    ;
+	else if (what == YSTRING("dtmf-relay"))
+	    return new MimeLinesBody(type,buf,len);
+	else
+	    return new MimeBinaryBody(type,buf,len);
     }
-    if ((what.length() >=7) && what.endsWith("+xml"))
-	return new MimeStringBody(type,buf,len);
-    // Create a default binary body
+    else if (what.startsWith("multipart/"))
+	return new MimeMultipartBody(type,buf,len);
+    else if (what.startsWith("text/"))
+	;
+    else if ((what.length() >= 7) && what.endsWith("+xml"))
+	;
+    else if (what == YSTRING("message/sipfrag"))
+	return new MimeLinesBody(type,buf,len);
+    else
+	return new MimeBinaryBody(type,buf,len);
+    // Build string body
+    MimeStringBody* b = new MimeStringBody(type,buf,len);
+    if (len == (int)b->text().length())
+	return b;
+    DDebug(DebugInfo,"MimeBody::build(%p,%d,'%s') falling back to binary",buf,len,type.c_str());
+    TelEngine::destruct(b);
     return new MimeBinaryBody(type,buf,len);
 }
 
@@ -749,17 +760,13 @@ void MimeMultipartBody::parse(const char* buf, int len)
 	ObjList hdr;
 	MimeHeaderLine* cType = 0;
 	while (l) {
-	    int tmpLen = l;
-	    const char* s = start;
 	    String* line = MimeBody::getUnfoldedLine(start,l);
 	    // Found end of headers
 	    if (line->null()) {
-		l = tmpLen;
-		start = s;
 		TelEngine::destruct(line);
 		break;
 	    }
-	    DDebug(DebugAll,"Found line '%s' [%p]",line->c_str(),this);
+	    XDebug(DebugAll,"Found line '%s' [%p]",line->c_str(),this);
 	    int col = line->find(':');
 	    // Check if this is a valid header line
 	    if (col <= 0) {
@@ -790,13 +797,13 @@ void MimeMultipartBody::parse(const char* buf, int len)
 	    continue;
 	}
 	m_bodies.append(body);
-	ListIterator iter(hdr);
-	for (GenObject* o = 0; (o = iter.get());) {
-	    MimeHeaderLine* line = static_cast<MimeHeaderLine*>(o);
-	    if (line == cType)
-		continue;
-	    hdr.remove(o,false);
-	    body->appendHdr(line);
+	for (ObjList* o = hdr.skipNull(); o;) {
+	    if (cType != o->get()) {
+		body->appendHdr(static_cast<MimeHeaderLine*>(o->remove(false)));
+		o = o->skipNull();
+	    }
+	    else
+		o = o->skipNext();
 	}
 	XDebug(DebugInfo,"Added ('%s',%p) with %u additional headers [%p]",
 	    cType->c_str(),body,body->headers().count(),this);
