@@ -1454,9 +1454,9 @@ protected:
 	// Instant messaging related
 	MsgExecute = 0x00100000,
 	// Last possible public ID
-	PubLast    = 0x0fffffff,
+	PubLast    = 0x00ffffff,
 	// Private messages base ID
-	Private    = 0x10000000
+	Private    = 0x01000000
     } RelayID;
 
     /**
