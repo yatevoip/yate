@@ -362,6 +362,7 @@ private:
 
 #define MKDEBUG(lvl) params().addParam(new ExpOperation((int64_t)Debug ## lvl,"Debug" # lvl))
 #define MKTIME(typ) params().addParam(new ExpOperation((int64_t)SysUsage:: typ ## Time,# typ "Time"))
+#define MKDUMP(typ) params().addParam(new ExpOperation((int64_t)JsObject:: Dump ## typ,"Dump" # typ))
 class JsEngine : public JsObject, public DebugEnabler
 {
     YCLASS(JsEngine,JsObject)
@@ -387,6 +388,14 @@ public:
 	    MKTIME(Wall);
 	    MKTIME(User);
 	    MKTIME(Kernel);
+	    MKDUMP(PropOnly),
+	    MKDUMP(FuncOnly),
+	    MKDUMP(Func),
+	    MKDUMP(Prop),
+	    MKDUMP(Recursive),
+	    MKDUMP(Type),
+	    MKDUMP(Proto),
+	    MKDUMP(PropObjType),
 	    params().addParam(new ExpFunction("output"));
 	    params().addParam(new ExpFunction("debug"));
 	    params().addParam(new ExpFunction("traceDebug"));
@@ -405,6 +414,10 @@ public:
 	    params().addParam(new ExpFunction("init"));
 	    params().addParam(new ExpFunction("dump_r"));
 	    params().addParam(new ExpFunction("print_r"));
+	    params().addParam(new ExpFunction("dump_var_r"));
+	    params().addParam(new ExpFunction("print_var_r"));
+	    params().addParam(new ExpFunction("dump_root_r"));
+	    params().addParam(new ExpFunction("print_root_r"));
 	    params().addParam(new ExpFunction("dump_t"));
 	    params().addParam(new ExpFunction("print_t"));
 	    params().addParam(new ExpFunction("debugName"));
@@ -1185,7 +1198,7 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 // Return false if the number of arguments is not the expected one
 static bool extractStackArgs(int minArgc, JsObject* obj,
     ObjList& stack, const ExpOperation& oper, GenObject* context, ObjList& args,
-    ExpOperation** op1, ExpOperation** op2, ExpOperation** op3 = 0)
+    ExpOperation** op1, ExpOperation** op2 = 0, ExpOperation** op3 = 0)
 {
     if (!obj)
 	return false;
@@ -1204,6 +1217,9 @@ static bool extractStackArgs(int minArgc, JsObject* obj,
 	EXTRACT_ARG_CHECK(op1,1);
 	return true;
 #undef EXTRACT_ARG_CHECK
+	case 0:
+	    if (!minArgc)
+		return true;
     }
     return false;
 }
@@ -1516,6 +1532,48 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	}
 	else
 	    return false;
+    }
+    else if (oper.name() == YSTRING("dump_var_r")) {
+	// str = Engine.dump_var_r(obj[,flags])
+	ObjList args;
+	ExpOperation* obj = 0;
+	ExpOperation* flags = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&obj,&flags))
+	    return false;
+	String buf;
+	dumpRecursive(obj,buf,flags ? flags->valInteger(DumpPropOnly) : DumpPropOnly);
+	ExpEvaluator::pushOne(stack,new ExpOperation(buf));
+    }
+    else if (oper.name() == YSTRING("print_var_r")) {
+	// Engine.print_var_r(obj[,flags])
+	ObjList args;
+	ExpOperation* obj = 0;
+	ExpOperation* flags = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&obj,&flags))
+	    return false;
+	printRecursive(obj,flags ? flags->valInteger(DumpPropOnly) : DumpPropOnly);
+    }
+    else if (oper.name() == YSTRING("dump_root_r")) {
+	// str = Engine.dump_root_r([flags])
+	ObjList args;
+	ExpOperation* flags = 0;
+	if (!extractStackArgs(0,this,stack,oper,context,args,&flags))
+	    return false;
+	String buf;
+	ScriptRun* run = YOBJECT(ScriptRun,context);
+	dumpRecursive(run ? run->context() : context,buf,
+	    flags ? flags->valInteger(DumpPropOnly) : DumpPropOnly);
+	ExpEvaluator::pushOne(stack,new ExpOperation(buf));
+    }
+    else if (oper.name() == YSTRING("print_root_r")) {
+	// Engine.print_root_r([flags])
+	ObjList args;
+	ExpOperation* flags = 0;
+	if (!extractStackArgs(0,this,stack,oper,context,args,&flags))
+	    return false;
+	ScriptRun* run = YOBJECT(ScriptRun,context);
+	printRecursive(run ? run->context() : context,
+	    flags ? flags->valInteger(DumpPropOnly) : DumpPropOnly);
     }
     else if (oper.name() == YSTRING("dump_t")) {
 	if (oper.number() != 1)

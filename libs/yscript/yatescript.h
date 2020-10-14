@@ -1955,6 +1955,21 @@ class YSCRIPT_API JsObject : public ScriptContext
     YCLASS(JsObject,ScriptContext)
 public:
     /**
+     * Dump object flags
+     */
+    enum DumpFlags {
+	DumpFunc = 0x01,                 // Dump functions
+	DumpProp = 0x02,                 // Dump non functions (data)
+	DumpRecursive = 0x10,            // Dump recursive (stop on root if not set)
+	DumpType = 0x20,                 // Dump type (apply to functions also),
+	DumpProto = 0x40,                // Dump prototype
+	DumpPropObjType = 0x80,          // Dump non basic type for DumpPropOnly whithout DumpType 
+	// Masks
+	DumpFuncOnly = DumpRecursive | DumpProto | DumpFunc,
+	DumpPropOnly = DumpRecursive | DumpPropObjType | DumpProp,
+    };
+
+    /**
      * Constructor
      * @param name Name of the object
      * @param mtx Pointer to the mutex that serializes this object
@@ -2276,14 +2291,16 @@ public:
      * Helper method to return the hierarchical structure of an object
      * @param obj Object to dump structure
      * @param buf String to which the structure is added
+     * @param flags Flags indicating what to dump
      */
-    static void dumpRecursive(const GenObject* obj, String& buf);
+    static void dumpRecursive(const GenObject* obj, String& buf, unsigned int flags = 0xffffffff);
 
     /**
      * Helper method to display the hierarchical structure of an object
      * @param obj Object to display
+     * @param flags Flags indicating what to dump (display)
      */
-    static void printRecursive(const GenObject* obj);
+    static void printRecursive(const GenObject* obj, unsigned int flags = 0xffffffff);
 
     /**
      * Static method to obtain a JSON representation of the given object

@@ -125,9 +125,16 @@ protected:
 
 
 // Helper function that does the actual object printing
-static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int depth, ObjList& seen)
+static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int depth, ObjList& seen,
+    unsigned int flags)
 {
     if (!obj)
+	return;
+    if (depth > 1 && !(flags & JsObject::DumpRecursive))
+	return;
+    // Check if we have something to dump
+    unsigned int dump = flags & (JsObject::DumpFunc | JsObject::DumpProp);
+    if (!dump)
 	return;
     String str(' ',2 * depth);
     if (seen.find(obj)) {
@@ -136,12 +143,17 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 	return;
     }
     const NamedString* nstr = YOBJECT(NamedString,obj);
+    // Check for prototype dump (always dump the first level if original object is a prototype)
+    bool isProto = nstr && nstr->name() == JsObject::protoName();
+    if (depth && isProto && !(flags & JsObject::DumpProto))
+	return;
     const NamedPointer* nptr = YOBJECT(NamedPointer,nstr);
     const char* type = nstr ? (nptr ? "NamedPointer" : "NamedString") : "???";
     const char* subType = 0;
     const ScriptContext* scr = YOBJECT(ScriptContext,obj);
     const ExpWrapper* wrap = 0;
     bool objRecursed = false;
+    bool isFunc = false;
     if (scr) {
 	const JsObject* jso = YOBJECT(JsObject,scr);
 	if (jso) {
@@ -150,8 +162,10 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 		seen.append(jso)->setDelete(false);
 	    if (YOBJECT(JsArray,scr))
 		type = "JsArray";
-	    else if (YOBJECT(JsFunction,scr))
+	    else if (YOBJECT(JsFunction,scr)) {
 		type = "JsFunction";
+		isFunc = true;
+	    }
 	    else if (YOBJECT(JsRegExp,scr))
 		type = "JsRegExp";
 	    else if (YOBJECT(JsDate,scr))
@@ -167,38 +181,79 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
     if (exp && !scr) {
 	if ((wrap = YOBJECT(ExpWrapper,exp)))
 	    type = wrap->object() ? "ExpWrapper" : "Undefined";
-	else if (YOBJECT(ExpFunction,exp))
+	else if (YOBJECT(ExpFunction,exp)) {
 	    type = "ExpFunction";
+	    isFunc = true;
+	}
 	else {
 	    type = "ExpOperation";
 	    subType = exp->typeOf();
 	}
     }
-    if (nstr)
-	str << "'" << nstr->name() << "' = '" << *nstr << "'";
+    // Check for func/prop dump (don't do it if we are printing a prototype)
+    if (depth && !isProto && ((isFunc && (0 == (flags & JsObject::DumpFunc))) ||
+	(!isFunc && (0 == (flags & JsObject::DumpProp)))))
+	return;
+    bool dumpType = flags & JsObject::DumpType;
+    if (nstr) {
+	str << "'" << nstr->name() << "'";
+	// Nicely dump property value if dumping props only and type is not shown 
+	if ((dump == JsObject::DumpProp) && !isProto && !dumpType) {
+	    if (scr) {
+		if (exp && JsParser::isNull(*exp))
+		    str << " = null";
+		else if (YOBJECT(JsRegExp,scr))
+		    str << " = /" << *nstr << "/";
+		else if (flags & JsObject::DumpPropObjType) {
+		    if (YOBJECT(JsObject,scr))
+			str << " = " << *nstr;
+		    else
+			str << " = [ScriptContext]";
+		}
+	    }
+	    else if (exp) {
+		if (JsParser::isUndefined(*exp))
+		    str << " = undefined";
+		else if (exp->isInteger()) {
+		    if (exp->isBoolean())
+			str << " = " << exp->valBoolean();
+		    else
+			str << " = " << exp->number();
+		}
+		else if (exp->isNumber()) // NaN
+		    str << " = " << *nstr;
+		else // string
+		    str << " = '" << *nstr << "'";
+	    }
+	    else
+		str << " = '" << *nstr << "'";
+	}
+	else
+	    str << " = '" << *nstr << "'";
+    }
     else
 	str << "'" << obj->toString() << "'";
-    str << " (" << type << (subType ? ", " : "") << subType << ")";
+    if (dumpType)
+	str << " (" << type << (subType ? ", " : "") << subType << ")";
     if (objRecursed)
 	str << " (already seen)";
     buf.append(str,"\r\n");
     if (objRecursed)
 	return;
-    str.clear();
     if (scr) {
 	NamedIterator iter(scr->params());
 	while (const NamedString* p = iter.get())
-	    dumpRecursiveObj(p,buf,depth + 1,seen);
+	    dumpRecursiveObj(p,buf,depth + 1,seen,flags);
 	if (scr->nativeParams()) {
 	    iter = *scr->nativeParams();
 	    while (const NamedString* p = iter.get())
-		dumpRecursiveObj(p,buf,depth + 1,seen);
+		dumpRecursiveObj(p,buf,depth + 1,seen,flags);
 	}
     }
     else if (wrap)
-	dumpRecursiveObj(wrap->object(),buf,depth + 1,seen);
+	dumpRecursiveObj(wrap->object(),buf,depth + 1,seen,flags);
     else if (nptr)
-	dumpRecursiveObj(nptr->userData(),buf,depth + 1,seen);
+	dumpRecursiveObj(nptr->userData(),buf,depth + 1,seen,flags);
 }
 
 
@@ -243,16 +298,16 @@ JsObject* JsObject::copy(Mutex* mtx) const
     return jso;
 }
 
-void JsObject::dumpRecursive(const GenObject* obj, String& buf)
+void JsObject::dumpRecursive(const GenObject* obj, String& buf, unsigned int flags)
 {
     ObjList seen;
-    dumpRecursiveObj(obj,buf,0,seen);
+    dumpRecursiveObj(obj,buf,0,seen,flags);
 }
 
-void JsObject::printRecursive(const GenObject* obj)
+void JsObject::printRecursive(const GenObject* obj, unsigned int flags)
 {
     String buf;
-    dumpRecursive(obj,buf);
+    dumpRecursive(obj,buf,flags);
     Output("%s",buf.c_str());
 }
 
