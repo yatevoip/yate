@@ -999,6 +999,7 @@ static bool s_engineStop = false;
 static bool s_allowAbort = false;
 static bool s_allowTrace = false;
 static bool s_allowLink = true;
+static bool s_trackObj = false;
 static bool s_autoExt = true;
 static unsigned int s_maxFile = 500000;
 
@@ -5570,8 +5571,13 @@ bool JsGlobal::runMain()
 bool JsGlobal::buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
     const String& fileName, bool relPath, bool fromCfg, bool fromInit)
 {
+    bool objCount = s_trackObj && getObjCounting();
+    NamedCounter* saved = 0;
+    if (objCount)
+	saved = Thread::setCurrentObjCounter(getObjCounter("js:" + scriptName,true));
     JsGlobal* oldScript = old ? static_cast<JsGlobal*>(old->get()) : 0;
     JsGlobal* script = new JsGlobal(scriptName,fileName,relPath,fromCfg);
+    bool ok = false;
     if (script->load() || !s_keepOldOnFail || !old) {
 	if (old)
 	    old->set(script,false);
@@ -5579,16 +5585,20 @@ bool JsGlobal::buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
 	    s_globals.append(script);
 	lck.drop();
 	TelEngine::destruct(oldScript);
-	return script->runMain();
+	ok = script->runMain();
     }
-    // Make sure we don't remove the old one if unused
-    if (oldScript && fromInit) {
-	oldScript->m_inUse = true;
-	oldScript->m_confLoaded = fromCfg;
+    else {
+	// Make sure we don't remove the old one if unused
+	if (oldScript && fromInit) {
+	    oldScript->m_inUse = true;
+	    oldScript->m_confLoaded = fromCfg;
+	}
+	lck.drop();
+	TelEngine::destruct(script);
     }
-    lck.drop();
-    TelEngine::destruct(script);
-    return false;
+    if (objCount)
+	Thread::setCurrentObjCounter(saved);
+    return ok;
 }
 
 
@@ -5951,6 +5961,7 @@ void JsModule::initialize()
     s_maxFile = cfg.getIntValue("general","max_length",500000,32768,2097152);
     s_autoExt = cfg.getBoolValue("general","auto_extensions",true);
     s_allowAbort = cfg.getBoolValue("general","allow_abort");
+    s_trackObj = cfg.getBoolValue("general","track_objects");
     JsGlobal::s_keepOldOnFail = cfg.getBoolValue("general","keep_old_on_fail");
     bool changed = false;
     if (cfg.getBoolValue("general","allow_trace") != s_allowTrace) {
