@@ -321,6 +321,9 @@ public:
     virtual bool runAssign(ObjList& stack, const ExpOperation& oper, GenObject* context);
     virtual void clearField(const String& name)
 	{ m_list.remove(name); }
+    virtual const HashList* getHashListParams() const
+	{ return &m_list; }
+
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 private:

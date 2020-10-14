@@ -254,6 +254,17 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 	dumpRecursiveObj(wrap->object(),buf,depth + 1,seen,flags);
     else if (nptr)
 	dumpRecursiveObj(nptr->userData(),buf,depth + 1,seen,flags);
+    const JsObject* jso = YOBJECT(JsObject,obj);
+    if (jso) {
+	const HashList* hash = jso->getHashListParams();
+	if (hash) {
+	    for (unsigned int i = 0; i < hash->length(); i++) {
+		ObjList* lst = hash->getList(i);
+		for (lst ? lst = lst->skipNull() : 0; lst; lst = lst->skipNext())
+		    dumpRecursiveObj(lst->get(),buf,depth + 1,seen,flags);
+	    }
+	}
+    }
 }
 
 
@@ -359,12 +370,61 @@ ExpOperation* JsObject::toJSON(const ExpOperation* oper, int spaces)
     return ret;
 }
 
-void JsObject::toJSON(const NamedString* ns, String& buf, int spaces, int indent)
+// Utility: retrieve a JSON candidate from given list item
+// Advance the list
+// Return pointer to candidate, NULL if not found
+static inline GenObject* nextJSONCandidate(ObjList*& crt, bool isNs = true)
 {
-    const ExpOperation* oper = YOBJECT(ExpOperation,ns);
+    if (!crt)
+	return 0;
+    if (!crt->get()) {
+	crt = crt->skipNull();
+	if (!crt)
+	    return 0;
+    }
+    while (crt) {
+	GenObject* gen = crt->get();
+	crt = crt->skipNext();
+	const String& n = isNs ? static_cast<NamedString*>(gen)->name() : gen->toString();
+	if (!n || n == JsObject::protoName() || YOBJECT(JsFunction,gen) || YOBJECT(ExpFunction,gen))
+	    continue;
+	const ExpOperation* op = YOBJECT(ExpOperation,gen);
+	if (!(op && JsParser::isUndefined(*op)))
+	    return gen;
+    }
+    return 0;
+}
+
+// Utility: retrieve a JSON candidate from given hash list
+// Advance the list
+// Return pointer to candidate, NULL if not found
+static inline GenObject* nextJSONCandidate(const HashList& hash, unsigned int& idx, ObjList*& crt)
+{
+    GenObject* gen = nextJSONCandidate(crt,false);
+    if (gen)
+	return gen;
+    crt = 0;
+    while (++idx < hash.length()) {
+	crt = hash.getList(idx);
+	if (!crt)
+	    continue;
+	gen = nextJSONCandidate(crt,false);
+	if (gen)
+	    return gen;
+    }
+    return 0;
+}
+
+void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces, int indent)
+{
+    if (!obj) {
+	buf << "null";
+	return;
+    }
+    const ExpOperation* oper = YOBJECT(ExpOperation,obj);
     if (!oper) {
-	if (ns)
-	    buf << strEscape(*ns);
+	if (isStr)
+	    buf << strEscape(*static_cast<const String*>(obj));
 	else
 	    buf << "null";
 	return;
@@ -407,6 +467,30 @@ void JsObject::toJSON(const NamedString* ns, String& buf, int spaces, int indent
 	    buf << strEscape(jso->toString());
 	    return;
 	}
+	const HashList* hash = jso->getHashListParams();
+	if (hash) {
+	    ObjList* crt = hash->getList(0);
+	    unsigned int idx = 0;
+	    GenObject* gen = nextJSONCandidate(*hash,idx,crt);
+	    if (!gen) {
+		buf << "{}";
+		return;
+	    }
+	    String li(' ',indent);
+	    String ci(' ',indent + spaces);
+	    const char* sep = spaces ? ": " : ":";
+	    buf << "{" << nl;
+	    while (gen) {
+		buf << ci << strEscape(gen->toString()) << sep;
+		internalToJSON(gen,false,buf,spaces,indent + spaces);
+		gen = static_cast<NamedString*>(nextJSONCandidate(*hash,idx,crt));
+		if (gen)
+		    buf << ",";
+		buf << nl;
+	    }
+	    buf << li << "}";
+	    return;
+	}
 	switch (jso->params().count()) {
 	    case 1:
 		if (!jso->params().getParam(protoName()))
@@ -421,24 +505,12 @@ void JsObject::toJSON(const NamedString* ns, String& buf, int spaces, int indent
 	String ci(' ',indent + spaces);
 	const char* sep = spaces ? ": " : ":";
 	buf << "{" << nl;
-	while (l) {
-	    const NamedString* p = static_cast<const NamedString*>(l->get());
-	    l = l->skipNext();
-	    if (p->name() == protoName() || YOBJECT(JsFunction,p) || YOBJECT(ExpFunction,p))
-		continue;
-	    const ExpOperation* op = YOBJECT(ExpOperation,p);
-	    if (op && JsParser::isUndefined(*op))
-		continue;
+	const NamedString* p = static_cast<NamedString*>(nextJSONCandidate(l));
+	while (p) {
 	    buf << ci << strEscape(p->name()) << sep;
-	    toJSON(p,buf,spaces,indent + spaces);
-	    for (; l; l = l->skipNext()) {
-		p = static_cast<const NamedString*>(l->get());
-		op = YOBJECT(ExpOperation,p);
-		if (!(p->name() == protoName() || YOBJECT(JsFunction,p) || YOBJECT(ExpFunction,p)
-			|| (op && JsParser::isUndefined(*op))))
-		    break;
-	    }
-	    if (l)
+	    internalToJSON(p,true,buf,spaces,indent + spaces);
+	    p = static_cast<NamedString*>(nextJSONCandidate(l));
+	    if (p)
 		buf << ",";
 	    buf << nl;
 	}
@@ -492,6 +564,11 @@ void JsObject::fillFieldNames(ObjList& names)
     tmp.append(names,",");
     Debug(DebugInfo,"JsObject::fillFieldNames: %s",tmp.c_str());
 #endif
+}
+
+const HashList* JsObject::getHashListParams() const
+{
+    return 0;
 }
 
 bool JsObject::hasField(ObjList& stack, const String& name, GenObject* context) const

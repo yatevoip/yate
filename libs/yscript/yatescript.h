@@ -2041,6 +2041,12 @@ public:
     virtual void fillFieldNames(ObjList& names);
 
     /**
+     * Retrieve enclosed hashed list paramsters
+     * @return HashList pointer, NULL if this object don't hold one
+     */
+    virtual const HashList* getHashListParams() const;
+
+    /**
      * Check if a certain field is assigned in the object or its prototype
      * @param stack Evaluation stack in use
      * @param name Name of the field to test
@@ -2335,7 +2341,8 @@ protected:
      * @param spaces Number of spaces used for one indentation level
      * @param indent Current number of spaces used for indentation
      */
-    static void toJSON(const NamedString* ns, String& buf, int spaces, int indent = 0);    
+    static inline void toJSON(const NamedString* ns, String& buf, int spaces, int indent = 0)
+	{ internalToJSON(ns,true,buf,spaces,indent); }
 
     /**
      * Static helper method for escaping special characters when JSON stringifying
@@ -2345,6 +2352,7 @@ protected:
     static String strEscape(const char* str);
 
 private:
+    static void internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces, int indent = 0);    
     static const String s_protoName;
     bool m_frozen;
     Mutex* m_mutex;
