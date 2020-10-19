@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 using namespace TelEngine;
 
@@ -373,11 +374,32 @@ bool ExpEvaluator::getNumber(ParsePoint& expr)
     if (inError())
 	return false;
     XDebug(this,DebugAll,"getNumber line=0x%X '%.30s'",lineNumber(),(const char*)expr);
+    static const Regexp r("^[-+]?([0-9]*(\\.)?[0-9]+|[0-9]+(\\.))([eE][-+]?[0-9]+)?",true);
+    String m(expr,50);
+    if (m.matches(r) && (m.matchLength(2) || m.matchLength(3) || m.matchLength(4))) {
+	String str = m.matchString();
+	double val = str.toDouble(0.0);
+	// Maximum IEEE double that can be converted to signed int64
+#define DLONG_MAX 9223372036854774784.0
+	if (val >= DLONG_MAX)
+	    val = DLONG_MAX;
+	else if (val <= -DLONG_MAX)
+	    val = -DLONG_MAX;
+#undef DLONG_MAX
+	expr += str.length();
+	ExpOperation* op = addOpcode(str);
+	op->m_number = ::round(val);
+	op->m_isNumber = true;
+	DDebug(this,DebugAll,"Fake float %s ~ " FMT64,str.safe(),op->m_number);
+	return true;
+    }
     char* endp = 0;
     int64_t val = ::strtoll(expr,&endp,0);
     if (!endp || (endp == expr))
 	return false;
     expr = endp;
+    if (LLONG_MIN == val)
+	val++;
     DDebug(this,DebugAll,"Found " FMT64,val);
     addOpcode(val);
     return true;
