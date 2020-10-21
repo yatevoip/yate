@@ -1016,8 +1016,10 @@ bool ExpEvaluator::runOperation(ObjList& stack, const ExpOperation& oper, GenObj
 	    break;
 	case OpcCopy:
 	    {
-		Mutex* mtx = 0;
+		ScriptMutex* mtx = 0;
 		ScriptRun* runner = YOBJECT(ScriptRun,&oper);
+		if (!runner)
+		    runner = YOBJECT(ScriptRun,context);
 		if (runner) {
 		    if (runner->context())
 			mtx = runner->context()->mutex();
@@ -1367,8 +1369,8 @@ bool ExpEvaluator::runOperation(ObjList& stack, const ExpOperation& oper, GenObj
 
 bool ExpEvaluator::runFunction(ObjList& stack, const ExpOperation& oper, GenObject* context) const
 {
-    DDebug(this,DebugAll,"runFunction(%p,'%s' " FMT64 ", %p) ext=%p",
-	&stack,oper.name().c_str(),oper.number(),context,(void*)m_extender);
+    DDebug(this,DebugAll,"runFunction(%p,'%s' " FMT64 ", %p) ext=%p line=0x%08x",
+	&stack,oper.name().c_str(),oper.number(),context,(void*)m_extender,oper.lineNumber());
     if (oper.name() == YSTRING("chr")) {
 	String res;
 	for (int i = (int)oper.number(); i; i--) {
@@ -1627,13 +1629,13 @@ ExpOperation* ExpWrapper::clone(const char* name) const
     return op;
 }
 
-ExpOperation* ExpWrapper::copy(Mutex* mtx) const
+ExpOperation* ExpWrapper::copy(ScriptMutex* mtx) const
 {
     JsObject* jso = YOBJECT(JsObject,m_object);
     if (!jso)
 	return ExpOperation::clone();
     XDebug(DebugInfo,"ExpWrapper::copy(%p) [%p]",mtx,this);
-    ExpWrapper* op = new ExpWrapper(jso->copy(mtx),name());
+    ExpWrapper* op = new ExpWrapper(jso->copy(mtx,*this),name());
     static_cast<String&>(*op) = *this;
     op->lineNumber(lineNumber());
     return op;

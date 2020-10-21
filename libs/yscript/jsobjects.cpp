@@ -30,7 +30,7 @@ class JsObjectObj : public JsObject
 {
     YCLASS(JsObjectObj,JsObject)
 public:
-    inline JsObjectObj(Mutex* mtx)
+    inline JsObjectObj(ScriptMutex* mtx)
 	: JsObject("Object",mtx,true)
 	{
 	}
@@ -47,7 +47,7 @@ class JsDate : public JsObject
 {
     YCLASS(JsDate,JsObject)
 public:
-    inline JsDate(Mutex* mtx)
+    inline JsDate(ScriptMutex* mtx)
 	: JsObject("Date",mtx,true),
 	  m_time(0), m_msec(0), m_offs(0)
 	{
@@ -86,16 +86,16 @@ public:
 	}
 
 protected:
-    inline JsDate(Mutex* mtx, u_int64_t msecs, bool local = false)
-	: JsObject("Date",mtx),
+    inline JsDate(ScriptMutex* mtx, unsigned int lineNo, u_int64_t msecs, bool local = false)
+	: JsObject(mtx,"[object Date]",lineNo),
 	  m_time((unsigned int)(msecs / 1000)), m_msec((unsigned int)(msecs % 1000)), m_offs(Time::timeZone(m_time))
 	{ if (local) m_time -= m_offs; }
-    inline JsDate(Mutex* mtx, const char* name, unsigned int time, unsigned int msec, unsigned int offs)
-	: JsObject(mtx,name),
+    inline JsDate(ScriptMutex* mtx, const char* name, unsigned int line, unsigned int time, unsigned int msec, unsigned int offs)
+	: JsObject(mtx,name,line),
 	  m_time(time), m_msec(msec), m_offs(offs)
 	{ }
-    virtual JsObject* clone(const char* name) const
-	{ return new JsDate(mutex(),name,m_time,m_msec,m_offs); }
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsDate(mutex(),name,oper.lineNumber(),m_time,m_msec,m_offs); }
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 private:
     unsigned int m_time;
@@ -109,7 +109,7 @@ class JsMath : public JsObject
 {
     YCLASS(JsMath,JsObject)
 public:
-    inline JsMath(Mutex* mtx)
+    inline JsMath(ScriptMutex* mtx)
 	: JsObject("Math",mtx,true)
 	{
 	    params().addParam(new ExpFunction("abs"));
@@ -270,9 +270,9 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 
 const String JsObject::s_protoName("__proto__");
 
-JsObject::JsObject(const char* name, Mutex* mtx, bool frozen)
+JsObject::JsObject(const char* name, ScriptMutex* mtx, bool frozen)
     : ScriptContext(String("[object ") + name + "]"),
-      m_frozen(frozen), m_mutex(mtx)
+      m_frozen(frozen), m_mutex(mtx), m_lineNo(0)
 {
     XDebug(DebugAll,"JsObject::JsObject('%s',%p,%s) [%p]",
 	name,mtx,String::boolText(frozen),this);
@@ -282,29 +282,37 @@ JsObject::JsObject(const char* name, Mutex* mtx, bool frozen)
     params().addParam(new ExpFunction("hasOwnProperty"));
 }
 
-JsObject::JsObject(Mutex* mtx, const char* name, bool frozen)
+JsObject::JsObject(ScriptMutex* mtx, const char* name, unsigned int line, bool frozen)
     : ScriptContext(name),
-      m_frozen(frozen), m_mutex(mtx)
+      m_frozen(frozen), m_mutex(mtx), m_lineNo(line)
 {
-    XDebug(DebugAll,"JsObject::JsObject(%p,'%s',%s) [%p]",
-	mtx,name,String::boolText(frozen),this);
+    XDebug(DebugAll,"JsObject::JsObject(%p,'%s',0x%08x,%s) [%p]",
+	mtx,name,m_lineNo,String::boolText(frozen),this);
+    if (/*m_lineNo && */ m_mutex && m_mutex->objTrack())
+	m_mutex->objCreated(this);
 }
 
-JsObject::JsObject(GenObject* context, Mutex* mtx, bool frozen)
+JsObject::JsObject(GenObject* context, unsigned int line, ScriptMutex* mtx, bool frozen)
     : ScriptContext("[object Object]"),
-      m_frozen(frozen), m_mutex(mtx)
+      m_frozen(frozen), m_mutex(mtx), m_lineNo(line)
 {
+    XDebug(DebugAll,"JsObject::JsObject(ctxt=%p,l=0x%08x,mtx=%p,f=%s) [%p]",
+	context,m_lineNo,mtx,String::boolText(frozen),this);
     setPrototype(context,YSTRING("Object"));
+    if (/*m_lineNo && */ m_mutex && m_mutex->objTrack())
+	m_mutex->objCreated(this);
 }
 
 JsObject::~JsObject()
 {
+    if (m_mutex && m_mutex->objTrack())
+	m_mutex->objDeleted(this);
     XDebug(DebugAll,"JsObject::~JsObject '%s' [%p]",toString().c_str(),this);
 }
 
-JsObject* JsObject::copy(Mutex* mtx) const
+JsObject* JsObject::copy(ScriptMutex* mtx, const ExpOperation& oper) const
 {
-    JsObject* jso = new JsObject(mtx,toString(),frozen());
+    JsObject* jso = new JsObject(mtx,toString(),oper.lineNumber(),frozen());
     deepCopyParams(jso->params(),params(),mtx);
     return jso;
 }
@@ -545,11 +553,13 @@ void JsObject::setPrototype(GenObject* context, const String& objName)
     }
 }
 
-JsObject* JsObject::buildCallContext(Mutex* mtx, JsObject* thisObj)
+JsObject* JsObject::buildCallContext(ScriptMutex* mtx, JsObject* thisObj)
 {
-    JsObject* ctxt = new JsObject(mtx,"()");
-    if (thisObj && thisObj->alive())
+    JsObject* ctxt = new JsObject(mtx,"()",0);
+    if (thisObj && thisObj->alive()) {
+	ctxt->lineNo(thisObj->lineNo());
 	ctxt->params().addParam(new ExpWrapper(thisObj,"this"));
+    }
     return ctxt;
 }
 
@@ -603,7 +613,7 @@ JsObject* JsObject::runConstructor(ObjList& stack, const ExpOperation& oper, Gen
 {
     if (!ref())
 	return 0;
-    JsObject* obj = clone("[object " + oper.name() + "]");
+    JsObject* obj = clone("[object " + oper.name() + "]",oper);
     obj->params().addParam(new ExpWrapper(this,protoName()));
     return obj;
 }
@@ -729,7 +739,7 @@ void JsObject::addObject(NamedList& params, const char* name, JsObject* obj)
 // Static method that adds a constructor to a parent
 void JsObject::addConstructor(NamedList& params, const char* name, JsObject* obj)
 {
-    JsFunction* ctr = new JsFunction(obj->mutex(),name);
+    JsFunction* ctr = new JsFunction(obj->mutex(),name,0);
     ctr->params().addParam(new NamedPointer("prototype",obj,obj->toString()));
     obj->initConstructor(ctr);
     params.addParam(new NamedPointer(name,ctr,ctr->toString()));
@@ -752,7 +762,7 @@ int JsObject::extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& ope
 }
 
 // Static helper method that deep copies all parameters
-void JsObject::deepCopyParams(NamedList& dst, const NamedList& src, Mutex* mtx)
+void JsObject::deepCopyParams(NamedList& dst, const NamedList& src, ScriptMutex* mtx)
 {
     NamedIterator iter(src);
     while (const NamedString* p = iter.get()) {
@@ -769,7 +779,7 @@ void JsObject::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& p = context->params();
     static_cast<String&>(p) = "[object Global]";
@@ -785,6 +795,24 @@ void JsObject::initialize(ScriptContext* context)
 	addConstructor(p,"Date",new JsDate(mtx));
     if (!p.getParam(YSTRING("Math")))
 	addObject(p,"Math",new JsMath(mtx));
+}
+
+void JsObject::setLineForObj(JsObject* obj,unsigned int lineNo, bool recursive)
+{
+    if (!obj)
+	return;
+    DDebug(DebugAll,"JsObject::setLineForObj(%p,%u,%s)",obj,lineNo,String::boolText(recursive));
+    obj->lineNo(lineNo);
+    if (!recursive)
+	return;
+    for (unsigned int i = 0;i < obj->params().length();i++) {
+	String* param = obj->params().getParam(i);
+	JsObject* tmpObj = YOBJECT(JsObject,param);
+	if (!tmpObj)
+	    continue;
+	JsObject::setLineForObj(tmpObj,lineNo,recursive);
+	tmpObj->lineNo(lineNo);
+    }
 }
 
 bool JsObject::getIntField(const String& name, int64_t& val)
@@ -854,7 +882,7 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 	const NamedList* lst = YOBJECT(NamedList,obj);
 	if (lst) {
 	    NamedIterator iter(*lst);
-	    JsArray* jsa = new JsArray(context,mutex());
+	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	    while (const NamedString* ns = iter.get())
 		if (ns->name() != protoName())
 		    jsa->push(new ExpOperation(ns->name(),0,true));
@@ -870,7 +898,7 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 }
 
 
-JsArray::JsArray(Mutex* mtx)
+JsArray::JsArray(ScriptMutex* mtx)
     : JsObject("Array",mtx), m_length(0)
 {
     params().addParam(new ExpFunction("push"));
@@ -889,15 +917,15 @@ JsArray::JsArray(Mutex* mtx)
     params().addParam("length","0");
 }
 
-JsArray::JsArray(GenObject* context, Mutex* mtx)
-    : JsObject(mtx,"[object Array]"), m_length(0)
+JsArray::JsArray(GenObject* context, unsigned int line, ScriptMutex* mtx)
+    : JsObject(mtx,"[object Array]",line), m_length(0)
 {
     setPrototype(context,YSTRING("Array"));
 }
 
-JsObject* JsArray::copy(Mutex* mtx) const
+JsObject* JsArray::copy(ScriptMutex* mtx, const ExpOperation& oper) const
 {
-    JsArray* jsa = new JsArray(mtx,toString(),frozen());
+    JsArray* jsa = new JsArray(mtx,toString(),oper.lineNumber(),frozen());
     deepCopyParams(jsa->params(),params(),mtx);
     jsa->setLength(length());
     return jsa;
@@ -957,7 +985,7 @@ JsObject* JsArray::runConstructor(ObjList& stack, const ExpOperation& oper, GenO
 {
     if (!ref())
 	return 0;
-    JsArray* obj = static_cast<JsArray*>(clone("[object " + oper.name() + "]"));
+    JsArray* obj = static_cast<JsArray*>(clone("[object " + oper.name() + "]",oper));
     unsigned int len = (unsigned int)oper.number();
     for (unsigned int i = len; i;  i--) {
 	ExpOperation* op = obj->popValue(stack,context);
@@ -1030,7 +1058,7 @@ bool JsArray::runNative(ObjList& stack, const ExpOperation& oper, GenObject* con
 	ObjList args;
 	extractArgs(this,stack,oper,context,args);
 
-	JsArray* array = new JsArray(context,mutex());
+	JsArray* array = new JsArray(context,oper.lineNumber(),mutex());
 	// copy this array - only numerically indexed elements!
 	for (int i = 0; i < m_length; i++) {
 	    NamedString* ns = params().getParam(String(i));
@@ -1299,8 +1327,8 @@ bool JsArray::runNativeSlice(ObjList& stack, const ExpOperation& oper, GenObject
     }
     if (end < 0)
 	end = length() + end;
- 
-    JsArray* array = new JsArray(context,mutex());
+
+    JsArray* array = new JsArray(context,oper.lineNumber(),mutex());
     for (int32_t i = begin; i < end; i++) {
 	NamedString* ns = params().getParam(String(i));
 	if (!ns) {
@@ -1350,7 +1378,7 @@ bool JsArray::runNativeSplice(ObjList& stack, const ExpOperation& oper, GenObjec
     }
 
     // remove elements
-    JsArray* removed = new JsArray(context,mutex());
+    JsArray* removed = new JsArray(context,oper.lineNumber(),mutex());
     for (int32_t i = begin; i < begin + delCount; i++) {
 	NamedString* ns = params().getParam(String(i));
 	if (!ns) {
@@ -1478,15 +1506,15 @@ bool JsArray::runNativeSort(ObjList& stack, const ExpOperation& oper, GenObject*
 }
 
 
-JsRegExp::JsRegExp(Mutex* mtx)
+JsRegExp::JsRegExp(ScriptMutex* mtx)
     : JsObject("RegExp",mtx)
 {
     params().addParam(new ExpFunction("test"));
     params().addParam(new ExpFunction("valid"));
 }
 
-JsRegExp::JsRegExp(Mutex* mtx, const char* name, const char* rexp, bool insensitive, bool extended, bool frozen)
-    : JsObject(mtx,name,frozen),
+JsRegExp::JsRegExp(ScriptMutex* mtx, const char* name, unsigned int line, const char* rexp, bool insensitive, bool extended, bool frozen)
+    : JsObject(mtx,name,line,frozen),
       m_regexp(rexp,extended,insensitive)
 {
     XDebug(DebugAll,"JsRegExp::JsRegExp('%s',%p,%s) [%p]",
@@ -1495,17 +1523,17 @@ JsRegExp::JsRegExp(Mutex* mtx, const char* name, const char* rexp, bool insensit
     params().addParam("basicPosix",String::boolText(!extended));
 }
 
-JsRegExp::JsRegExp(Mutex* mtx, const Regexp& rexp, bool frozen)
-    : JsObject(mtx,rexp.c_str()),
+JsRegExp::JsRegExp(ScriptMutex* mtx, unsigned int line, const Regexp& rexp, bool frozen)
+    : JsObject(mtx,rexp.c_str(),line),
       m_regexp(rexp)
 {
     XDebug(DebugAll,"JsRegExp::JsRegExp('%s',%p,%s) [%p]",
 	toString().c_str(),mtx,String::boolText(frozen),this);
 }
 
-JsObject* JsRegExp::copy(Mutex* mtx) const
+JsObject* JsRegExp::copy(ScriptMutex* mtx, const ExpOperation& oper) const
 {
-    JsRegExp* reg = new JsRegExp(mtx,m_regexp,frozen());
+    JsRegExp* reg = new JsRegExp(mtx,oper.lineNumber(),m_regexp,frozen());
     deepCopyParams(reg->params(),params(),mtx);
     return reg;
 }
@@ -1581,7 +1609,7 @@ JsObject* JsRegExp::runConstructor(ObjList& stack, const ExpOperation& oper, Gen
     }
     if (!ref())
 	return 0;
-    JsRegExp* obj = new JsRegExp(mutex(),*pattern,*pattern,insensitive,extended);
+    JsRegExp* obj = new JsRegExp(mutex(),*pattern,oper.lineNumber(),*pattern,insensitive,extended);
     obj->params().addParam(new ExpWrapper(this,protoName()));
     return obj;
 }
@@ -1663,20 +1691,20 @@ JsObject* JsDate::runConstructor(ObjList& stack, const ExpOperation& oper, GenOb
     JsObject* obj = 0;
     switch (extractArgs(stack,oper,context,args)) {
 	case 0:
-	    obj = new JsDate(mutex(),Time::msecNow());
+	    obj = new JsDate(mutex(),oper.lineNumber(),Time::msecNow());
 	    break;
 	case 1:
 	    {
 		ExpOperation* val = static_cast<ExpOperation*>(args[0]);
 		if (val) {
 		    if (val->isInteger())
-			obj = new JsDate(mutex(),val->number());
+			obj = new JsDate(mutex(),oper.lineNumber(),val->number());
 		    else {
 			// Check string
 			uint64_t n = Time::toEpoch(*val,val->length(),1);
 			if (n == (uint64_t)-1)
 			    return JsParser::nullObject();
-			obj = new JsDate(mutex(),n);
+			obj = new JsDate(mutex(),oper.lineNumber(),n);
 		    }
 		}
 	    }
@@ -1704,7 +1732,7 @@ JsObject* JsDate::runConstructor(ObjList& stack, const ExpOperation& oper, GenOb
 		    parts[0] += 1900;
 		parts[1]++;
 		u_int64_t time = Time::toEpoch(parts[0],parts[1],parts[2],parts[3],parts[4],parts[5]);
-		obj = new JsDate(mutex(),1000 * time + parts[6],true);
+		obj = new JsDate(mutex(),oper.lineNumber(),1000 * time + parts[6],true);
 	    }
 	    break;
 	default:

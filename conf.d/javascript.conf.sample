@@ -32,6 +32,10 @@
 ; track_objects: boolean: Track objects separately in each global script
 ;track_objects=no
 
+; track_obj_life: unsigned integer: Number of lists to create for Hash List used
+; for tracking object creation and destruction. Setting it to 0 deactivates tracking.
+;track_obj_life=0
+
 ; auto_extensions: boolean: Automatically load scripting extensions in new scripts
 ; This does not prevent script code from explicitly loading extensions
 ;auto_extensions=yes

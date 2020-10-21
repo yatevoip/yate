@@ -31,16 +31,20 @@ class ParseNested;
 class JsRunner;
 class JsCodeStats;
 
-class JsContext : public JsObject, public Mutex
+class JsContext : public JsObject, public ScriptMutex
 {
     YCLASS(JsContext,JsObject)
 public:
     inline JsContext()
-	: JsObject("Context",this), Mutex(true,"JsContext")
+	: JsObject("Context",0), ScriptMutex(true,"JsContext"),
+	  m_trackObjs(0)
 	{
+	    setMutex(this);
 	    params().addParam(new ExpFunction("isNaN"));
 	    params().addParam(new ExpFunction("parseInt"));
 	    params().addParam(new ExpOperation(ExpOperation::nonInteger(),"NaN"));
+	    m_objTrack = !!m_trackObjs;
+	    DDebug(DebugAll,"JsContext::JsContext() [%p]",this);
 	}
     virtual void destroyed();
     virtual bool runFunction(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -49,15 +53,24 @@ public:
     GenObject* resolve(ObjList& stack, String& name, GenObject* context);
     bool runStringFunction(GenObject* obj, const String& name, ObjList& stack, const ExpOperation& oper, GenObject* context);
     bool runStringField(GenObject* obj, const String& name, ObjList& stack, const ExpOperation& oper, GenObject* context);
+    void objCreated(GenObject* obj)
+	{ createdObj(obj); };
+    void objDeleted(GenObject* obj)
+	{ deletedObj(obj); };
+    void createdObj(GenObject* obj);
+    void deletedObj(GenObject* obj);
+    void trackObjs(unsigned int track = 0);
+    ObjList* countAllocations();
 private:
     GenObject* resolveTop(ObjList& stack, const String& name, GenObject* context);
+    HashList* m_trackObjs;
 };
 
 class JsNull : public JsObject
 {
 public:
     inline JsNull()
-	: JsObject(0,"null",true)
+	: JsObject(0,"null",0,true)
 	{ }
 };
 
@@ -191,11 +204,16 @@ public:
     virtual ScriptRun* createRunner(ScriptContext* context, const char* title);
     virtual bool null() const;
     virtual void dump(String& res, bool loneNo = false) const;
+    virtual void getFileLine(unsigned int line, String& fileName, unsigned int& fileLine, bool wholePath = true)
+    {
+	fileName = getFileName(line,wholePath);
+	fileLine = getLineNo(line);
+    }
     bool link();
     inline bool traceable() const
 	{ return m_traceable; }
-    JsObject* parseArray(ParsePoint& expr, bool constOnly, Mutex* mtx);
-    JsObject* parseObject(ParsePoint& expr, bool constOnly, Mutex* mtx);
+    JsObject* parseArray(ParsePoint& expr, bool constOnly, ScriptMutex* mtx);
+    JsObject* parseObject(ParsePoint& expr, bool constOnly, ScriptMutex* mtx);
     inline const NamedList& pragmas() const
 	{ return m_pragmas; }
     inline static unsigned int getLineNo(unsigned int line)
@@ -247,7 +265,7 @@ private:
     bool parseVar(ParsePoint& expr);
     bool parseTry(ParsePoint& expr, GenObject* nested);
     bool parseFuncDef(ParsePoint& expr, bool publish);
-    bool parseSimple(ParsePoint& expr, bool constOnly, Mutex* mtx = 0);
+    bool parseSimple(ParsePoint& expr, bool constOnly, ScriptMutex* mtx = 0);
     bool evalList(ObjList& stack, GenObject* context) const;
     bool evalVector(ObjList& stack, GenObject* context) const;
     bool jumpToLabel(long int label, GenObject* context) const;
@@ -575,6 +593,8 @@ static const NativeFields s_nativeFields;
 void JsContext::destroyed()
 {
     params().clearParams();
+    TelEngine::destruct(m_trackObjs);
+    setMutex(0);
     JsObject::destroyed();
 }
 
@@ -640,7 +660,7 @@ GenObject* JsContext::resolve(ObjList& stack, String& name, GenObject* context)
 
 bool JsContext::runFunction(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
-    XDebug(DebugAll,"JsContext::runFunction '%s' [%p]",oper.name().c_str(),this);
+    XDebug(DebugAll,"JsContext::runFunction '%s' line=0x%08x [%p]",oper.name().c_str(),oper.lineNumber(),this);
     String name = oper.name();
     GenObject* o = resolve(stack,name,context);
     if (o && o != this) {
@@ -778,7 +798,7 @@ bool JsContext::runStringFunction(GenObject* obj, const String& name, ObjList& s
 		ok = buf.matches(r);
 	    }
 	    if (ok) {
-		JsArray* jsa = new JsArray(context,mutex());
+		JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 		for (int i = 0; i <= buf.matchCount(); i++)
 		    jsa->push(new ExpOperation(buf.matchString(i)));
 		jsa->params().addParam(new ExpOperation((int64_t)buf.matchOffset(),"index"));
@@ -857,7 +877,7 @@ bool JsContext::runStringFunction(GenObject* obj, const String& name, ObjList& s
     } while (false);
     if (name == YSTRING("split")) {
 	ObjList args;
-	JsArray* array = new JsArray(context,mutex());
+	JsArray* array = new JsArray(context,oper.lineNumber(),mutex());
 	if (!(extractArgs(stack,oper,context,args) && args.skipNull()))
 	    SPLIT_EMPTY();
 	GenObject* gen = args[0];
@@ -964,6 +984,66 @@ bool JsContext::runAssign(ObjList& stack, const ExpOperation& oper, GenObject* c
     return JsObject::runAssign(stack,oper,context);
 }
 
+void JsContext::createdObj(GenObject* obj)
+{
+    if (!m_trackObjs)
+	return;
+    JsObject* jso = YOBJECT(JsObject,obj);
+    JsObject* me = static_cast<JsObject*>(this);
+    if (!(jso && jso != me))
+	return;
+    XDebug(DebugInfo,"Adding object=%p created at line=%u(0x%08x)",jso,jso->lineNo(),jso->lineNo());
+    ObjList* o = m_trackObjs->append(jso,String(*((uint64_t*)jso)).hash());
+    if (o)
+	o->setDelete(false);
+}
+
+void JsContext::deletedObj(GenObject* obj)
+{
+    if (!m_trackObjs)
+	return;
+    JsObject* jso = YOBJECT(JsObject,obj);
+    if (!jso)
+	return;
+    XDebug(DebugInfo,"Removing object=%p created at line=%u(0x%08x)",jso,jso->lineNo(),jso->lineNo());
+    m_trackObjs->remove(jso,String(*((uint64_t*)jso)).hash(),false);
+}
+
+void JsContext::trackObjs(unsigned int track)
+{
+    // once tracking is set per script, it cannot be reset
+    if (!track || m_trackObjs)
+	return;
+    m_trackObjs = new HashList(track);
+    m_objTrack = true;
+}
+
+ObjList* JsContext::countAllocations()
+{
+    if (!m_trackObjs)
+	return 0;
+    ObjList* counters = new ObjList();
+    for (unsigned int i = 0; i < m_trackObjs->length(); i++) {
+	ObjList* l = m_trackObjs->getList(i);
+	if (!l)
+	    continue;
+	for (ObjList* n = l->skipNull(); n; n = n->skipNext()) {
+	    JsObject* jso = YOBJECT(JsObject,n->get());
+	    if (!jso)
+		continue;
+	    String id(jso->lineNo());
+	    NamedCounter* count = static_cast<NamedCounter*>(counters->operator[](id));
+	    if (!count)
+		counters->insert(count = new NamedCounter(id));
+	    count->inc();
+	}
+    }
+    if (!counters->skipNull()) {
+	TelEngine::destruct(counters);
+	return 0;
+    }
+    return counters;
+}
 
 JsCode::~JsCode()
 {
@@ -982,7 +1062,7 @@ bool JsCode::initialize(ScriptContext* context) const
 	    continue;
 	const JsFunction* jf = YOBJECT(JsFunction,op);
 	if (jf) {
-	    JsObject* nf = jf->copy(context->mutex(),jf->getFunc()->name());
+	    JsObject* nf = jf->copy(context->mutex(),jf->getFunc()->name(),*op);
 	    context->params().setParam(new ExpWrapper(nf,op->name(),op->barrier()));
 	}
 	else
@@ -1173,7 +1253,7 @@ bool JsCode::getString(ParsePoint& expr)
     }
     XDebug(this,DebugInfo,"Regexp '%s' flags '%s%s'",str.c_str(),
 	(insensitive ? "i" : ""),(extended ? "" : "b"));
-    JsRegExp* obj = new JsRegExp(0,str,str,insensitive,extended);
+    JsRegExp* obj = new JsRegExp(0,str,lineNumber(),str,insensitive,extended);
     addOpcode(new ExpWrapper(ExpEvaluator::OpcCopy,obj));
     return true;
 }
@@ -1894,10 +1974,15 @@ bool JsCode::parseFuncDef(ParsePoint& expr, bool publish)
     // Add the implicit "return undefined" at end of function
     addOpcode((Opcode)OpcReturn);
     addOpcode(OpcLabel,jump->number());
-    JsFunction* obj = new JsFunction(0,name,&args,(long int)lbl->number(),this);
-    addOpcode(new ExpWrapper(obj,name));
-    if (publish && name && obj->ref())
-	m_globals.append(new ExpWrapper(obj,name));
+    JsFunction* obj = new JsFunction(0,name,lineNumber(),&args,(long int)lbl->number(),this);
+    ExpWrapper* exp = new ExpWrapper(obj,name);
+    exp->lineNumber(lineNumber());
+    addOpcode(exp);
+    if (publish && name && obj->ref()) {
+	exp = new ExpWrapper(obj,name);
+	exp->lineNumber(lineNumber());
+	m_globals.append(exp);
+    }
     return true;
 }
 
@@ -2014,7 +2099,7 @@ bool JsCode::getSimple(ParsePoint& expr, bool constOnly)
     return parseSimple(expr,constOnly);
 }
 
-bool JsCode::parseSimple(ParsePoint& expr, bool constOnly, Mutex* mtx)
+bool JsCode::parseSimple(ParsePoint& expr, bool constOnly, ScriptMutex* mtx)
 {
     if (inError())
 	return false;
@@ -2053,12 +2138,12 @@ bool JsCode::parseSimple(ParsePoint& expr, bool constOnly, Mutex* mtx)
 }
 
 // Parse an inline Javascript Array: [ item1, item2, ... ]
-JsObject* JsCode::parseArray(ParsePoint& expr, bool constOnly, Mutex* mtx)
+JsObject* JsCode::parseArray(ParsePoint& expr, bool constOnly, ScriptMutex* mtx)
 {
     if (skipComments(expr) != '[')
 	return 0;
     expr++;
-    JsArray* jsa = new JsArray(mtx,"[object Array]");
+    JsArray* jsa = new JsArray(mtx,"[object Array]",lineNumber());
     for (bool first = true; ; first = false) {
 	if (skipComments(expr) == ']') {
 	    expr++;
@@ -2108,12 +2193,12 @@ JsObject* JsCode::parseArray(ParsePoint& expr, bool constOnly, Mutex* mtx)
 
 
 // Parse an inline Javascript Object: { prop1: value1, "prop 2": value2, ... }
-JsObject* JsCode::parseObject(ParsePoint& expr, bool constOnly, Mutex* mtx)
+JsObject* JsCode::parseObject(ParsePoint& expr, bool constOnly, ScriptMutex* mtx)
 {
     if (skipComments(expr) != '{')
 	return 0;
     expr++;
-    JsObject* jso = new JsObject(mtx,"[object Object]");
+    JsObject* jso = new JsObject(mtx,"[object Object]",lineNumber());
     for (bool first = true; ; first = false) {
 	if (skipComments(expr) == '}') {
 	    expr++;
@@ -2167,6 +2252,8 @@ JsObject* JsCode::parseObject(ParsePoint& expr, bool constOnly, Mutex* mtx)
 
 bool JsCode::runOperation(ObjList& stack, const ExpOperation& oper, GenObject* context) const
 {
+    DDebug(this,DebugAll,"JsCode::runOperation(%p,%u,%p) %s line=0x%08x",&stack,oper.opcode(),context,
+	    getOperator(oper.opcode()),oper.lineNumber());
     JsRunner* sr = static_cast<JsRunner*>(context);
     if (sr && sr->tracing())
 	sr->tracePrep(oper);
@@ -3491,15 +3578,15 @@ void JsCodeStats::dump(Stream& file)
 }; // anonymous namespace
 
 
-JsFunction::JsFunction(Mutex* mtx)
+JsFunction::JsFunction(ScriptMutex* mtx)
     : JsObject("Function",mtx,true),
       m_label(0), m_code(0), m_func("")
 {
     init();
 }
 
-JsFunction::JsFunction(Mutex* mtx, const char* name, ObjList* args, long int lbl, ScriptCode* code)
-    : JsObject(mtx,String("[function ") + name + "()]",false),
+JsFunction::JsFunction(ScriptMutex* mtx, const char* name, unsigned int line, ObjList* args, long int lbl, ScriptCode* code)
+    : JsObject(mtx,String("[function ") + name + "()]",line,false),
       m_label(lbl), m_code(code), m_func(name)
 {
     init();
@@ -3512,12 +3599,12 @@ JsFunction::JsFunction(Mutex* mtx, const char* name, ObjList* args, long int lbl
     params().addParam("length",String(argc));
 }
 
-JsObject* JsFunction::copy(Mutex* mtx, const char* name) const
+JsObject* JsFunction::copy(ScriptMutex* mtx, const char* name, const ExpOperation& oper) const
 {
     ObjList args;
     for (ObjList* l = m_formal.skipNull(); l; l = l->skipNext())
 	args.append(new String(l->get()->toString()));
-    return new JsFunction(mtx,name,&args,label(),m_code);
+    return new JsFunction(mtx,name,oper.lineNumber(),&args,label(),m_code);
 }
 
 void JsFunction::init()
@@ -3716,7 +3803,7 @@ ScriptRun::Status JsParser::eval(const String& text, ExpOperation** result, Scri
 }
 
 // Parse JSON using native methods
-ExpOperation* JsParser::parseJSON(const char* text, Mutex* mtx, ObjList* stack, GenObject* context)
+ExpOperation* JsParser::parseJSON(const char* text, ScriptMutex* mtx, ObjList* stack, GenObject* context, const ExpOperation* op)
 {
     if (!text)
 	return 0;
@@ -3728,8 +3815,12 @@ ExpOperation* JsParser::parseJSON(const char* text, Mutex* mtx, ObjList* stack, 
 	if (code->skipComments(pp,context))
 	    TelEngine::destruct(ret);
     }
-    if (stack && ret)
-	code->resolveObjectParams(YOBJECT(JsObject,ret),*stack,context);
+    if (stack && ret) {
+	JsObject* obj = YOBJECT(JsObject,ret);
+	code->resolveObjectParams(obj,*stack,context);
+	if (op)
+	    JsObject::setLineForObj(obj,op->lineNumber(),true);
+    }
     TelEngine::destruct(code);
     return ret;
 }

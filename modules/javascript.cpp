@@ -118,6 +118,7 @@ public:
     virtual bool msgDisconnect(Message& msg, const String& reason);
     void msgPostExecute(const Message& msg, bool handled);
     bool init();
+    bool evalAllocations(String& retVal, unsigned int top);
     inline State state() const
 	{ return m_state; }
     inline const char* stateName() const
@@ -188,7 +189,7 @@ class JsShared : public JsObject
 {
     YCLASS(JsShared,JsObject)
 public:
-    inline JsShared(Mutex* mtx)
+    inline JsShared(ScriptMutex* mtx)
 	: JsObject("Shared",mtx,true)
 	{
 	    params().addParam(new ExpFunction("inc"));
@@ -251,7 +252,7 @@ class JsSemaphore : public JsObject
 {
     YCLASS(JsSemaphore,JsObject)
 public:
-    inline JsSemaphore(Mutex* mtx)
+    inline JsSemaphore(ScriptMutex* mtx)
 	: JsObject("Semaphore",mtx,true), m_constructor(0), m_exit(false)
 	{
 	    XDebug(DebugAll,"JsSemaphore::JsSemaphore() [%p]",this);
@@ -259,9 +260,9 @@ public:
 	    params().addParam(new ExpFunction("signal"));
 	}
 
-    inline JsSemaphore(JsSemaphore* constructor, Mutex* mtx, unsigned int maxCount, unsigned int initialCount,
+    inline JsSemaphore(JsSemaphore* constructor, ScriptMutex* mtx, unsigned int line, unsigned int maxCount, unsigned int initialCount,
 	    const char* name)
-	: JsObject(mtx,"[object Semaphore]",false), m_name(name),
+	: JsObject(mtx,"[object Semaphore]",line,false), m_name(name),
 	  m_semaphore(maxCount,m_name.c_str(),initialCount), m_constructor(constructor), m_exit(false)
 	{
 	    XDebug(DebugAll,"JsSemaphore::JsSemaphore(%u,'%s',%u) [%p]",maxCount, 
@@ -296,15 +297,15 @@ private:
 class JsHashList : public JsObject
 {
 public:
-    inline JsHashList(Mutex* mtx)
+    inline JsHashList(ScriptMutex* mtx)
 	: JsObject("HashList",mtx,true),
 	  m_list()
 	{
 	    XDebug(DebugAll,"JsHashList::JsHashList() [%p]",this);
 	    params().addParam(new ExpFunction("count"));
 	}
-    inline JsHashList(unsigned int size, Mutex* mtx)
-	: JsObject(mtx,"[object HashList]",false),
+    inline JsHashList(unsigned int size, ScriptMutex* mtx, unsigned int line)
+	: JsObject(mtx,"[object HashList]",line,false),
 	  m_list(size)
 	{
 	    XDebug(DebugAll,"JsHashList::JsHashList(%u) [%p]",size,this);
@@ -333,7 +334,7 @@ private:
 class JsURI : public JsObject
 {
 public:
-    inline JsURI(Mutex* mtx)
+    inline JsURI(ScriptMutex* mtx)
 	: JsObject("URI",mtx,true)
 	{
 	    XDebug(DebugAll,"JsURI::JsURI() [%p]",this);
@@ -345,8 +346,8 @@ public:
 	    params().addParam(new ExpFunction("getExtra"));
 	    params().addParam(new ExpFunction("getCanonical"));
 	}
-    inline JsURI(const char* str, Mutex* mtx)
-	: JsObject(mtx,str,false),
+    inline JsURI(const char* str, ScriptMutex* mtx, unsigned int line)
+	: JsObject(mtx,str,line,false),
 	  m_uri(str)
 	{
 	    XDebug(DebugAll,"JsURI::JsURI('%s') [%p]",str,this);
@@ -370,7 +371,7 @@ class JsEngine : public JsObject, public DebugEnabler
 {
     YCLASS(JsEngine,JsObject)
 public:
-    inline JsEngine(Mutex* mtx, const char* name = 0)
+    inline JsEngine(ScriptMutex* mtx, const char* name = 0)
 	: JsObject("Engine",mtx,true),
 	  m_worker(0), m_debugName("javascript")
 	{
@@ -409,6 +410,7 @@ public:
 	    params().addParam(new ExpFunction("lineNo"));
 	    params().addParam(new ExpFunction("fileName"));
 	    params().addParam(new ExpFunction("fileNo"));
+	    params().addParam(new ExpFunction("creationLine"));
 	    params().addParam(new ExpFunction("sleep"));
 	    params().addParam(new ExpFunction("usleep"));
 	    params().addParam(new ExpFunction("yield"));
@@ -472,7 +474,7 @@ class JsMessage : public JsObject
 {
 public:
 
-    inline JsMessage(Mutex* mtx)
+    inline JsMessage(ScriptMutex* mtx)
 	: JsObject("Message",mtx,true),
 	  m_message(0), m_dispatch(false), m_owned(false), m_trackPrio(true),
 	  m_traceLvl(DebugInfo), m_traceLst(0)
@@ -494,8 +496,8 @@ public:
 	    params().addParam(new ExpFunction("clearParam"));
 	    params().addParam(new ExpFunction("trace"));
 	}
-    inline JsMessage(Message* message, Mutex* mtx, bool disp, bool owned = false)
-	: JsObject(mtx,"[object Message]"),
+    inline JsMessage(Message* message, ScriptMutex* mtx, unsigned int line, bool disp, bool owned = false)
+	: JsObject(mtx,"[object Message]",line),
 	  m_message(message), m_dispatch(disp), m_owned(owned), m_trackPrio(true),
 	  m_traceLvl(DebugInfo), m_traceLst(0)
 	{
@@ -546,8 +548,8 @@ public:
     void runAsync(ObjList& stack, Message* msg, bool owned);
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
-    void getColumn(ObjList& stack, const ExpOperation* col, GenObject* context);
-    void getRow(ObjList& stack, const ExpOperation* row, GenObject* context);
+    void getColumn(ObjList& stack, const ExpOperation* col, GenObject* context, unsigned int lineNo);
+    void getRow(ObjList& stack, const ExpOperation* row, GenObject* context, unsigned int lineNo);
     void getResult(ObjList& stack, const ExpOperation& row, const ExpOperation& col, GenObject* context);
     bool installHook(ObjList& stack, const ExpOperation& oper, GenObject* context);
     inline void setTrace() 
@@ -573,12 +575,12 @@ class JsHandler : public MessageHandler
 {
     YCLASS(JsHandler,MessageHandler)
 public:
-    inline JsHandler(const char* name, unsigned priority, const ExpFunction& func, GenObject* context)
+    inline JsHandler(const char* name, unsigned priority, const ExpFunction& func, GenObject* context, unsigned int lineNo)
 	: MessageHandler(name,priority,__plugin.name()),
-	  m_function(func.name(),1)
+	  m_function(func.name(),1), m_lineNo(lineNo)
 	{
-	    XDebug(&__plugin,DebugAll,"JsHandler::JsHandler('%s',%u,'%s') [%p]",
-		name,priority,func.name().c_str(),this);
+	    XDebug(&__plugin,DebugAll,"JsHandler::JsHandler('%s',%u,'%s',%p,%u) [%p]",
+		name,priority,func.name().c_str(),context,lineNo,this);
 	    ScriptRun* runner = YOBJECT(ScriptRun,context);
 	    if (runner) {
 		m_context = runner->context();
@@ -599,14 +601,15 @@ private:
     ExpFunction m_function;
     RefPointer<ScriptContext> m_context;
     RefPointer<ScriptCode> m_code;
+    unsigned int m_lineNo;
 };
 
 class JsMessageQueue : public MessageQueue
 {
     YCLASS(JsMessageQueue,MessageQueue)
 public:
-    inline JsMessageQueue(const ExpFunction* received,const char* name, unsigned threads, const ExpFunction* trap, unsigned trapLunch, GenObject* context)
-	: MessageQueue(name,threads), m_receivedFunction(0), m_trapFunction(0), m_trapLunch(trapLunch), m_trapCalled(false)
+    inline JsMessageQueue(unsigned int line, const ExpFunction* received,const char* name, unsigned threads, const ExpFunction* trap, unsigned trapLunch, GenObject* context)
+	: MessageQueue(name,threads), m_lineNo(line), m_receivedFunction(0), m_trapFunction(0), m_trapLunch(trapLunch), m_trapCalled(false)
 	{
 	    ScriptRun* runner = YOBJECT(ScriptRun,context);
 	    if (runner) {
@@ -628,6 +631,7 @@ public:
 protected:
     virtual void received(Message& msg);
 private:
+    unsigned int m_lineNo;
     ExpFunction* m_receivedFunction;
     ExpFunction* m_trapFunction;
     RefPointer<ScriptContext> m_context;
@@ -640,7 +644,7 @@ class JsFile : public JsObject
 {
     YCLASS(JsFile,JsObject)
 public:
-    inline JsFile(Mutex* mtx)
+    inline JsFile(ScriptMutex* mtx)
 	: JsObject("File",mtx,true)
 	{
 	    XDebug(DebugAll,"JsFile::JsFile() [%p]",this);
@@ -662,16 +666,10 @@ protected:
 class JsConfigFile : public JsObject
 {
 public:
-    inline JsConfigFile(Mutex* mtx)
+    inline JsConfigFile(ScriptMutex* mtx)
 	: JsObject("ConfigFile",mtx,true)
 	{
 	    XDebug(DebugAll,"JsConfigFile::JsConfigFile() [%p]",this);
-	}
-    inline JsConfigFile(Mutex* mtx, const char* name, bool warn)
-	: JsObject("ConfigFile",mtx,true),
-	  m_config(name,warn)
-	{
-	    XDebug(DebugAll,"JsConfigFile::JsConfigFile('%s') [%p]",name,this);
 	    params().addParam(new ExpFunction("name"));
 	    params().addParam(new ExpFunction("load"));
 	    params().addParam(new ExpFunction("save"));
@@ -686,6 +684,12 @@ public:
 	    params().addParam(new ExpFunction("clearSection"));
 	    params().addParam(new ExpFunction("clearKey"));
 	    params().addParam(new ExpFunction("keys"));
+	}
+    inline JsConfigFile(ScriptMutex* mtx, unsigned int line, const char* name, bool warn)
+	: JsObject(mtx,"[object ConfigFile]",line),
+	  m_config(name,warn)
+	{
+	    XDebug(DebugAll,"JsConfigFile::JsConfigFile('%s') [%p]",name,this);
 	}
     virtual void* getObject(const String& name) const;
     virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -705,8 +709,8 @@ class JsConfigSection : public JsObject
     friend class JsConfigFile;
     YCLASS(JsConfigSection,JsObject)
 protected:
-    inline JsConfigSection(JsConfigFile* owner, const char* name)
-	: JsObject(owner->mutex(),name,true),
+    inline JsConfigSection(JsConfigFile* owner, const char* name, unsigned int lineNo)
+	: JsObject(owner->mutex(),name,lineNo,true),
 	  m_owner(owner)
 	{
 	    XDebug(DebugAll,"JsConfigSection::JsConfigSection(%p,'%s') [%p]",owner,name,this);
@@ -727,7 +731,7 @@ private:
 class JsXML : public JsObject
 {
 public:
-    inline JsXML(Mutex* mtx)
+    inline JsXML(ScriptMutex* mtx)
 	: JsObject("XML",mtx,true),
 	  m_xml(0)
 	{
@@ -753,8 +757,8 @@ public:
 	    params().addParam(new ExpFunction("replaceParams"));
 	    params().addParam(new ExpFunction("saveFile"));
 	}
-    inline JsXML(Mutex* mtx, XmlElement* xml, JsXML* owner = 0)
-	: JsObject("XML",mtx,false),
+    inline JsXML(ScriptMutex* mtx, unsigned int line, XmlElement* xml, JsXML* owner = 0)
+	: JsObject(mtx,"[object XML]",line,false),
 	  m_xml(xml), m_owner(owner)
 	{
 	    XDebug(DebugAll,"JsXML::JsXML(%p,%p) [%p]",xml,owner,this);
@@ -800,7 +804,7 @@ class JsHasher : public JsObject
 {
     YCLASS(JsHasher,JsObject)
 public:
-    inline JsHasher(Mutex* mtx)
+    inline JsHasher(ScriptMutex* mtx)
 	: JsObject("Hasher",mtx,true),
 	  m_hasher(0)
 	{
@@ -813,8 +817,8 @@ public:
 	    params().addParam(new ExpFunction("hashLength"));
 	    params().addParam(new ExpFunction("hmacBlockSize"));
 	}
-    inline JsHasher(GenObject* context, Mutex* mtx, Hasher* h)
-	: JsObject(mtx,"Hasher",false),
+    inline JsHasher(GenObject* context, ScriptMutex* mtx, unsigned int line, Hasher* h)
+	: JsObject(mtx,"[object Hasher]",line,false),
 	  m_hasher(h)
 	{
 	    XDebug(DebugAll,"JsHasher::JsHasher(%p) [%p]",m_hasher,this);
@@ -843,7 +847,7 @@ class JsJSON : public JsObject
 {
     YCLASS(JsJSON,JsObject)
 public:
-    inline JsJSON(Mutex* mtx)
+    inline JsJSON(ScriptMutex* mtx)
 	: JsObject("JSON",mtx,true)
 	{
 	    params().addParam(new ExpFunction("parse"));
@@ -862,7 +866,7 @@ class JsDNS : public JsObject
 {
     YCLASS(JsDNS,JsObject)
 public:
-    inline JsDNS(Mutex* mtx)
+    inline JsDNS(ScriptMutex* mtx)
 	: JsObject("DNS",mtx,true)
 	{
 	    params().addParam(new ExpFunction("query"));
@@ -878,7 +882,7 @@ public:
 	    params().addParam(new ExpFunction("dscp"));
 	}
     static void initialize(ScriptContext* context);
-    void runQuery(ObjList& stack, const String& name, Resolver::Type type, GenObject* context);
+    void runQuery(ObjList& stack, const String& name, Resolver::Type type, GenObject* context, unsigned int lineNo);
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 };
@@ -887,7 +891,7 @@ class JsChannel : public JsObject
 {
     YCLASS(JsChannel,JsObject)
 public:
-    inline JsChannel(JsAssist* assist, Mutex* mtx)
+    inline JsChannel(JsAssist* assist, ScriptMutex* mtx)
 	: JsObject("Channel",mtx,false), m_assist(assist)
 	{
 	    params().addParam(new ExpFunction("id"));
@@ -975,18 +979,19 @@ class JsDnsAsync : public ScriptAsync
     YCLASS(JsDnsAsync,ScriptAsync)
 public:
     inline JsDnsAsync(ScriptRun* runner, JsDNS* jsDns, ObjList* stack,
-	const String& name, Resolver::Type type, GenObject* context)
+	const String& name, Resolver::Type type, GenObject* context, unsigned int lineNo)
 	: ScriptAsync(runner),
-	  m_stack(stack), m_name(name), m_type(type), m_context(context), m_dns(jsDns)
+	  m_stack(stack), m_name(name), m_type(type), m_context(context), m_dns(jsDns), m_lineNo(lineNo)
 	{ XDebug(DebugAll,"JsDnsAsync"); }
     virtual bool run()
-	{ m_dns->runQuery(*m_stack,m_name,m_type,m_context); return true; }
+	{ m_dns->runQuery(*m_stack,m_name,m_type,m_context,m_lineNo); return true; }
 private:
     ObjList* m_stack;
     String m_name;
     Resolver::Type m_type;
     GenObject* m_context;
     RefPointer<JsDNS> m_dns;
+    unsigned int m_lineNo;
 };
 
 class JsPostExecute : public MessagePostHook
@@ -1003,6 +1008,7 @@ static bool s_allowAbort = false;
 static bool s_allowTrace = false;
 static bool s_allowLink = true;
 static bool s_trackObj = false;
+static unsigned int s_trackCreation = 0;
 static bool s_autoExt = true;
 static unsigned int s_maxFile = 500000;
 
@@ -1063,6 +1069,50 @@ static void contextInit(ScriptRun* runner, const char* name = 0, JsAssist* assis
     JsDNS::initialize(ctx);
     if (s_autoExt)
 	contextLoad(ctx,name);
+}
+
+// sort list of object allocations descending
+static int counterSort(GenObject* obj1, GenObject* obj2, void* context)
+{
+    const NamedCounter* s1 = static_cast<NamedCounter*>(obj1);
+    const NamedCounter* s2 = static_cast<NamedCounter*>(obj2);
+    int c1 = s1 ? s1->count() : 0;
+    int c2 = s2 ? s2->count() : 0;
+    return c1 < c2 ? 1 : (c1 > c2 ? -1 : 0);
+}
+
+// Obtain a string with top object allocations from context ctx
+static bool evalCtxtAllocations(String& retVal, unsigned int count, ScriptContext* ctx,
+		ScriptCode* code, const String& scrName)
+{
+    if (!(ctx && code)) {
+	retVal << "Script '" << scrName << "' has no associated context\r\n";
+	return true;
+    }
+    Lock l(ctx->mutex());
+    ObjList* objCounters = ctx->countAllocations();
+    l.drop();
+    if (!objCounters) {
+	retVal << "Script '" << scrName << "' has no active object tracking\r\n";
+	return true;
+    }
+    objCounters->sort(counterSort);
+    String tmp;
+    unsigned int i = 0;
+    for (ObjList* o = objCounters->skipNull(); o && i < count; o = o->skipNext(), i++) {
+	NamedCounter* c = static_cast<NamedCounter*>(o->get());
+	uint64_t line = c->toString().toUInt64();
+	String fn;
+	unsigned int fl = 0;
+	code->getFileLine(line,fn,fl,false);
+	tmp << "\r\n" << fn << ":" << fl << " " << c->count();
+    }
+    if (!tmp)
+	retVal << "Script '" << scrName << "' has no active object tracking counters\r\n";
+    else
+	retVal << "Top " << count << " object allocations for '" << scrName <<"':" << tmp << "\r\n";
+    TelEngine::destruct(objCounters);
+    return true;
 }
 
 // Utility: return a list of parameters to be used for replaceParams
@@ -1449,6 +1499,31 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	    fileName << ":" << runner->currentLineNo();
 	ExpEvaluator::pushOne(stack,new ExpOperation(fileName));
     }
+    else if (oper.name() == YSTRING("creationLine")) {
+	ObjList args;
+	unsigned int c = extractArgs(stack,oper,context,args);
+	if (c < 1)
+	    return false;
+	JsObject* jso= 0;
+	ExpWrapper* w = YOBJECT(ExpWrapper,args[0]);
+	if (w)
+	    jso = YOBJECT(JsObject,w->object());
+	if (!jso)
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(0,0));
+	else {
+	    bool wholePath = false;
+	    ExpOperation* op = static_cast<ExpOperation*>(args[1]);
+	    if (op)
+		wholePath = op->valBoolean();
+	    ScriptRun* runner = YOBJECT(ScriptRun,context);
+	    if (!(runner && runner->code()))
+		return false;
+	    String fn;
+	    unsigned int fl = 0;
+	    runner->code()->getFileLine(jso->lineNo(),fn,fl,wholePath);
+	    ExpEvaluator::pushOne(stack,new ExpOperation(fn << ":" << fl));
+	}
+    }
     else if (oper.name() == YSTRING("sleep")) {
 	if (oper.number() != 1)
 	    return false;
@@ -1687,7 +1762,7 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
     }
     else if (oper.name() == YSTRING("runParams")) {
 	if (oper.number() == 0) {
-	    JsObject* jso = new JsObject(context,mutex());
+	    JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
 	    jso->params().copyParams(Engine::runParams());
 	    ExpEvaluator::pushOne(stack,new ExpWrapper(jso,oper.name()));
 	}
@@ -2022,7 +2097,7 @@ void JsEngine::initialize(ScriptContext* context, const char* name)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("Engine")))
@@ -2277,7 +2352,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    default:
 		return false;
 	}
-	getColumn(stack,static_cast<ExpOperation*>(args[0]),context);
+	getColumn(stack,static_cast<ExpOperation*>(args[0]),context,oper.lineNumber());
     }
     else if (oper.name() == YSTRING("getRow")) {
 	ObjList args;
@@ -2288,7 +2363,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    default:
 		return false;
 	}
-	getRow(stack,static_cast<ExpOperation*>(args[0]),context);
+	getRow(stack,static_cast<ExpOperation*>(args[0]),context,oper.lineNumber());
     }
     else if (oper.name() == YSTRING("getResult")) {
 	ObjList args;
@@ -2361,7 +2436,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    else
 		return false;
 	}
-	JsHandler* h = new JsHandler(*name,priority,*func,context);
+	JsHandler* h = new JsHandler(*name,priority,*func,context,oper.lineNumber());
 	ExpOperation* filterName = static_cast<ExpOperation*>(args[3]);
 	ExpOperation* filterValue = static_cast<ExpOperation*>(args[4]);
 	if (filterName && filterValue && *filterName) {
@@ -2417,8 +2492,8 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    else if (name && (*h != *name))
 		continue;
 	    if (!jsa)
-		jsa = new JsArray(context,mutex());
-	    JsObject* jso = new JsObject(context,mutex());
+		jsa = new JsArray(context,oper.lineNumber(),mutex());
+	    JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
 	    jso->params().setParam(new ExpOperation(*h,"name"));
 	    jso->params().setParam(new ExpOperation((int64_t)h->priority(),"priority"));
 	    jso->params().setParam(new ExpOperation(h->function().name(),"handler"));
@@ -2426,7 +2501,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    if (f) {
 		jso->params().setParam(new ExpOperation(f->name(),"filterName"));
 		if (h->filterRegexp())
-		    jso->params().setParam(new ExpWrapper(new JsRegExp(mutex(),*(h->filterRegexp())),"filterValue"));
+		    jso->params().setParam(new ExpWrapper(new JsRegExp(mutex(),*(h->filterRegexp()),oper.lineNumber()),"filterValue"));
 		else
 		    jso->params().setParam(new ExpOperation(*f,"filterValue"));
 	    }
@@ -2716,7 +2791,7 @@ bool JsMessage::installHook(ObjList& stack, const ExpOperation& oper, GenObject*
 	    return false;
 	o = o->skipNext();
     }
-    JsMessageQueue* msgQueue = new JsMessageQueue(receivedFunc,*name,threadsCount,trapFunction,trapLunch,context);
+    JsMessageQueue* msgQueue = new JsMessageQueue(oper.lineNumber(),receivedFunc,*name,threadsCount,trapFunction,trapLunch,context);
     for (;o;o = o->skipNext()) {
 	ExpOperation* filter = static_cast<ExpOperation*>(o->get());
 	ObjList* pair = filter->split('=',false);
@@ -2729,7 +2804,7 @@ bool JsMessage::installHook(ObjList& stack, const ExpOperation& oper, GenObject*
     return Engine::installHook(msgQueue);
 }
 
-void JsMessage::getColumn(ObjList& stack, const ExpOperation* col, GenObject* context)
+void JsMessage::getColumn(ObjList& stack, const ExpOperation* col, GenObject* context, unsigned int lineNo)
 {
     Array* arr = m_message ? YOBJECT(Array,m_message->userData()) : 0;
     if (arr && arr->getRows()) {
@@ -2750,7 +2825,7 @@ void JsMessage::getColumn(ObjList& stack, const ExpOperation* col, GenObject* co
 		}
 	    }
 	    if (idx >= 0 && idx < cols) {
-		JsArray* jsa = new JsArray(context,mutex());
+		JsArray* jsa = new JsArray(context,lineNo,mutex());
 		for (int r = 1; r <= rows; r++) {
 		    GenObject* o = arr->get(idx,r);
 		    if (o) {
@@ -2771,12 +2846,12 @@ void JsMessage::getColumn(ObjList& stack, const ExpOperation* col, GenObject* co
 	}
 	else {
 	    // { col1: [ val11, val12, val13], col2: [ val21, val22, val23 ] }
-	    JsObject* jso = new JsObject(context,mutex());
+	    JsObject* jso = new JsObject(context,lineNo,mutex());
 	    for (int c = 0; c < cols; c++) {
 		const String* name = YOBJECT(String,arr->get(c,0));
 		if (TelEngine::null(name))
 		    continue;
-		JsArray* jsa = new JsArray(context,mutex());
+		JsArray* jsa = new JsArray(context,lineNo,mutex());
 		for (int r = 1; r <= rows; r++) {
 		    GenObject* o = arr->get(c,r);
 		    if (o) {
@@ -2800,7 +2875,7 @@ void JsMessage::getColumn(ObjList& stack, const ExpOperation* col, GenObject* co
     ExpEvaluator::pushOne(stack,JsParser::nullClone());
 }
 
-void JsMessage::getRow(ObjList& stack, const ExpOperation* row, GenObject* context)
+void JsMessage::getRow(ObjList& stack, const ExpOperation* row, GenObject* context, unsigned int lineNo)
 {
     Array* arr = m_message ? YOBJECT(Array,m_message->userData()) : 0;
     if (arr && arr->getRows()) {
@@ -2811,7 +2886,7 @@ void JsMessage::getRow(ObjList& stack, const ExpOperation* row, GenObject* conte
 	    if (row->isInteger()) {
 		int idx = (int)row->number() + 1;
 		if (idx > 0 && idx <= rows) {
-		    JsObject* jso = new JsObject(context,mutex());
+		    JsObject* jso = new JsObject(context,lineNo,mutex());
 		    for (int c = 0; c < cols; c++) {
 			const String* name = YOBJECT(String,arr->get(c,0));
 			if (TelEngine::null(name))
@@ -2836,9 +2911,9 @@ void JsMessage::getRow(ObjList& stack, const ExpOperation* row, GenObject* conte
 	}
 	else {
 	    // [ { col1: val11, col2: val12 }, { col1: val21, col2: val22 } ]
-	    JsArray* jsa = new JsArray(context,mutex());
+	    JsArray* jsa = new JsArray(context,lineNo,mutex());
 	    for (int r = 1; r <= rows; r++) {
-		JsObject* jso = new JsObject(context,mutex());
+		JsObject* jso = new JsObject(context,lineNo,mutex());
 		for (int c = 0; c < cols; c++) {
 		    const String* name = YOBJECT(String,arr->get(c,0));
 		    if (TelEngine::null(name))
@@ -2925,7 +3000,7 @@ JsObject* JsMessage::runConstructor(ObjList& stack, const ExpOperation& oper, Ge
     const String& traceId = YOBJECT(ScriptRun,context) ? context->traceId() : String::empty();
     if (traceId)
 	m->setParam(YSTRING("trace_id"),traceId);
-    JsMessage* obj = new JsMessage(m,mutex(),true,true);
+    JsMessage* obj = new JsMessage(m,mutex(),oper.lineNumber(),true,true);
     obj->params().addParam(new ExpWrapper(this,protoName()));
     return obj;
 }
@@ -2934,7 +3009,7 @@ void JsMessage::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("Message")))
@@ -2958,7 +3033,7 @@ bool JsHandler::receivedInternal(Message& msg)
 	safeNowInternal();
 	return false;
     }
-    JsMessage* jm = new JsMessage(&msg,runner->context()->mutex(),true);
+    JsMessage* jm = new JsMessage(&msg,runner->context()->mutex(),m_lineNo,true);
     jm->setPrototype(runner->context(),YSTRING("Message"));
     jm->ref();
     String name = m_function.name();
@@ -2997,7 +3072,7 @@ void JsMessageQueue::received(Message& msg)
     ScriptRun* runner = m_code->createRunner(m_context,NATIVE_TITLE);
     if (!runner)
 	return;
-    JsMessage* jm = new JsMessage(&msg,runner->context()->mutex(),true);
+    JsMessage* jm = new JsMessage(&msg,runner->context()->mutex(),m_lineNo,true);
     jm->setPrototype(runner->context(),YSTRING("Message"));
     jm->ref();
     ObjList args;
@@ -3230,7 +3305,7 @@ void JsFile::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("File")))
@@ -3316,7 +3391,7 @@ JsObject* JsSemaphore::runConstructor(ObjList& stack, const ExpOperation& oper, 
 	default:
 	    return 0;
     }
-    JsSemaphore* sem = new JsSemaphore(this,mutex(),maxcount,initialCount,name);
+    JsSemaphore* sem = new JsSemaphore(this,mutex(),oper.lineNumber(),maxcount,initialCount,name);
     mutex()->lock();
     m_semaphores.append(sem);
     mutex()->unlock();
@@ -3388,12 +3463,12 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
     else if (oper.name() == YSTRING("sections")) {
 	if (extractArgs(stack,oper,context,args) != 0)
 	    return false;
-	JsArray* jsa = new JsArray(context,mutex());
+	JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	unsigned int n = m_config.sections();
 	for (unsigned int i = 0; i < n; i++) {
 	    NamedList* nl = m_config.getSection(i);
 	    if (nl)
-		jsa->params().addParam(new ExpWrapper(new JsConfigSection(this,*nl),*nl));
+		jsa->params().addParam(new ExpWrapper(new JsConfigSection(this,*nl,oper.lineNumber()),*nl));
 	}
 	ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"sections"));
     }
@@ -3410,7 +3485,7 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
 	}
 	const String& name = *static_cast<ExpOperation*>(args[0]);
 	if (create ? m_config.createSection(name) : m_config.getSection(name))
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsConfigSection(this,name),name));
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsConfigSection(this,name,oper.lineNumber()),name));
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
@@ -3513,7 +3588,7 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
 	    return false;
 	NamedList* sect = m_config.getSection(*static_cast<ExpOperation*>(args[0]));
 	if (sect) {
-	    JsArray* jsa = new JsArray(context,mutex());
+	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	    int32_t len = 0;
 	    for (const ObjList* l = sect->paramList()->skipNull(); l; l = l->skipNext()) {
 		jsa->push(new ExpOperation(static_cast<const NamedString*>(l->get())->name()));
@@ -3544,7 +3619,15 @@ JsObject* JsConfigFile::runConstructor(ObjList& stack, const ExpOperation& oper,
 	    name = static_cast<ExpOperation*>(args[0])->c_str();
 	    // fall through
 	case 0:
-	    return new JsConfigFile(mutex(),name,warn);
+	{
+	    JsConfigFile* obj = new JsConfigFile(mutex(),oper.lineNumber(),name,warn);
+	    if (!ref()) {
+		TelEngine::destruct(obj);
+		return 0;
+	    }
+	    obj->params().addParam(new ExpWrapper(this,protoName()));
+	    return obj;
+	}
 	default:
 	    return 0;
     }
@@ -3554,7 +3637,7 @@ void JsConfigFile::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("ConfigFile")))
@@ -3668,7 +3751,7 @@ bool JsConfigSection::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 	    return false;
 	NamedList* sect = m_owner->config().getSection(toString());
 	if (sect) {
-	    JsArray* jsa = new JsArray(context,mutex());
+	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	    int32_t len = 0;
 	    for (const ObjList* l = sect->paramList()->skipNull(); l; l = l->skipNext()) {
 		jsa->push(new ExpOperation(static_cast<const NamedString*>(l->get())->name()));
@@ -3704,14 +3787,14 @@ JsObject* JsHasher::runConstructor(ObjList& stack, const ExpOperation& oper,
 	h = new SHA256;
     else
 	return 0;
-    return new JsHasher(context,mutex(),h);
+    return new JsHasher(context,mutex(),oper.lineNumber(),h);
 }
 
 void JsHasher::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("Hasher")))
@@ -3855,7 +3938,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    return false;
 	XmlElement* xml = m_xml ? m_xml->parent() : 0;
 	if (xml)
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),xml,owner())));
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
@@ -3931,7 +4014,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	const ObjList* o = m_xml ? m_xml->attributes().paramList()->skipNull() : 0;
 	JsObject* jso = 0;
 	if (o) {
-	    jso = new JsObject(context,mutex());
+	    jso = new JsObject(context,oper.lineNumber(),mutex());
 	    for (; o; o = o->skipNext()) {
 		const NamedString* ns = static_cast<const NamedString*>(o->get());
 		if (ns->name() != JsObject::protoName())
@@ -3977,7 +4060,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	if (xml && val && !JsParser::isNull(*val))
 	    xml->addText(*val);
 	if (xml && (XmlSaxParser::NoError == m_xml->addChild(xml)))
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),xml,owner())));
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
 	else {
 	    TelEngine::destruct(xml);
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
@@ -3997,7 +4080,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    xml = m_xml->findFirstChild(name,ns);
 	}
 	if (xml)
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),xml,owner())));
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
@@ -4014,9 +4097,9 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	if (m_xml)
 	    xml = m_xml->findFirstChild(name,ns);
 	if (xml) {
-	    JsArray* jsa = new JsArray(context,mutex());
+	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	    while (xml) {
-		jsa->push(new ExpWrapper(new JsXML(mutex(),xml,owner())));
+		jsa->push(new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
 		xml = m_xml->findNextChild(xml,name,ns);
 	    }
 	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"children"));
@@ -4156,14 +4239,14 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	if (JsParser::isFilled(file) &&
 	    (doc.loadFile(*file) == XmlSaxParser::NoError) && doc.root(true) &&
 	    ref()) {
-	    JsXML* xml = new JsXML(mutex(),doc.takeRoot(true));
+	    JsXML* xml = new JsXML(mutex(),oper.lineNumber(),doc.takeRoot(true));
 	    xml->params().addParam(new ExpWrapper(this,protoName()));
 	    const XmlFragment& before = doc.getFragment(true);
 	    for (const ObjList* b = before.getChildren().skipNull(); b; b = b->skipNext()) {
 		XmlChild* ch = static_cast<XmlChild*>(b->get());
 		XmlDeclaration* decl = ch->xmlDeclaration();
 		if (decl) {
-		    JsObject* jso = new JsObject(context,mutex());
+		    JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
 		    jso->addFields(decl->getDec());
 		    xml->params().addParam(new ExpWrapper(jso,"declaration"));
 		    continue;
@@ -4198,7 +4281,7 @@ JsObject* JsXML::runConstructor(ObjList& stack, const ExpOperation& oper, GenObj
 		    xml = getXml(arg1,false);
 		if (!xml)
 		    return JsParser::nullObject();
-		obj = new JsXML(mutex(),xml);
+		obj = new JsXML(mutex(),oper.lineNumber(),xml);
 	    }
 	    break;
 	case 2:
@@ -4206,7 +4289,7 @@ JsObject* JsXML::runConstructor(ObjList& stack, const ExpOperation& oper, GenObj
 		// new XML(object,"field-name") or new XML("element-name","text-content")
 		XmlElement* xml = buildXml(arg1,arg2);
 		if (xml) {
-		    obj = new JsXML(mutex(),xml);
+		    obj = new JsXML(mutex(),oper.lineNumber(),xml);
 		    break;
 		}
 	    }
@@ -4222,7 +4305,7 @@ JsObject* JsXML::runConstructor(ObjList& stack, const ExpOperation& oper, GenObj
 		XmlElement* xml = getXml(jso->getField(stack,*arg2,context),take);
 		if (!xml)
 		    return JsParser::nullObject();
-		obj = new JsXML(mutex(),xml);
+		obj = new JsXML(mutex(),oper.lineNumber(),xml);
 	    }
 	    break;
 	default:
@@ -4281,7 +4364,7 @@ void JsXML::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("XML")))
@@ -4316,7 +4399,7 @@ JsObject* JsHashList::runConstructor(ObjList& stack, const ExpOperation& oper, G
 	    return 0;
     }
 
-    JsHashList* obj = new JsHashList(cnt,mutex());
+    JsHashList* obj = new JsHashList(cnt,mutex(),oper.lineNumber());
     if (!ref()) {
 	TelEngine::destruct(obj);
 	return 0;
@@ -4420,7 +4503,7 @@ JsObject* JsURI::runConstructor(ObjList& stack, const ExpOperation& oper, GenObj
 	    return 0;
     }
 
-    JsURI* obj = new JsURI(str,mutex());
+    JsURI* obj = new JsURI(str,mutex(),oper.lineNumber());
     if (!ref()) {
 	TelEngine::destruct(obj);
 	return 0;
@@ -4463,7 +4546,7 @@ bool JsJSON::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
     if (oper.name() == YSTRING("parse")) {
 	if (extractArgs(stack,oper,context,args) != 1)
 	    return false;
-	ExpOperation* op = JsParser::parseJSON(static_cast<ExpOperation*>(args[0])->c_str(),mutex(),&stack,context);
+	ExpOperation* op = JsParser::parseJSON(static_cast<ExpOperation*>(args[0])->c_str(),mutex(),&stack,context,&oper);
 	if (!op)
 	    op = new ExpWrapper(0,"JSON");
 	ExpEvaluator::pushOne(stack,op);
@@ -4491,7 +4574,7 @@ bool JsJSON::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 		    char* text = (char*)buf.data();
 		    if (f.readData(text,len) == len) {
 			text[len] = '\0';
-			op = JsParser::parseJSON(text,mutex(),&stack,context);
+			op = JsParser::parseJSON(text,mutex(),&stack,context,&oper);
 		    }
 		}
 	    }
@@ -4572,7 +4655,7 @@ void JsJSON::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("JSON")))
@@ -4608,11 +4691,11 @@ bool JsDNS::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 		ScriptRun* runner = YOBJECT(ScriptRun,context);
 		if (!runner)
 		    return false;
-		runner->insertAsync(new JsDnsAsync(runner,this,&stack,*arg,(Resolver::Type)qType,context));
+		runner->insertAsync(new JsDnsAsync(runner,this,&stack,*arg,(Resolver::Type)qType,context,oper.lineNumber()));
 		runner->pause();
 		return true;
 	    }
-	    runQuery(stack,*arg,(Resolver::Type)qType,context);
+	    runQuery(stack,*arg,(Resolver::Type)qType,context,oper.lineNumber());
 	}
     }
     else if ((oper.name() == YSTRING("resolve")) || (oper.name() == YSTRING("local"))) {
@@ -4704,7 +4787,7 @@ bool JsDNS::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
     return true;
 }
 
-void JsDNS::runQuery(ObjList& stack, const String& name, Resolver::Type type, GenObject* context)
+void JsDNS::runQuery(ObjList& stack, const String& name, Resolver::Type type, GenObject* context, unsigned int lineNo)
 {
     if (!Resolver::init()) {
 	ExpEvaluator::pushOne(stack,JsParser::nullClone());
@@ -4713,7 +4796,7 @@ void JsDNS::runQuery(ObjList& stack, const String& name, Resolver::Type type, Ge
     JsArray* jsa = 0;
     ObjList res;
     if (Resolver::query(type,name,res) == 0) {
-	jsa = new JsArray(context,mutex());
+	jsa = new JsArray(context,lineNo,mutex());
 	switch (type) {
 	    case Resolver::A4:
 	    case Resolver::A6:
@@ -4726,7 +4809,7 @@ void JsDNS::runQuery(ObjList& stack, const String& name, Resolver::Type type, Ge
 	    case Resolver::Naptr:
 		for (ObjList* l = res.skipNull(); l; l = l->skipNext()) {
 		    NaptrRecord* r = static_cast<NaptrRecord*>(l->get());
-		    JsObject* jso = new JsObject(context,mutex());
+		    JsObject* jso = new JsObject(context,lineNo,mutex());
 		    jso->params().setParam(new ExpOperation(r->flags(),"flags"));
 		    jso->params().setParam(new ExpOperation(r->serv(),"service"));
 		    // Would be nice to create a RegExp here but does not stringify properly
@@ -4742,7 +4825,7 @@ void JsDNS::runQuery(ObjList& stack, const String& name, Resolver::Type type, Ge
 	    case Resolver::Srv:
 		for (ObjList* l = res.skipNull(); l; l = l->skipNext()) {
 		    SrvRecord* r = static_cast<SrvRecord*>(l->get());
-		    JsObject* jso = new JsObject(context,mutex());
+		    JsObject* jso = new JsObject(context,lineNo,mutex());
 		    jso->params().setParam(new ExpOperation((int64_t)r->port(),"port"));
 		    jso->params().setParam(new ExpOperation(r->address(),"name"));
 		    jso->params().setParam(new ExpOperation((int64_t)r->ttl(),"ttl"));
@@ -4762,7 +4845,7 @@ void JsDNS::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("DNS")))
@@ -5142,7 +5225,7 @@ void JsChannel::initialize(ScriptContext* context, JsAssist* assist)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("Channel")))
@@ -5196,11 +5279,12 @@ bool JsAssist::init()
     if (ScriptRun::Invalid == m_runner->reset(true))
 	return false;
     ScriptContext* ctx = m_runner->context();
+    ctx->trackObjs(s_trackCreation);
     ScriptContext* chan = YOBJECT(ScriptContext,ctx->getField(m_runner->stack(),YSTRING("Channel"),m_runner));
     if (chan) {
 	JsMessage* jsm = YOBJECT(JsMessage,chan->getField(m_runner->stack(),YSTRING("message"),m_runner));
 	if (!jsm) {
-	    jsm = new JsMessage(0,ctx->mutex(),false);
+	    jsm = new JsMessage(0,ctx->mutex(),0,false);
 	    ExpWrapper wrap(jsm,"message");
 	    if (!chan->runAssign(m_runner->stack(),wrap,m_runner))
 		return false;
@@ -5223,6 +5307,15 @@ bool JsAssist::init()
 	return true;
     }
     return false;
+}
+
+bool JsAssist::evalAllocations(String& retVal, unsigned int top)
+{
+    if (!m_runner) {
+	retVal << "Script " << toString() << " has no associated runner\r\n";
+	return true;
+    }
+    return evalCtxtAllocations(retVal,top,m_runner->context(),m_runner->code(),toString());
 }
 
 Message* JsAssist::getMsg(ScriptRun* runner) const
@@ -5345,7 +5438,7 @@ bool JsAssist::runFunction(const String& name, Message& msg, bool* handled)
     if (!runner)
 	return false;
 
-    JsMessage* jm = new JsMessage(&msg,runner->context()->mutex(),false);
+    JsMessage* jm = new JsMessage(&msg,runner->context()->mutex(),0,false);
     jm->setPrototype(runner->context(),YSTRING("Message"));
     jm->ref();
     ObjList args;
@@ -5565,6 +5658,7 @@ bool JsGlobal::runMain()
 	return false;
     if (!m_context)
 	m_context = runner->context();
+    m_context->trackObjs(s_trackCreation);
     contextInit(runner,name());
     ScriptRun::Status st = runner->run();
     TelEngine::destruct(runner);
@@ -5610,10 +5704,12 @@ static const char* s_cmds[] = {
     "eval",
     "reload",
     "load",
+    "allocations",
     0
 };
 
-static const char* s_cmdsLine = "  javascript {info|eval[=context] instructions...|reload script|load [script=]file}";
+static const char* s_cmdsLine = "  javascript {info|eval[=context] instructions...|reload script|load [script=]file|"
+	"allocations script top_no}";
 
 
 JsModule::JsModule()
@@ -5710,6 +5806,26 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 
     if (cmd.startSkip("eval") && cmd.trimSpaces())
 	return evalContext(retVal,cmd);
+
+    if (cmd.startSkip("allocations") && cmd.trimSpaces()) {
+	String scr;
+	cmd.extractTo(" ",scr).trimSpaces();
+	unsigned int top = cmd.toInteger(25,0,1,100);
+	if (scr.null())
+	    return false;
+	Lock mylock(JsGlobal::s_mutex);;
+	JsGlobal* script = static_cast<JsGlobal*>(JsGlobal::globals()[scr]);
+	if (script)
+	    return evalCtxtAllocations(retVal,top,script->context(),script->parser().code(),scr);
+	mylock.acquire(this);
+	RefPointer<JsAssist> assist = static_cast<JsAssist*>(calls()[scr]);
+	if (assist) {
+	    mylock.drop();
+	    return assist->evalAllocations(retVal,top);
+	}
+	retVal << "Cannot find script context: " << scr << "\n\r";
+	return true;
+    }
 
     if (cmd.startSkip("load") && cmd.trimSpaces()) {
 	if (!cmd) {
@@ -5811,7 +5927,7 @@ bool JsModule::commandComplete(Message& msg, const String& partLine, const Strin
 	    itemComplete(msg.retValue(),*list,partWord);
 	return true;
     }
-    else if (partLine == YSTRING("javascript reload")) {
+    else if (partLine == YSTRING("javascript reload") || partLine == YSTRING("javascript allocations")) {
 	Lock lck(JsGlobal::s_mutex);
 	for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
 	    JsGlobal* script = static_cast<JsGlobal*>(o->get());
@@ -5965,6 +6081,7 @@ void JsModule::initialize()
     s_autoExt = cfg.getBoolValue("general","auto_extensions",true);
     s_allowAbort = cfg.getBoolValue("general","allow_abort");
     s_trackObj = cfg.getBoolValue("general","track_objects");
+    s_trackCreation = cfg.getIntValue("general","track_obj_life",s_trackCreation,0);
     JsGlobal::s_keepOldOnFail = cfg.getBoolValue("general","keep_old_on_fail");
     bool changed = false;
     if (cfg.getBoolValue("general","allow_trace") != s_allowTrace) {

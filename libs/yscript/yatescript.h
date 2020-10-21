@@ -46,6 +46,7 @@ namespace TelEngine {
 
 class ExpEvaluator;
 class ExpOperation;
+class ScriptMutex;
 
 /**
  * This class allows extending ExpEvaluator to implement custom fields and functions
@@ -970,7 +971,7 @@ public:
     inline ExpOperation(const ExpOperation& original)
 	: NamedString(original.name(),original),
 	  m_opcode(original.opcode()), m_number(original.number()), m_bool(original.isBoolean()),
-	  m_isNumber(original.isNumber()), m_lineNo(0), m_barrier(original.barrier())
+	  m_isNumber(original.isNumber()), m_lineNo(original.lineNumber()), m_barrier(original.barrier())
 	{ }
 
     /**
@@ -983,7 +984,7 @@ public:
 	: NamedString(name,original),
 	  m_opcode(copyType ? original.opcode() : ExpEvaluator::OpcPush),
 	  m_number(original.number()), m_bool(original.isBoolean()),
-	  m_isNumber(original.isNumber()), m_lineNo(0), m_barrier(original.barrier())
+	  m_isNumber(original.isNumber()), m_lineNo(original.lineNumber()), m_barrier(original.barrier())
 	{ }
 
     /**
@@ -1184,7 +1185,7 @@ public:
      * @param mtx Pointer to the mutex that serializes the copied object
      * @return New operation instance
      */
-    virtual ExpOperation* copy(Mutex* mtx) const
+    virtual ExpOperation* copy(ScriptMutex* mtx) const
 	{ return clone(); }
 
 private:
@@ -1297,7 +1298,7 @@ public:
      * @param mtx Pointer to the mutex that serializes the copied object
      * @return New operation instance
      */
-    virtual ExpOperation* copy(Mutex* mtx) const;
+    virtual ExpOperation* copy(ScriptMutex* mtx) const;
 
     /**
      * Object access method
@@ -1379,6 +1380,47 @@ protected:
 class ScriptRun;
 
 /**
+ * A mutex that serializes object access
+ * @short Script context serialization mutex
+ */
+class YSCRIPT_API ScriptMutex : public Mutex
+{
+public:
+    /**
+     * Constructor
+     * @param recursive True if the mutex has to be recursive (reentrant),
+     *  false for a normal fast mutex
+     * @param name Static name of the mutex (for debugging purpose only)
+     */
+    inline ScriptMutex(bool recursive, const char* name)
+	: Mutex(recursive,name), m_objTrack(false)
+	{ }
+
+    /**
+     * Notification that an object was created in context serialized by this mutex
+     * @param obj Created object
+     */
+    virtual void objCreated(GenObject* obj) = 0;
+
+    /**
+     * Notification that an object was destroyed in context serialized by this mutex
+     * @param obj Destroyed object
+     */
+    virtual void objDeleted(GenObject* obj) = 0;
+
+    /**
+     * Check if object tracking is active
+     * @return True if it's active, false otherwise
+     */
+    inline bool objTrack() const
+	{ return m_objTrack; }
+
+protected:
+    bool m_objTrack;
+};
+
+
+/**
  * A script execution context, holds global variables and objects
  * @short Script execution context
  */
@@ -1439,7 +1481,7 @@ public:
      * Retrieve the Mutex object used to serialize object access, if any
      * @return Pointer to the mutex or NULL if none applies
      */
-    virtual Mutex* mutex() = 0;
+    virtual ScriptMutex* mutex() = 0;
 
     /**
      * Check if a certain field is assigned in context
@@ -1533,6 +1575,36 @@ public:
      */
     bool runMatchingField(ObjList& stack, const ExpOperation& oper, GenObject* context);
 
+    /**
+     * Notification that an object was created in this context
+     * Used for object tracking purposes
+     * @param obj The created object
+     */
+    virtual void createdObj(GenObject* obj)
+	{  }
+
+    /**
+     * Notification that an object was destroyed in this context
+     * Used for object tracking purposes
+     * @param obj The destroyed object
+     */
+    virtual void deletedObj(GenObject* obj)
+	{  }
+
+    /**
+     * Activate object tracking
+     * @param track O for not enabled, non-zero for enabling it
+     */
+    virtual void trackObjs(unsigned int track = 0)
+	{  }
+
+    /**
+     * Retrieve a list of how many objects were allocated at each line
+     * @return The list of counters for allocations, 0 if tracking is not active
+     */
+    virtual ObjList* countAllocations()
+	{ return 0; }
+
 private:
     NamedList m_params;
 };
@@ -1567,6 +1639,16 @@ public:
      */
     virtual ScriptRun* createRunner(ScriptContext* context, const char* title = 0)
 	{ return 0; }
+
+    /**
+     * Get the file name and the file line from which this code line was interpreted
+     * @param line Code line
+     * @param fileName On output, it contains the file name associated with code line
+     * @param fileLine On output, it contains the file line associated with code line
+     * @param wholePath If true, file name contains the whole file path, otherwise just the filename
+     */
+    virtual void getFileLine(unsigned int line, String& fileName, unsigned int& fileLine, bool wholePath = true)
+	{ }
 };
 
 /**
@@ -1640,7 +1722,7 @@ private:
  * An instance of script code and data, status machine run by a single thread at a time
  * @short Script runtime execution
  */
-class YSCRIPT_API ScriptRun : public GenObject, public Mutex
+class YSCRIPT_API ScriptRun : public GenObject, public ScriptMutex
 {
     friend class ScriptCode;
     YCLASS(ScriptRun,GenObject)
@@ -1819,6 +1901,11 @@ public:
      */
     bool runAssign(const ExpOperation& oper, GenObject* context = 0);
 
+    void objCreated(GenObject* obj)
+	{ if (m_context) m_context->createdObj(obj); };
+    void objDeleted(GenObject* obj)
+	{ if (m_context) m_context->deletedObj(obj); };
+
 protected:
     /**
      * Resume script from where it was left, may stop and return Incomplete state
@@ -1975,23 +2062,25 @@ public:
      * @param mtx Pointer to the mutex that serializes this object
      * @param frozen True if the object is to be frozen from creation
      */
-    JsObject(const char* name = "Object", Mutex* mtx = 0, bool frozen = false);
+    JsObject(const char* name = "Object", ScriptMutex* mtx = 0, bool frozen = false);
 
     /**
      * Constructor for an empty object
      * @param mtx Pointer to the mutex that serializes this object
      * @param name Full name of the object
+     * @param line Code line where this object was created
      * @param frozen True if the object is to be frozen from creation
      */
-    JsObject(Mutex* mtx, const char* name, bool frozen = false);
+    JsObject(ScriptMutex* mtx, const char* name, unsigned int line, bool frozen = 0);
 
     /**
      * Constructor for an empty object with prototype
-     * @param context Script context from which Object prototype is obtainend
+     * @param context Script context from which Object prototype is obtained
+     * @param line Code line where this object was created
      * @param mtx Pointer to the mutex that serializes this object
      * @param frozen True if the object is to be frozen from creation
      */
-    JsObject(GenObject* context, Mutex* mtx = 0, bool frozen = false);
+    JsObject(GenObject* context, unsigned int line, ScriptMutex* mtx = 0, bool frozen = false);
 
     /**
      * Destructor
@@ -2002,23 +2091,25 @@ public:
      * Retrieve the Mutex object used to serialize object access
      * @return Pointer to the mutex of the context this object belongs to
      */
-    virtual Mutex* mutex()
+    virtual ScriptMutex* mutex()
 	{ return m_mutex; }
 
     /**
      * Clone and rename method
      * @param name Name of the cloned object
+     * @param oper ExpOperation that required the clone
      * @return New object instance
      */
-    virtual JsObject* clone(const char* name) const
-	{ return new JsObject(m_mutex,name); }
+    virtual JsObject* clone(const char* name, const ExpOperation& oper ) const
+	{ return new JsObject(m_mutex,name,oper.lineNumber()); }
 
     /**
      * Clone method
+     * @param oper ExpOperation that required the clone
      * @return New object instance
      */
-    inline JsObject* clone() const
-	{ return clone(toString()); }
+    inline JsObject* clone(const ExpOperation& oper) const
+	{ return clone(toString(),oper); }
 
     /**
      * Set the object prototype
@@ -2030,9 +2121,10 @@ public:
     /**
      * Deep copy method
      * @param mtx Pointer to the mutex that serializes the copied object
+     * @param oper Caller of copying operation
      * @return New object instance, does not keep references to old object
      */
-    virtual JsObject* copy(Mutex* mtx) const;
+    virtual JsObject* copy(ScriptMutex* mtx, const ExpOperation& oper) const;
 
     /**
      * Fill a list with the unique names of all fields
@@ -2226,6 +2318,20 @@ public:
 	{ m_frozen = true; }
 
     /**
+     * Set the script line number at which this object was created
+     * @param line Line number
+     */
+    inline void lineNo(unsigned int line)
+	{ m_lineNo = line; }
+
+    /**
+     * Get the script line number at which this object was created;
+     * @return The line number from the script where this object was created.
+     */
+    inline unsigned int lineNo() const
+	{ return m_lineNo; }
+
+    /**
      * Helper static method that adds an object to a parent
      * @param params List of parameters where to add the object
      * @param name Name of the new parameter
@@ -2270,13 +2376,21 @@ public:
      * @param thisObj Optional object that will be set as "this"
      * @return New empty object usable as call context
      */
-    static JsObject* buildCallContext(Mutex* mtx, JsObject* thisObj = 0);
+    static JsObject* buildCallContext(ScriptMutex* mtx, JsObject* thisObj = 0);
 
     /**
      * Initialize the standard global objects in a context
      * @param context Script context to initialize
      */
     static void initialize(ScriptContext* context);
+
+    /**
+     * Set the creation line for this object and its properties
+     * @param obj Object t set the line for
+     * @param lineNo The line number to set
+     * @param recursive True to set it to its sub-objects, false otherwise
+     */
+    static void setLineForObj(JsObject* obj,unsigned int lineNo, bool recursive);
 
     /**
      * Get the name of the internal property used to track prototypes
@@ -2291,7 +2405,7 @@ public:
      * @param src Source parameters
      * @param mtx Mutex to be used to synchronize all new objects
      */
-    static void deepCopyParams(NamedList& dst, const NamedList& src, Mutex* mtx);
+    static void deepCopyParams(NamedList& dst, const NamedList& src, ScriptMutex* mtx);
 
     /**
      * Helper method to return the hierarchical structure of an object
@@ -2331,8 +2445,15 @@ protected:
      * Retrieve the Mutex object used to serialize object access
      * @return Pointer to the mutex of the context this object belongs to
      */
-    inline Mutex* mutex() const
+    inline ScriptMutex* mutex() const
 	{ return m_mutex; }
+
+    /**
+     * Set the Mutex used to serialize this object, set to 0 to reset it
+     * @param mtx Mutex to set
+     */
+    inline void setMutex(ScriptMutex* mtx)
+	{ m_mutex = mtx; }
 
     /**
      * Static method to obtain a JSON representation of the given object
@@ -2355,7 +2476,8 @@ private:
     static void internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces, int indent = 0);    
     static const String s_protoName;
     bool m_frozen;
-    Mutex* m_mutex;
+    ScriptMutex* m_mutex;
+    unsigned int m_lineNo; // creation line for this object;
 };
 
 /**
@@ -2370,17 +2492,18 @@ public:
      * Constructor
      * @param mtx Pointer to the mutex that serializes this object
      */
-    JsFunction(Mutex* mtx = 0);
+    JsFunction(ScriptMutex* mtx = 0);
 
     /**
      * Constructor with function name
      * @param mtx Pointer to the mutex that serializes this object
      * @param name Name of the function
+     * @param line Code line where this object was created
      * @param args Optional list of formal parameter names, will be emptied
      * @param lbl Number of the entry point label
      * @param code The script code to be used while running the function
      */
-    JsFunction(Mutex* mtx, const char* name, ObjList* args = 0, long int lbl = 0,
+    JsFunction(ScriptMutex* mtx, const char* name, unsigned int line, ObjList* args = 0, long int lbl = 0,
 	ScriptCode* code = 0);
 
     /**
@@ -2426,18 +2549,20 @@ public:
     /**
      * Deep copy method
      * @param mtx Pointer to the mutex that serializes the copied array
+     * @param oper ExpOperation that required the copy
      * @return New object instance, does not keep references to old array
      */
-    inline JsObject* copy(Mutex* mtx) const
-	{ return copy(mtx,0); }
+    inline JsObject* copy(ScriptMutex* mtx, const ExpOperation& oper) const
+	{ return copy(mtx,0,oper); }
 
     /**
      * Deep copy method with given name
      * @param mtx Pointer to the mutex that serializes the copied array
      * @param name Name for the copied function
+     * @param oper ExpOperation that required the copy
      * @return New object instance, does not keep references to old array
      */
-    virtual JsObject* copy(Mutex* mtx, const char* name) const;
+    virtual JsObject* copy(ScriptMutex* mtx, const char* name, const ExpOperation& oper) const;
 
 protected:
     /**
@@ -2470,19 +2595,21 @@ public:
 
     /**
      * Constructor for an empty array with prototype
-     * @param context Script context from which Array prototype is obtainend
+     * @param context Script context from which Array prototype is obtained
+     * @param line Code line where this object was created
      * @param mtx Pointer to the mutex that serializes this object
      */
-    JsArray(GenObject* context, Mutex* mtx = 0);
+    JsArray(GenObject* context, unsigned int line, ScriptMutex* mtx = 0);
 
     /**
      * Constructor for an empty array
      * @param mtx Pointer to the mutex that serializes this object
      * @param name Full name of the object
+     * @param line Code line where this object was created
      * @param frozen True if the object is to be frozen from creation
      */
-    inline JsArray(Mutex* mtx, const char* name, bool frozen = false)
-	: JsObject(mtx,name,frozen), m_length(0)
+    inline JsArray(ScriptMutex* mtx, const char* name, unsigned int line, bool frozen = false)
+	: JsObject(mtx,name,line,frozen), m_length(0)
 	{ }
 
     /**
@@ -2508,9 +2635,10 @@ public:
     /**
      * Deep copy method
      * @param mtx Pointer to the mutex that serializes the copied array
+     * @param oper ExpOperation that required the copy operation
      * @return New object instance, does not keep references to old array
      */
-    virtual JsObject* copy(Mutex* mtx) const;
+    virtual JsObject* copy(ScriptMutex* mtx, const ExpOperation& oper) const;
 
     /**
      * Try to assign a value to a single field if object is not frozen and update array length.
@@ -2551,10 +2679,11 @@ protected:
     /**
      * Clone and rename method
      * @param name Name of the cloned object
+     * @param oper ExpOperation that requested the cloning
      * @return New object instance
      */
-    virtual JsObject* clone(const char* name) const
-	{ return new JsArray(mutex(),name); }
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsArray(mutex(),name,oper.lineNumber()); }
 
     /**
      * Try to evaluate a single native method
@@ -2572,7 +2701,7 @@ private:
      * Private constructor
      * @param mtx Pointer to the mutex that serializes this object
      */
-    JsArray(Mutex* mtx = 0);
+    JsArray(ScriptMutex* mtx = 0);
 
     bool runNativeSlice(ObjList& stack, const ExpOperation& oper, GenObject* context);
     bool runNativeSplice(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -2592,27 +2721,29 @@ public:
      * Constructor for a RegExp constructor
      * @param mtx Pointer to the mutex that serializes this object
      */
-    JsRegExp(Mutex* mtx = 0);
+    JsRegExp(ScriptMutex* mtx = 0);
 
     /**
      * Constructor for a RegExp object
      * @param mtx Pointer to the mutex that serializes this object
      * @param name Full name of the object
+     * @param line Code line where this object was created
      * @param rexp Regular expression text
      * @param insensitive True to not differentiate case
      * @param extended True to use POSIX Extended Regular Expression syntax
      * @param frozen True to create an initially frozen object
      */
-    JsRegExp(Mutex* mtx, const char* name, const char* rexp = 0, bool insensitive = false,
+    JsRegExp(ScriptMutex* mtx, const char* name, unsigned int line, const char* rexp = 0, bool insensitive = false,
 	bool extended = true, bool frozen = false);
 
     /**
      * Constructor from existing Regexp
      * @param mtx Pointer to the mutex that serializes this object
+     * @param line Code line where this object was created
      * @param rexp Regular expression to copy
      * @param frozen True to create an initially frozen object
      */
-    JsRegExp(Mutex* mtx, const Regexp& rexp, bool frozen = false);
+    JsRegExp(ScriptMutex* mtx, unsigned int line, const Regexp& rexp, bool frozen = false);
 
     /**
      * Access the internal Regexp object that does the matching
@@ -2649,18 +2780,20 @@ public:
     /**
      * Deep copy method
      * @param mtx Pointer to the mutex that serializes the copied regexp
+     * @param oper ExpOperation that required the copy
      * @return New object instance, does not keep references to old regexp
      */
-    virtual JsObject* copy(Mutex* mtx) const;
+    virtual JsObject* copy(ScriptMutex* mtx, const ExpOperation& oper) const;
 
 protected:
     /**
      * Clone and rename method
      * @param name Name of the cloned object
+     * @param oper ExpOperation that required the clone
      * @return New object instance
      */
-    virtual JsObject* clone(const char* name) const
-	{ return new JsRegExp(mutex(),name,m_regexp.c_str(),
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsRegExp(mutex(),name,oper.lineNumber(),m_regexp.c_str(),
 	    m_regexp.isCaseInsensitive(),m_regexp.isExtended()); }
 
     /**
@@ -2817,9 +2950,11 @@ public:
      * @param mtx Pointer to the mutex that serializes this object
      * @param stack Pointer to an execution stack, required for adding prototypes
      * @param context Pointer to an execution context, required for adding prototypes
+     * @param op ExpOperation that determined calling of this method
      * @return ExpOperation holding the content of JSON, must be dereferenced after use, NULL if parse error
      */
-    static ExpOperation* parseJSON(const char* text, Mutex* mtx = 0, ObjList* stack = 0, GenObject* context = 0);
+    static ExpOperation* parseJSON(const char* text, ScriptMutex* mtx = 0, ObjList* stack = 0,
+	    GenObject* context = 0, const ExpOperation* op = 0);
 
     /**
      * Get a "null" object wrapper that will identity match another "null"

@@ -24,15 +24,19 @@ using namespace TelEngine;
 
 namespace { // anonymous
 
-class BasicContext: public ScriptContext, public Mutex
+class BasicContext: public ScriptContext, public ScriptMutex
 {
     YCLASS(BasicContext,ScriptContext)
 public:
     inline explicit BasicContext()
-	: Mutex(true,"BasicContext")
+	: ScriptMutex(true,"BasicContext")
 	{ }
-    virtual Mutex* mutex()
+    virtual ScriptMutex* mutex()
 	{ return this; }
+    virtual void objCreated(GenObject* obj)
+	{ createdObj(obj); };
+    virtual void objDeleted(GenObject* obj)
+	{ deletedObj(obj); };
 };
 
 }; // anonymous namespace
@@ -249,7 +253,7 @@ static const TokenDict s_states[] = {
 #undef MAKE_NAME
 
 ScriptRun::ScriptRun(ScriptCode* code, ScriptContext* context)
-    : Mutex(true,"ScriptRun"),
+    : ScriptMutex(true,"ScriptRun"),
       m_state(Invalid)
 {
     XDebug(DebugAll,"ScriptRun::ScriptRun(%p,%p) [%p]",code,context,this);
