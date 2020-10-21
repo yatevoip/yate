@@ -104,6 +104,17 @@ ObjList* HashList::append(const GenObject* obj)
     return m_lists[i]->append(obj);
 }
 
+ObjList* HashList::append(const GenObject* obj, unsigned int hash)
+{
+    XDebug(DebugAll,"HashList::append(%p,%u) [%p]",obj,hash,this);
+    if (!obj)
+	return 0;
+    unsigned int i = hash % m_size;
+    if (!m_lists[i])
+	m_lists[i] = new ObjList;
+    return m_lists[i]->append(obj);
+}
+
 GenObject* HashList::remove(GenObject* obj, bool delobj, bool useHash)
 {
     ObjList* n = 0;

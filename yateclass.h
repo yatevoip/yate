@@ -3717,6 +3717,14 @@ public:
     ObjList* append(const GenObject* obj);
 
     /**
+     * Appends an object to the hashed list
+     * @param obj Pointer to the object to append
+     * @param hash Object hash used to identify the list into which this object should be inserted
+     * @return A pointer to the inserted list item
+     */
+    ObjList* append(const GenObject* obj, unsigned int hash);
+
+    /**
      * Delete the list item that holds a given object
      * @param obj Object to search in the list
      * @param delobj True to delete the object (default)
@@ -3734,6 +3742,19 @@ public:
     inline GenObject* remove(const String& str, bool delobj = true)
     {
 	ObjList* n = find(str);
+	return n ? n->remove(delobj) : 0;
+    }
+
+    /**
+     * Delete the item in the list that has the associated hash
+     * @param obj Object to search in the list
+     * @param hash Object hash used to identify the list from which to remove the object
+     * @param delobj True to delete the object (default)
+     * @return Pointer to the object if not destroyed
+     */
+    inline GenObject* remove(GenObject* obj, unsigned int hash, bool delobj = true)
+    {
+	ObjList* n = find(obj,hash);
 	return n ? n->remove(delobj) : 0;
     }
 
