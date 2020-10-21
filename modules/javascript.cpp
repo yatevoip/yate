@@ -3463,14 +3463,14 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
     else if (oper.name() == YSTRING("sections")) {
 	if (extractArgs(stack,oper,context,args) != 0)
 	    return false;
-	JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+	JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
 	unsigned int n = m_config.sections();
 	for (unsigned int i = 0; i < n; i++) {
 	    NamedList* nl = m_config.getSection(i);
 	    if (nl)
-		jsa->params().addParam(new ExpWrapper(new JsConfigSection(this,*nl,oper.lineNumber()),*nl));
+		jso->params().addParam(new ExpWrapper(new JsConfigSection(this,*nl,oper.lineNumber()),*nl));
 	}
-	ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"sections"));
+	ExpEvaluator::pushOne(stack,new ExpWrapper(jso,"sections"));
     }
     else if (oper.name() == YSTRING("getSection")) {
 	bool create = false;
