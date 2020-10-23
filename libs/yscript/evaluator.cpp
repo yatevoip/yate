@@ -415,6 +415,12 @@ bool ExpEvaluator::getString(ParsePoint& expr)
 	String str;
 	if (getString(expr,str)) {
 	    addOpcode(str);
+	    int pos = -1;
+	    while (true) {
+		if ((pos = str.find('\n',pos + 1)) < 0)
+		    break;
+		expr.m_lineNo = ++m_lineNo;
+	    }
 	    return true;
 	}
     }
