@@ -28,16 +28,16 @@ class JsExtObj : public JsObject
 {
     YCLASS(JsExtObj,JsObject)
 public:
-    inline JsExtObj(Mutex* mtx)
+    inline JsExtObj(ScriptMutex* mtx)
 	: JsObject("ExtObj",mtx,true)
 	{
 	    Debug(DebugAll,"JsExtObj::JsExtObj(%p) [%p]",mtx,this);
 	}
-    inline JsExtObj(Mutex* mtx, const char* val)
-	: JsObject("ExtObj",mtx,true),
+    inline JsExtObj(ScriptMutex* mtx, unsigned int line, const char* val)
+	: JsObject(mtx,"[object ExtObj]",line,true),
 	  m_val(val)
 	{
-	    Debug(DebugAll,"JsExtObj::JsExtObj(%p,'%s') [%p]",mtx,val,this);
+	    Debug(DebugAll,"JsExtObj::JsExtObj(%p,%u,'%s') [%p]",mtx,line,val,this);
 	    params().addParam(new ExpFunction("test"));
 	}
     virtual ~JsExtObj()
@@ -82,7 +82,7 @@ JsObject* JsExtObj::runConstructor(ObjList& stack, const ExpOperation& oper, Gen
 	    val = static_cast<ExpOperation*>(args[0])->c_str();
 	    // fall through
 	case 0:
-	    return new JsExtObj(mutex(),val);
+	    return new JsExtObj(mutex(),oper.lineNumber(),val);
 	default:
 	    return 0;
     }
@@ -92,7 +92,7 @@ void JsExtObj::initialize(ScriptContext* context)
 {
     if (!context)
 	return;
-    Mutex* mtx = context->mutex();
+    ScriptMutex* mtx = context->mutex();
     Lock mylock(mtx);
     NamedList& params = context->params();
     if (!params.getParam(YSTRING("ExtObj")))
