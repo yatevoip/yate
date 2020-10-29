@@ -37,7 +37,7 @@ class JsContext : public JsObject, public ScriptMutex
 public:
     inline JsContext()
 	: JsObject("Context",0), ScriptMutex(true,"JsContext"),
-	  m_trackObjs(0)
+	  m_trackObjs(0), m_trackObjsMtx(false,"JsObjTrack")
 	{
 	    setMutex(this);
 	    params().addParam(new ExpFunction("isNaN"));
@@ -64,6 +64,7 @@ public:
 private:
     GenObject* resolveTop(ObjList& stack, const String& name, GenObject* context);
     HashList* m_trackObjs;
+    Mutex m_trackObjsMtx;
 };
 
 class JsNull : public JsObject
@@ -989,11 +990,11 @@ void JsContext::createdObj(GenObject* obj)
     if (!m_trackObjs)
 	return;
     JsObject* jso = YOBJECT(JsObject,obj);
-    JsObject* me = static_cast<JsObject*>(this);
-    if (!(jso && jso != me))
+    if (!(jso && jso != static_cast<JsObject*>(this)))
 	return;
     XDebug(DebugInfo,"Adding object=%p created at line=%u(0x%08x)",jso,jso->lineNo(),jso->lineNo());
-    ObjList* o = m_trackObjs->append(jso,String(*((uint64_t*)jso)).hash());
+    Lock l(m_trackObjsMtx);
+    ObjList* o = m_trackObjs->append(jso,String((uint64_t)jso).hash());
     if (o)
 	o->setDelete(false);
 }
@@ -1006,7 +1007,8 @@ void JsContext::deletedObj(GenObject* obj)
     if (!jso)
 	return;
     XDebug(DebugInfo,"Removing object=%p created at line=%u(0x%08x)",jso,jso->lineNo(),jso->lineNo());
-    m_trackObjs->remove(jso,String(*((uint64_t*)jso)).hash(),false);
+    Lock l(m_trackObjsMtx);
+    m_trackObjs->remove(jso,String((uint64_t)jso).hash(),false);
 }
 
 void JsContext::trackObjs(unsigned int track)
@@ -1024,9 +1026,12 @@ ObjList* JsContext::countAllocations()
 	return 0;
     ObjList* counters = new ObjList();
     for (unsigned int i = 0; i < m_trackObjs->length(); i++) {
+	m_trackObjsMtx.lock();
 	ObjList* l = m_trackObjs->getList(i);
-	if (!l)
+	if (!l) {
+	    m_trackObjsMtx.unlock();
 	    continue;
+	}
 	for (ObjList* n = l->skipNull(); n; n = n->skipNext()) {
 	    JsObject* jso = YOBJECT(JsObject,n->get());
 	    if (!jso)
@@ -1037,6 +1042,7 @@ ObjList* JsContext::countAllocations()
 		counters->insert(count = new NamedCounter(id));
 	    count->inc();
 	}
+	m_trackObjsMtx.unlock();
     }
     if (!counters->skipNull()) {
 	TelEngine::destruct(counters);

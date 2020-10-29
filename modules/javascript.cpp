@@ -1089,9 +1089,7 @@ static bool evalCtxtAllocations(String& retVal, unsigned int count, ScriptContex
 	retVal << "Script '" << scrName << "' has no associated context\r\n";
 	return true;
     }
-    Lock l(ctx->mutex());
     ObjList* objCounters = ctx->countAllocations();
-    l.drop();
     if (!objCounters) {
 	retVal << "Script '" << scrName << "' has no active object tracking\r\n";
 	return true;
