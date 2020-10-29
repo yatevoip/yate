@@ -415,12 +415,7 @@ bool ExpEvaluator::getString(ParsePoint& expr)
 	String str;
 	if (getString(expr,str)) {
 	    addOpcode(str);
-	    int pos = -1;
-	    while (true) {
-		if ((pos = str.find('\n',pos + 1)) < 0)
-		    break;
-		expr.m_lineNo = ++m_lineNo;
-	    }
+	    expr.m_lineNo = m_lineNo;
 	    return true;
 	}
     }
@@ -431,6 +426,7 @@ bool ExpEvaluator::getString(const char*& expr, String& str)
 {
     char sep = *expr++;
     const char* start = expr;
+    unsigned int startLine = m_lineNo;
     while (char c = *expr++) {
 	if (c != '\\' && c != sep)
 	    continue;
@@ -447,12 +443,15 @@ bool ExpEvaluator::getString(const char*& expr, String& str)
 	start = expr;
     }
     expr--;
+    m_lineNo = startLine;
     return gotError("Expecting string end");
 }
 
 bool ExpEvaluator::getEscape(const char*& expr, String& str, char sep)
 {
     char c = *expr++;
+    if (c == '\n')
+	++m_lineNo;
     switch (c) {
 	case '\0':
 	    return false;
