@@ -1012,7 +1012,7 @@ void operator=(const type&)
  * @param val Integer value to hash
  * @return Hash value
  */
-YATE_API static inline uint32_t YATE_API hashInt64(uint64_t val)
+YATE_API inline uint32_t hashInt64(uint64_t val)
 {
     return (uint32_t)(((val ^ (val >> 48)) ^ (val >> 32)) ^ (val >> 16));
 }
@@ -1022,7 +1022,7 @@ YATE_API static inline uint32_t YATE_API hashInt64(uint64_t val)
  * @param val Integer value to hash
  * @return Hash value
  */
-YATE_API static inline uint32_t YATE_API hashInt32(uint32_t val)
+YATE_API inline uint32_t hashInt32(uint32_t val)
 {
     return (uint32_t)((val ^ (val >> 16)) ^ (val << 16));
 }
@@ -1032,12 +1032,12 @@ YATE_API static inline uint32_t YATE_API hashInt32(uint32_t val)
  * @param val Pointer to hash
  * @return Hash value
  */
-YATE_API static inline uint32_t YATE_API hashPtr(const void* ptr)
+YATE_API inline uint32_t hashPtr(const void* ptr)
 {
 #if (_WORDSIZE == 64)
     return hashInt64((uintptr_t)ptr);
 #else
-    return hashInt32((intptr_t)ptr);
+    return hashInt32((uintptr_t)ptr);
 #endif
 }
 
