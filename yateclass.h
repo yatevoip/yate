@@ -1036,7 +1036,7 @@ YATE_API static inline uint32_t YATE_API hashPtr(const void* ptr)
 {
 #if (_WORDSIZE == 64)
     return hashInt64((uintptr_t)ptr);
-#elif
+#else
     return hashInt32((intptr_t)ptr);
 #endif
 }
