@@ -1008,6 +1008,41 @@ void operator=(const type&)
 
 
 /**
+ * Compute a hash for a 64-bit unsigned integer
+ * @param val Integer value to hash
+ * @return Hash value
+ */
+YATE_API static inline uint32_t YATE_API hashInt64(uint64_t val)
+{
+    return (uint32_t)(((val ^ (val >> 48)) ^ (val >> 32)) ^ (val >> 16));
+}
+
+/**
+ * Compute a hash for a 32-bit unsigned integer
+ * @param val Integer value to hash
+ * @return Hash value
+ */
+YATE_API static inline uint32_t YATE_API hashInt32(uint32_t val)
+{
+    return (uint32_t)((val ^ (val >> 16)) ^ (val << 16));
+}
+
+/**
+ * Compute a hash for a pointer
+ * @param val Pointer to hash
+ * @return Hash value
+ */
+YATE_API static inline uint32_t YATE_API hashPtr(const void* ptr)
+{
+#if (_WORDSIZE == 64)
+    return hashInt64((uintptr_t)ptr);
+#elif
+    return hashInt32((intptr_t)ptr);
+#endif
+}
+
+
+/**
  * An object with just a public virtual destructor
  */
 class YATE_API GenObject

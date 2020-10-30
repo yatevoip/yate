@@ -994,7 +994,7 @@ void JsContext::createdObj(GenObject* obj)
 	return;
     XDebug(DebugInfo,"Adding object=%p created at line=%u(0x%08x)",jso,jso->lineNo(),jso->lineNo());
     Lock l(m_trackObjsMtx);
-    ObjList* o = m_trackObjs->append(jso,String((uint64_t)jso).hash());
+    ObjList* o = m_trackObjs->append(jso,hashPtr(obj));
     if (o)
 	o->setDelete(false);
 }
@@ -1008,7 +1008,7 @@ void JsContext::deletedObj(GenObject* obj)
 	return;
     XDebug(DebugInfo,"Removing object=%p created at line=%u(0x%08x)",jso,jso->lineNo(),jso->lineNo());
     Lock l(m_trackObjsMtx);
-    m_trackObjs->remove(jso,String((uint64_t)jso).hash(),false);
+    m_trackObjs->remove(jso,hashPtr(obj),false);
 }
 
 void JsContext::trackObjs(unsigned int track)
