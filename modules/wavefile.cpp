@@ -168,6 +168,8 @@ typedef struct {
     uint32_t chan;
 } AuHeader;
 
+const char AuInfo[8] = "By YATE";
+
 #define ILBC_HEADER_LEN 9
 
 static const char* ilbcFormat(Stream& stream)
@@ -247,6 +249,11 @@ void WaveSource::init(const String& file, bool autorepeat)
 	m_format = "ilbc30";
     else if (file.endsWith(".g729"))
 	m_format = "g729";
+    else if (file.endsWith(".g722")) {
+	m_rate = 16000;
+	m_brate = 8000;
+	m_format = "g722/16000";
+    }
     else if (file.endsWith(".au"))
 	detectAuFormat();
     else if (file.endsWith(".wav"))
@@ -315,6 +322,10 @@ void WaveSource::detectAuFormat()
 	    break;
 	case 27:
 	    m_format = "alaw";
+	    break;
+	case 24:
+	    m_format = "g722";
+	    m_brate /= 2;
 	    break;
 	case 3:
 	    m_brate *= 2;
@@ -558,6 +569,8 @@ WaveConsumer::WaveConsumer(const String& file, CallEndpoint* chan, unsigned maxl
 	m_format = "ilbc30";
     else if (file.endsWith(".g729"))
 	m_format = "g729";
+    else if (file.endsWith(".g722"))
+	m_format = "g722/16000";
     else if (file.endsWith(".lbc")) {
 	m_header = Ilbc;
 	if (!m_format.startsWith("ilbc"))
@@ -614,8 +627,8 @@ WaveConsumer::~WaveConsumer()
     }
     if (m_stream && (Au == m_header)) {
 	int64_t len = m_stream->length();
-	if ((len >= (int64_t)sizeof(AuHeader)) && (m_stream->seek(8) == 8)) {
-	    uint32_t bytes = htonl(len - sizeof(AuHeader));
+	if ((len >= (int64_t)(sizeof(AuHeader) + sizeof(AuInfo))) && (m_stream->seek(8) == 8)) {
+	    uint32_t bytes = htonl(len - sizeof(AuHeader) - sizeof(AuInfo));
 	    m_stream->writeData(&bytes,sizeof(bytes));
 	}
     }
@@ -658,16 +671,19 @@ void WaveConsumer::writeAuHeader()
 	header.form = htonl(1);
     else if (fmt == "alaw")
 	header.form = htonl(27);
+    else if (fmt == "g722")
+	header.form = htonl(24);
     else {
 	Debug(DebugMild,"Invalid au format '%s', not writing header",m_format.c_str());
 	return;
     }
     header.sign = htonl(0x2E736E64);
-    header.offs = htonl(sizeof(header));
+    header.offs = htonl(sizeof(header) + sizeof(AuInfo));
     header.freq = htonl(rate);
     header.chan = htonl(chans);
     header.len = 0xFFFFFFFF;
     m_stream->writeData(&header,sizeof(header));
+    m_stream->writeData(AuInfo,sizeof(AuInfo));
 }
 
 bool WaveConsumer::setFormat(const DataFormat& format)
