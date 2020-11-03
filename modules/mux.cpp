@@ -5,7 +5,7 @@
  * Data multiplex
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2020 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -160,9 +160,15 @@ static MuxModule plugin;
 
 // Dictionary containig the supported formats and sample lengths
 static const TokenDict s_dictSampleLen[] = {
-    {"mulaw", 1},
-    {"alaw",  1},
-    {"slin",  2},
+    {"mulaw",       1},
+    {"mulaw/16000", 1},
+    {"mulaw/32000", 1},
+    {"alaw",        1},
+    {"alaw/16000",  1},
+    {"alaw/32000",  1},
+    {"slin",        2},
+    {"slin/16000",  2},
+    {"slin/32000",  2},
     {0,0},
 };
 
@@ -272,6 +278,10 @@ MuxSource::MuxSource(const String& id, const char* targetid, const char* format,
 
     m_idleValue = params.getIntValue("idlevalue",s_idleValue);
     unsigned int chanBuffer = params.getIntValue("chanbuffer",s_chanBuffer);
+    if (getFormat().endsWith("/16000"))
+	chanBuffer *= 2;
+    else if (getFormat().endsWith("/32000"))
+	chanBuffer *= 4;
 
     // Adjust channel buffer to be multiple of sample length and not lesser then it
     if (chanBuffer < m_sampleLen)
