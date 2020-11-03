@@ -5,7 +5,7 @@
  * Wave file driver (record+playback)
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2020 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -612,6 +612,13 @@ WaveConsumer::~WaveConsumer()
 	    Debug(&__plugin,DebugInfo,"WaveConsumer rate=" FMT64U " b/s",m_time);
 	}
     }
+    if (m_stream && (Au == m_header)) {
+	int64_t len = m_stream->length();
+	if ((len >= (int64_t)sizeof(AuHeader)) && (m_stream->seek(8) == 8)) {
+	    uint32_t bytes = htonl(len - sizeof(AuHeader));
+	    m_stream->writeData(&bytes,sizeof(bytes));
+	}
+    }
     delete m_stream;
     m_stream = 0;
     s_statsMutex.lock();
@@ -659,7 +666,7 @@ void WaveConsumer::writeAuHeader()
     header.offs = htonl(sizeof(header));
     header.freq = htonl(rate);
     header.chan = htonl(chans);
-    header.len = 0;
+    header.len = 0xFFFFFFFF;
     m_stream->writeData(&header,sizeof(header));
 }
 
