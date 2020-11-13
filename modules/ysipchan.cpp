@@ -6153,7 +6153,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
     decodeIsupBody(*m,m_tr->initialMessage()->body);
     copySipBody(*m,m_tr->initialMessage()->body);
     if (m_traceId)
-	m->addParam("trace_id",m_traceId);
+	m->setParam("trace_id",m_traceId);
     m->addParam("caller",m_uri.getUser());
     m->addParam("called",uri.getUser());
     if (m_uri.getDescription())
