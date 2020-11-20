@@ -85,7 +85,7 @@ public:
 	{ return false; }
     virtual ExpOperation* clone(const char* name) const
 	{ return new ExpNull(static_cast<JsNull*>(object()),name); }
-    virtual ExpOperation* copy(Mutex* mtx) const
+    virtual ExpOperation* copy(ScriptMutex* mtx) const
 	{ return clone(name()); }
 protected:
     inline ExpNull(JsNull* obj, const char* name)
