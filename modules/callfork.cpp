@@ -323,6 +323,8 @@ bool ForkMaster::forkSlave(String* dest)
 	    Debug(this,DebugAll,"Call '%s' target '%s' slave '%s' execute succeeded with no peer [%p]",
 		getPeerId().c_str(),dest->c_str(),tmp.c_str(),this);
 	ok = false;
+	// error propagation via lostMaster() does not work in this case. No channel was created, hence no messages are created
+	m_exec->setParam("error", error);
 	slave->lostMaster(error);
     }
     slave->deref();
