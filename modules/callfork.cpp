@@ -366,6 +366,7 @@ bool ForkMaster::startCalling(Message& msg)
     m_rtpForward = msg.getBoolValue("rtp_forward");
     m_rtpStrict = msg.getBoolValue("rtpstrict");
     if (!callContinue()) {
+	Debug(&__plugin,DebugNote,"Fork '%s' startCalling() failed. No successful peers", id().c_str());
 	const char* err = m_exec->getValue("reason");
 	if (err)
 	    msg.setParam("reason",err);
@@ -430,8 +431,30 @@ bool ForkMaster::callContinue()
 			getPeerId().c_str(),dest->c_str(),this);
 	    }
 	    dest->destruct();
-	    if (forks)
-		break;
+	    if (forks) {
+		unsigned int regulars = 0;
+		unsigned int auxiliars = 0;
+		unsigned int persistents = 0;
+		for (ObjList* l = m_slaves.skipNull(); l; l = l->skipNext()) {
+		    switch (static_cast<const ForkSlave*>(l->get())->type()) {
+			case ForkSlave::Auxiliar:
+			    auxiliars++;
+			    break;
+			case ForkSlave::Persistent:
+			    persistents++;
+			    break;
+			default:
+			    regulars++;
+			    break;
+		    }
+		}
+		if (regulars > 0) {
+		    break;
+		} else {
+		    clear(true);
+		    forks = persistents;
+		}
+	    }
 	    m_timer = 0;
 	    m_timerDrop = false;
 	    continue;
