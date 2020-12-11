@@ -20,6 +20,14 @@
 ;  Example: prompt="${configname}@${nodename}> "
 ;prompt=
 
+; prompt_user: string: Prompt to display when authenticated as observer user
+; If not set it will take the same value as prompt above
+;prompt_user=
+
+; prompt_guest: string: Prompt to display when not yet authenticated
+; If not set it will take the same value as prompt_user or prompt above
+;prompt_guest=
+
 ; password: string: Password required to authenticate as admin, default empty!
 ;password=
 

@@ -236,6 +236,7 @@ public:
     void checkTimer(u_int64_t time);
 private:
     void disconnect();
+    void setPrompt(const char* prompt);
     NamedList m_aliases;
     Level m_auth;
     ObjList* m_userPrefix;
@@ -440,10 +441,7 @@ Connection::Connection(Socket* sock, const char* addr, RManagerListener* listene
       m_timeout(0), m_address(addr), m_listener(listener),
       m_cursorPos(0), m_histLen(DEF_HISTORY), m_width(0), m_height(24)
 {
-    m_prompt = cfg().getValue("prompt");
-    if ((m_prompt.length() > 1) && (m_prompt.startsWith("\"")) && (m_prompt.endsWith("\"")))
-	m_prompt = m_prompt.substr(1,m_prompt.length() - 2);
-    Engine::runParams().replaceParams(m_prompt);
+    setPrompt(cfg().getValue("prompt"));
     s_mutex.lock();
     s_connList.append(this);
     s_mutex.unlock();
@@ -471,6 +469,14 @@ void Connection::disconnect()
 	m_socket->terminate();
 }
 
+void Connection::setPrompt(const char* prompt)
+{
+    m_prompt = prompt;
+    if ((m_prompt.length() > 1) && (m_prompt.startsWith("\"")) && (m_prompt.endsWith("\"")))
+	m_prompt = m_prompt.substr(1,m_prompt.length() - 2);
+    Engine::runParams().replaceParams(m_prompt);
+}
+
 void Connection::run()
 {
     if (!m_socket)
@@ -489,6 +495,7 @@ void Connection::run()
 		tout = 5000;
 	    m_timeout = Time::now() + 1000 * tout;
 	}
+	setPrompt(cfg().getValue("prompt_guest",cfg().getValue("prompt_user",cfg().getValue("prompt"))));
     }
     else {
 	m_auth = cfg().getValue("password") ? User : Admin;
@@ -497,6 +504,8 @@ void Connection::run()
 	    if (m_debug)
 		Debugger::enableOutput(true);
 	}
+	else
+	    setPrompt(cfg().getValue("prompt_user",cfg().getValue("prompt")));
 	m_output = cfg().getBoolValue("output",m_debug);
     }
     m_userPrefix = cfg()["user_prefix"].split(',',false);
@@ -1385,6 +1394,7 @@ bool Connection::processCommand(const char *line, bool saveLine)
 	    Output("Authenticated admin connection %s",m_address.c_str());
 	    m_auth = Admin;
 	    m_timeout = 0;
+	    setPrompt(cfg().getValue("prompt"));
 	    writeStr(m_machine ? "%%=auth:success\r\n" : "Authenticated successfully as admin!\r\n");
 	}
 	else if ((pass = cfg().getValue("userpass")) && (str == pass)) {
@@ -1392,6 +1402,7 @@ bool Connection::processCommand(const char *line, bool saveLine)
 		Output("Authenticated user connection %s",m_address.c_str());
 		m_auth = User;
 		m_timeout = 0;
+		setPrompt(cfg().getValue("prompt_user",cfg().getValue("prompt")));
 		writeStr(m_machine ? "%%=auth:success\r\n" : "Authenticated successfully as user!\r\n");
 	    }
 	    else
