@@ -67,6 +67,7 @@ protected:
     bool m_execNext;
     bool m_chanMsgs;
     bool m_failuresRev;
+    bool m_setId;
     String m_reason;
     String m_media;
 };
@@ -149,7 +150,7 @@ ForkMaster::ForkMaster(ObjList* targets)
     : m_index(0), m_answered(false), m_rtpForward(false), m_rtpStrict(false),
       m_fake(false), m_targets(targets), m_exec(0),
       m_timer(0), m_timerDrop(false), m_execNext(false), m_chanMsgs(false),
-      m_failuresRev(false), m_reason("hangup")
+      m_failuresRev(false), m_setId(false), m_reason("hangup")
 {
     String tmp(MOD_PREFIX "/");
     tmp << ++s_current;
@@ -319,8 +320,10 @@ bool ForkMaster::startCalling(Message& msg)
 	m_failuresRev = true;
 	m_failures = m_failures.substr(0,m_failures.length()-1);
     }
+    m_setId = msg.getBoolValue("fork.setid");
     m_exec->clearParam("stoperror");
     m_exec->clearParam("fork.stop");
+    m_exec->clearParam("fork.setid");
     m_exec->clearParam("peerid");
     m_exec->setParam("fork.master",id());
     m_exec->setParam("fork.origid",getPeerId());
@@ -485,6 +488,12 @@ bool ForkMaster::msgAnswered(Message& msg, const String& dest)
     m_reason = msg.getValue("reason","pickup");
     Debug(&__plugin,DebugCall,"Call '%s' answered on '%s' by '%s'",
 	peer->id().c_str(),dest.c_str(),call->id().c_str());
+    if (m_setId) {
+	msg.setParam("fork.origid",msg.getValue("id"));
+	msg.setParam("id",id());
+    }
+    else
+	msg.setParam("fork.master",id());
     msg.setParam("peerid",peer->id());
     msg.setParam("targetid",peer->id());
     Message* r = new Message("chan.replaced",0,true);
@@ -537,6 +546,12 @@ bool ForkMaster::msgProgress(Message& msg, const String& dest)
 	    }
 	}
     }
+    if (m_setId) {
+	msg.setParam("fork.origid",msg.getValue("id"));
+	msg.setParam("id",id());
+    }
+    else
+	msg.setParam("fork.master",id());
     msg.setParam("peerid",peer->id());
     msg.setParam("targetid",peer->id());
     if (m_media) {
