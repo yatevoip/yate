@@ -273,9 +273,8 @@ void RTPReceiver::rtpData(const void* data, int len)
 				seq,ts,m_tsLast,m_seq,this);
 			else
 			    TraceDebug(m_traceId,dbg(),DebugNote,"RTP sequence resync: %u -> %u [%p]",m_seq,seq,this);
-			// sync sequence and resync the timestamp offset
+			// sync sequence but keep the timestamp offset
 			m_seq = seq;
-			m_ts = ts - m_tsLast;
 			m_seqCount = 0;
 			if (m_warnSeq > 0)
 			    m_warn = true;
