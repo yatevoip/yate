@@ -638,7 +638,7 @@ bool RTPSender::sendEventData(unsigned int timestamp)
 	if (m_debugEvent)
 	    TraceDebug(m_traceId,dbg(),m_debugDataLevel,
 		"RTP send event=%d ts=%u event_ts=%u duration=%u ev_duration=%u ev_seq=%u end=%s [%p]",
-		m_evNum,timestamp,m_evTs,duration,m_evTime,m_evSeq,String::boolText(end),this);
+		m_evNum,timestamp,m_evTs,duration,m_evTime,m_evSeq,String::boolText(0 != end),this);
 	if (end)
 	    duration = m_evTime;
 	char buf[4];

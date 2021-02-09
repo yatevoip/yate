@@ -194,7 +194,7 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
     if (depth && !isProto && ((isFunc && (0 == (flags & JsObject::DumpFunc))) ||
 	(!isFunc && (0 == (flags & JsObject::DumpProp)))))
 	return;
-    bool dumpType = flags & JsObject::DumpType;
+    bool dumpType = 0 != (flags & JsObject::DumpType);
     if (nstr) {
 	str << "'" << nstr->name() << "'";
 	// Nicely dump property value if dumping props only and type is not shown 

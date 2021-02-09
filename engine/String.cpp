@@ -327,7 +327,7 @@ bool UChar::decode(DataBlock& buff, Endianness order, uint32_t maxChar)
     len = len >> 1;
     if (!decode(in,len,order,maxChar))
 	return false;
-    buff.cut(-(buff.length() - len * 2));
+    buff.cut(-(int)(buff.length() - len * 2));
     return true;
 }
 

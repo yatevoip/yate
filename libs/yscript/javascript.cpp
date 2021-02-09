@@ -3438,9 +3438,11 @@ unsigned int JsRunner::currentLineNo() const
 
 const String& JsRunner::currentFileName(bool wholePath) const 
 {
+    static const String s_unk("???");
+
     const ExpOperation* o = getCurrentOpCode();
     if (!(o && code()))
-	return YSTRING("???");
+	return s_unk;
     return (static_cast<const JsCode*>(code()))->getFileName(o->lineNumber(),wholePath);
 }
  

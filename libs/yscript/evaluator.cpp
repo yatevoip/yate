@@ -388,7 +388,11 @@ bool ExpEvaluator::getNumber(ParsePoint& expr)
 #undef DLONG_MAX
 	expr += str.length();
 	ExpOperation* op = addOpcode(str);
+#ifdef _WINDOWS
+	op->m_number = (int64_t)((val >= 0) ? (val + 0.5) : (val - 0.5));
+#else
 	op->m_number = ::round(val);
+#endif
 	op->m_isNumber = true;
 	DDebug(this,DebugAll,"Fake float %s ~ " FMT64,str.safe(),op->m_number);
 	return true;

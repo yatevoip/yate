@@ -6385,7 +6385,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     m_uri = tmp;
     m_uri.parse();
     sips(m_uri.getProtocol() == YSTRING("sips"));
-    if (!setParty(msg,false,"o",m_uri.getHost(),m_uri.getPort(),this) && line) {
+    if (!setParty(msg,false,"o",m_uri.getHost(),m_uri.getPort(),true) && line) {
 	SIPParty* party = line->party();
 	setParty(party);
 	TelEngine::destruct(party);
@@ -6393,7 +6393,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     // No party for SIPS and we don't have transport related params
     // Force party creation: this will force used protocol to TLS
     if (!m_party && sips() && !haveTransParams(msg,"o"))
-	setParty(msg,true,"o",m_uri.getHost(),m_uri.getPort(),this);
+	setParty(msg,true,"o",m_uri.getHost(),m_uri.getPort(),true);
     SIPMessage* m = new SIPMessage("INVITE",m_uri);
     m->dontSend(m_stopOCall);
     m->msgTraceId = m_traceId;
@@ -8195,7 +8195,7 @@ bool YateSIPConnection::callPrerouted(Message& msg, bool handled)
     bool ok = Channel::callPrerouted(msg,handled);
     m_autoChangeParty = msg.getBoolValue(YSTRING("iautochangeparty"),m_autoChangeParty);
     if (msg.getBoolValue(YSTRING("ioutbound_party")))
-	ok = setParty(msg,true,"i",String::empty(),0,this) && ok;
+	ok = setParty(msg,true,"i",String::empty(),0,true) && ok;
     return ok;
 }
 

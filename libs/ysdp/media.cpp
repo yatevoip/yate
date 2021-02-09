@@ -84,7 +84,7 @@ bool SDPMedia::sameAs(const SDPMedia* other, bool ignorePort, bool checkStarted)
 
     // Check format
     ObjList* lst = m.formats().split(',',false);
-    bool found = lst->find(m_format);
+    bool found = (0 != lst->find(m_format));
     TelEngine::destruct(lst);
     if (!found) {
 	XDebug(DebugAll,"SDPMedia::sameAs(%p) format='%s' other_formats='%s': not found [%p]",
