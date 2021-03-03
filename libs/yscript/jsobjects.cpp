@@ -1062,6 +1062,8 @@ bool JsArray::runNative(ObjList& stack, const ExpOperation& oper, GenObject* con
 	// copy this array - only numerically indexed elements!
 	for (int i = 0; i < m_length; i++) {
 	    NamedString* ns = params().getParam(String(i));
+	    if (!ns)
+		continue;
 	    ExpOperation* op = YOBJECT(ExpOperation,ns);
 	    op = op ? op->clone() : new ExpOperation(*ns,ns->name(),true);
 	    array->params().addParam(op);
@@ -1074,10 +1076,14 @@ bool JsArray::runNative(ObjList& stack, const ExpOperation& oper, GenObject* con
 		int len = ja->length();
 		for (int i = 0; i < len; i++) {
 		    NamedString* ns = ja->params().getParam(String(i));
-		    ExpOperation* arg = YOBJECT(ExpOperation,ns);
-		    arg = arg ? arg->clone() : new ExpOperation(*ns,0,true);
-		    const_cast<String&>(arg->name()) = (unsigned int)array->m_length++;
-		    array->params().addParam(arg);
+		    if (ns) {
+			ExpOperation* arg = YOBJECT(ExpOperation,ns);
+			arg = arg ? arg->clone() : new ExpOperation(*ns,0,true);
+			const_cast<String&>(arg->name()) = (unsigned int)array->m_length++;
+			array->params().addParam(arg);
+		    }
+		    else
+			array->m_length++;
 		}
 		TelEngine::destruct(op);
 	    }
