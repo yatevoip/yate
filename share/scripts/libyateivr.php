@@ -47,7 +47,7 @@ class IVR
     /**
      * Base class constructor
      */
-    function IVR()
+    function __construct()
     {
 	$this->ivrname = null;
 	$this->optable = array();

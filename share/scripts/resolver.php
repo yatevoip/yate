@@ -55,7 +55,7 @@ class Cached {
     var $address;
     var $expires;
 
-    function Cached($addr,$ttl)
+    function __construct($addr,$ttl)
     {
 	$this->address = $addr;
 	$this->expires = $ttl + time();

@@ -235,7 +235,7 @@ class Yate
      * @param $retval (optional) Default return
      * @param $id (optional) Identifier of the new message
      */
-    function Yate($name, $retval = "", $id = "")
+    function __construct($name, $retval = "", $id = "")
     {
 	if ($id == "")
 	    $id=uniqid(rand(),1);
@@ -302,7 +302,7 @@ class Yate
 	    return;
 	}
 	$i=Yate::Escape($this->id);
-	$t=0+$this->origin;
+	$t=(int)$this->origin;
 	$n=Yate::Escape($this->name);
 	$r=Yate::Escape($this->retval);
 	$p="";
@@ -379,7 +379,7 @@ class Yate
 		/* incoming message str_id:int_time:str_name:str_retval[:key=value...] */
 		$ev=new Yate(Yate::Unescape($part[3]),Yate::Unescape($part[4]),Yate::Unescape($part[1]));
 		$ev->type="incoming";
-		$ev->origin=0+$part[2];
+		$ev->origin=(int)$part[2];
 		$ev->FillParams($part,5);
 		break;
 	    case "%%<message":
@@ -391,13 +391,13 @@ class Yate
 		break;
 	    case "%%<install":
 		/* install answer num_priority:str_name:bool_success */
-		$ev=new Yate(Yate::Unescape($part[2]),"",0+$part[1]);
+		$ev=new Yate(Yate::Unescape($part[2]),"",(int)$part[1]);
 		$ev->type="installed";
 		$ev->handled=Yate::Str2bool($part[3]);
 		break;
 	    case "%%<uninstall":
 		/* uninstall answer num_priority:str_name:bool_success */
-		$ev=new Yate(Yate::Unescape($part[2]),"",0+$part[1]);
+		$ev=new Yate(Yate::Unescape($part[2]),"",(int)$part[1]);
 		$ev->type="uninstalled";
 		$ev->handled=Yate::Str2bool($part[3]);
 		break;

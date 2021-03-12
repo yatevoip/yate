@@ -63,7 +63,7 @@ class Host
     var $fail;
     var $when;
 
-    function Host()
+    function __construct()
     {
 	global $clear_gray;
 	$this->fail = 1;
@@ -210,7 +210,7 @@ function onCommand($l,&$retval)
 	return true;
     }
     else if (strpos($l,"banbrutes failures ") === 0) {
-	$fail = 1 * substr($l,19);
+	$fail = (int) substr($l,19);
 	if ($fail > 1 && $fail <= 1000) {
 	    $ban_failures = $fail;
 	    return true;
@@ -288,7 +288,7 @@ Yate::Output(true);
 // Uncomment the next line to get debugging details by default
 //Yate::Debug(true);
 
-$n = round(1 * Yate::Arg());
+$n = round( (float)Yate::Arg());
 if ($n >= 2)
     $ban_failures = $n;
 

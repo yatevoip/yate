@@ -59,7 +59,7 @@ class Subscription {
     var $pending = false;
 
     // Constructor, fills internal variables and sends initial/final notifications
-    function Subscription($ev,$event,$media)
+    function __construct($ev,$event,$media)
     {
 	$this->event = $event;
 	$this->media = $media;
@@ -162,8 +162,8 @@ class Subscription {
 // Mailbox status subscription
 class MailSub extends Subscription {
 
-    function MailSub($ev) {
-	parent::Subscription($ev,"message-summary","application/simple-message-summary");
+    function __construct($ev) {
+	parent::__construct($ev,"message-summary","application/simple-message-summary");
     }
 
     // Update count of messages, calls voicemail library function
@@ -187,8 +187,8 @@ class DialogSub extends Subscription {
 
     var $version;
 
-    function DialogSub($ev) {
-	parent::Subscription($ev,"dialog","application/dialog-info+xml");
+    function __construct($ev) {
+	parent::__construct($ev,"dialog","application/dialog-info+xml");
 	$this->version = 0;
     }
 
@@ -263,8 +263,8 @@ class DialogSub extends Subscription {
 // Presence subscription
 class PresenceSub extends Subscription {
 
-    function PresenceSub($ev) {
-	parent::Subscription($ev,"presence","application/pidf+xml");
+    function __construct($ev) {
+	parent::__construct($ev,"presence","application/pidf+xml");
 	$this->body = '<?xml version="1.0" encoding="UTF-8"?><presence xmlns="urn:ietf:params:xml:ns:pidf"></presence>';
     }
 

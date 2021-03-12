@@ -176,7 +176,7 @@ while ($running) {
 	    if ($ev->name == "call.execute") {
 		if ($ev->handled) {
 		    callExecuting($ev->GetValue("peerid"));
-		    continue;
+		    continue 2;
 		}
 		callFailed($ev->GetValue("error"),$ev->GetValue("reason"));
 	    }

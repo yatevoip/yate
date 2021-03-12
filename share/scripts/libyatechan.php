@@ -189,7 +189,7 @@ class YateChan
      * Constructor. Creates a new channel object
      * @param $prefix Prefix used for the unique channel identifier
      */
-    function YateChan($prefix)
+    function __construct($prefix)
     {
 	$this->localid = $prefix . "/" . uniqid(rand(),1);
 	$this->targetid = "";
