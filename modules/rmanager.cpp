@@ -26,6 +26,7 @@
 #include <sys/types.h>
 #include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
 
@@ -47,6 +48,18 @@ namespace { // anonymous
 
 #define DEF_HISTORY 10
 #define MAX_HISTORY 50
+
+static const TokenDict s_timeFmts[] =
+{
+    { "date and time not logged",       Debugger::None      },
+    { "seconds from program start",     Debugger::Relative  },
+    { "seconds from UNIX EPOCH",        Debugger::Absolute  },
+    { "UTC without separators",         Debugger::Textual   },
+    { "local time without separators",  Debugger::TextLocal },
+    { "UTC with separators",            Debugger::TextSep   },
+    { "local time with separators",     Debugger::TextLSep  },
+    { 0, 0 }
+};
 
 enum Level {
     None = 0,
@@ -121,6 +134,7 @@ static const CommandInfo s_cmdInfo[] =
     // User commands
     { User, "status", "[overview] [modulename]", s_oview, "Shows status of all or selected modules or channels" },
     { User, "uptime", 0, 0, "Show information on how long Yate has run" },
+    { User, "date", 0, 0, "Show current logging date, time and format" },
     { User, "machine", "[on|off]", s_bools, "Show or turn machine output mode on or off" },
     { User, "output", "[on|off]", s_bools, "Show or turn local output on or off" },
     { User, "color", "[on|off]", s_bools, "Show status or turn local colorization on or off" },
@@ -1461,6 +1475,28 @@ bool Connection::processCommand(const char *line, bool saveLine)
 	    (str << " kernel: ").append(SysUsage::runTime(SysUsage::KernelTime));
 	}
 	str << "\r\n";
+	writeStr(str);
+	return false;
+    }
+    else if (str.startSkip("date"))
+    {
+	Debugger::Formatting fmt = Debugger::getFormatting();
+	char buf[32];
+	Debugger::formatTime(buf,fmt);
+	str = buf;
+	switch (fmt) {
+	    case Debugger::TextLocal:
+	    case Debugger::TextLSep:
+		{
+		    int tz = Time::timeZone() / 60;
+		    ::sprintf(buf,"%+03d:%02d ",tz / 60, ::abs(tz) % 60);
+		    str << buf;
+		}
+		break;
+	    default:
+		;
+	}
+	str << "(" << lookup(fmt,s_timeFmts,"unknown format") << ")\r\n";
 	writeStr(str);
 	return false;
     }
