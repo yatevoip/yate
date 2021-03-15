@@ -112,6 +112,9 @@
 ;  filtersniff=^\(chan\.\|engine\.halt$\)
 ;filtersniff=
 
+; agesniff: float: Display only messages whose age or delay is higher than this value
+;agesniff=0
+
 
 [modules]
 ; This section should hold one line for each module whose loading behaviour

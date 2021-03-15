@@ -22,6 +22,7 @@
 #include <yatengine.h>
 
 #include <stdio.h>
+#include <math.h>
 
 using namespace TelEngine;
 namespace { // anonymous
@@ -38,6 +39,7 @@ static const char* s_debugs[] =
     "no",
     "filter",
     "timer",
+    "age",
     0
 };
 
@@ -66,6 +68,7 @@ public:
 
 static bool s_active = true;
 static bool s_timer = false;
+static u_int64_t s_minAge = 0;
 static Regexp s_filter;
 static Mutex s_mutex(false,"FilterSniff");
 
@@ -109,11 +112,16 @@ bool SniffHandler::received(Message &msg)
 		s_filter = line;
 		s_mutex.unlock();
 	    }
+	    if (line.startSkip("age"))
+		s_minAge = (u_int64_t)(1000000.0 * fabs(line.toDouble()));
 	    msg.retValue() << "Message sniffer: " << (s_active ? "on" : "off");
 	    if (s_active)
 		msg.retValue() << ", timer: " << (s_timer ? "on" : "off");
 	    if (s_active && s_filter)
 		msg.retValue() << ", filter: " << s_filter;
+	    if (s_active && s_minAge)
+		msg.retValue() << ", age: " << String().printf("%u.%06u",
+		    (unsigned int)(s_minAge / 1000000),(unsigned int)(s_minAge % 1000000));
 	    msg.retValue() << "\r\n";
 	    return true;
 	}
@@ -135,12 +143,18 @@ bool SniffHandler::received(Message &msg)
     if (s_filter && !s_filter.matches(msg))
 	return false;
     lock.drop();
+    u_int64_t mt = msg.msgTime().usec();
+    u_int64_t dt = Time::now() - mt;
+    if (s_minAge && (dt < s_minAge))
+	return false;
     String par;
     dumpParams(msg,par);
-    Output("Sniffed '%s' time=%u.%06u%s\r\n  thread=%p '%s'\r\n  data=%p\r\n  retval='%s'%s",
+    Output("Sniffed '%s' time=%u.%06u age=%u.%06u%s\r\n  thread=%p '%s'\r\n  data=%p\r\n  retval='%s'%s",
 	msg.c_str(),
-	(unsigned int)(msg.msgTime().usec() / 1000000),
-	(unsigned int)(msg.msgTime().usec() % 1000000),
+	(unsigned int)(mt / 1000000),
+	(unsigned int)(mt % 1000000),
+	(unsigned int)(dt / 1000000),
+	(unsigned int)(dt % 1000000),
 	(msg.broadcast() ? " (broadcast)" : ""),
 	Thread::current(),
 	Thread::currentName(),
@@ -160,6 +174,8 @@ void HookHandler::dispatched(const Message& msg, bool handled)
 	return;
     lock.drop();
     u_int64_t dt = Time::now() - msg.msgTime().usec();
+    if (s_minAge && (dt < s_minAge))
+	return;
     String par;
     dumpParams(msg,par);
     const char* rval = msg.retValue().c_str();
@@ -198,6 +214,7 @@ void MsgSniff::initialize()
 	s_mutex.lock();
 	s_filter = Engine::config().getValue("general","filtersniff");
 	s_mutex.unlock();
+	s_minAge = (u_int64_t)(1000000.0 * fabs(Engine::config().getDoubleValue("general","agesniff")));
 	Engine::install(new SniffHandler);
 	Engine::self()->setHook(new HookHandler);
     }
