@@ -879,8 +879,18 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 	}
 	else
 	    return false;
-	const NamedList* lst = YOBJECT(NamedList,obj);
-	if (lst) {
+	ScriptContext* scr = YOBJECT(ScriptContext,obj);
+	if (scr) {
+	    ObjList names;
+	    scr->fillFieldNames(names);
+	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+	    for (ObjList* o = names.skipNull(); o; o = o->skipNext()) {
+		String* name = static_cast<String*>(o->get());
+		jsa->push(new ExpOperation(*name,0,true));
+	    }
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"keys"));
+	}
+	else if (const NamedList* lst = YOBJECT(NamedList,obj)) {
 	    NamedIterator iter(*lst);
 	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	    while (const NamedString* ns = iter.get())
