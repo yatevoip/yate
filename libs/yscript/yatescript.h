@@ -1254,9 +1254,10 @@ public:
      * Constructor with special operation
      * @param opcode Operation code of the wrapper
      * @param object Pointer to the object to wrap
+     * @param name Optional name of the wrapper
      */
-    inline ExpWrapper(ExpEvaluator::Opcode opcode, GenObject* object)
-	: ExpOperation(opcode,0,object ? object->toString().c_str() : (const char*)0,false),
+    inline ExpWrapper(ExpEvaluator::Opcode opcode, GenObject* object, const char* name = 0)
+	: ExpOperation(opcode,name,object ? object->toString().c_str() : (const char*)0,false),
 	  m_object(object)
 	{ }
 
