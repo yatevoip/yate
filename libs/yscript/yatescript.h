@@ -2519,6 +2519,12 @@ public:
     virtual bool runDefined(ObjList& stack, const ExpOperation& oper, GenObject* context, JsObject* thisObj = 0);
 
     /**
+     * Function constructor initialization
+     * @param construct The Function function
+     */
+    virtual void initConstructor(JsFunction* construct);
+
+    /**
      * Retrieve the ExpFunction matching this Javascript function
      * @return Pointer to ExpFunction representation
      */

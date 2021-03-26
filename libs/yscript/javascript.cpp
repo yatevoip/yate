@@ -2986,7 +2986,9 @@ bool JsCode::callFunction(ObjList& stack, const ExpOperation& oper, GenObject* c
 	long int retIndex, JsFunction* func, ObjList& args,
 	JsObject* thisObj, JsObject* scopeObj) const
 {
-    pushOne(stack,new ExpOperation(OpcFunc,oper.name(),retIndex,true));
+    ExpOperation* ret = new ExpOperation(OpcFunc,oper.name(),retIndex,true);
+    ret->lineNumber(oper.lineNumber());
+    pushOne(stack,ret);
     if (scopeObj)
 	pushOne(stack,new ExpWrapper(scopeObj,"()"));
     JsObject* arguments = new JsObject("Arguments",func->mutex());
@@ -3621,6 +3623,12 @@ void JsFunction::init()
     params().addParam(new ExpFunction("call"));
 }
 
+void JsFunction::initConstructor(JsFunction* construct)
+{
+    construct->params().addParam(new ExpFunction("context"));
+    construct->params().addParam(new ExpFunction("stack"));
+}
+
 bool JsFunction::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
     XDebug(DebugAll,"JsFunction::runNative() '%s' in '%s' [%p]",
@@ -3667,6 +3675,114 @@ bool JsFunction::runNative(ObjList& stack, const ExpOperation& oper, GenObject* 
 	}
 	ExpFunction func(toString(),argc);
 	return runDefined(stack,func,context,thisObj);
+    }
+    else if (oper.name() == YSTRING("context")) {
+	// Function.context([skipContexts])
+	// return the current function context
+	int skip = 0;
+	ObjList args;
+	switch (extractArgs(this,stack,oper,context,args)) {
+	    case 1:
+		skip = static_cast<ExpOperation*>(args[0])->valInteger();
+		if (skip < 0)
+		    skip = 0;
+		break;
+	    case 0:
+		break;
+	    default:
+		return false;
+	}
+	for (const ObjList* l = stack.skipNull(); l; l = l->skipNext()) {
+	    GenObject* o = l->get();
+	    if (static_cast<ExpOperation*>(o)->opcode() == ExpEvaluator::OpcFunc) {
+		if (skip--)
+		    continue;
+		break;
+	    }
+	    if (skip)
+		continue;
+	    ExpWrapper* wrap = YOBJECT(ExpWrapper,o);
+	    if (!(wrap && wrap->name() == YSTRING("()")))
+		continue;
+	    JsObject* obj = YOBJECT(JsObject,wrap->object());
+	    if (!obj)
+		continue;
+	    if (!obj->ref())
+		break;
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(obj,oper.name()));
+	    return true;
+	}
+	ExpEvaluator::pushOne(stack,JsParser::nullClone());
+    }
+    else if (oper.name() == YSTRING("stack")) {
+	// Function.stack([fullPath[,stringSeparator]])
+	// return the function call stack
+	bool full = false;
+	String sep;
+	ObjList args;
+	switch (extractArgs(this,stack,oper,context,args)) {
+	    case 2:
+		sep = *static_cast<ExpOperation*>(args[1]);
+		// fall through
+	    case 1:
+		full = static_cast<ExpOperation*>(args[0])->valBoolean(full);
+		break;
+	    case 0:
+		break;
+	    default:
+		return false;
+	}
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+	if (runner) {
+	    String file;
+	    unsigned int line;
+	    runner->code()->getFileLine(oper.lineNumber(),file,line,full);
+	    file << ":" << line;
+	    ExpOperation* last = new ExpOperation(file);
+	    jsa->push(last);
+	    for (const ObjList* l = stack.skipNull(); l; l = l->skipNext()) {
+		GenObject* o = l->get();
+		const ExpOperation* op = static_cast<const ExpOperation*>(o);
+		if ((op->barrier() && op->opcode() == ExpEvaluator::OpcFunc)) {
+		    runner->code()->getFileLine(op->lineNumber(),file,line,full);
+		    file << ":" << line;
+		    last = new ExpOperation(file);
+		    jsa->push(last);
+		}
+		else if (last) {
+		    ExpWrapper* wrap = YOBJECT(ExpWrapper,o);
+		    if (!(wrap && wrap->name() == YSTRING("()")))
+			continue;
+		    JsObject* obj = YOBJECT(JsObject,wrap->object());
+		    if (!obj)
+			continue;
+		    wrap = YOBJECT(ExpWrapper,obj->params().getParam(YSTRING("arguments")));
+		    if (!wrap)
+			continue;
+		    obj = YOBJECT(JsObject,wrap->object());
+		    if (!obj)
+			continue;
+		    wrap = YOBJECT(ExpWrapper,obj->params().getParam(YSTRING("callee")));
+		    if (!wrap)
+			continue;
+		    obj = YOBJECT(JsObject,wrap->object());
+		    if (!obj)
+			continue;
+		    *last << " " << obj->params();
+		    last = 0;
+		}
+	    }
+	}
+	if (sep) {
+	    String res;
+	    for (int32_t i = 0; i < jsa->length(); i++)
+		res.append(jsa->params()[String(i)],sep);
+	    TelEngine::destruct(jsa);
+	    ExpEvaluator::pushOne(stack,new ExpOperation(res,oper.name()));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,oper.name()));
     }
     else {
 	JsObject* obj = YOBJECT(JsObject,params().getParam(YSTRING("prototype")));
