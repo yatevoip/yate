@@ -1636,22 +1636,20 @@ bool JsMath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
     XDebug(DebugAll,"JsMath::runNative() '%s' in '%s' [%p]",
 	oper.name().c_str(),toString().c_str(),this);
     if (oper.name() == YSTRING("abs")) {
-	if (!oper.number())
-	    return false;
-	int64_t n = 0;
+	int64_t n = ExpOperation::nonInteger();
 	for (int i = (int)oper.number(); i; i--) {
 	    ExpOperation* op = popValue(stack,context);
 	    if (op->isInteger())
 		n = op->number();
+	    else if (JsParser::isEmpty(*op))
+		n = 0;
 	    TelEngine::destruct(op);
 	}
-	if (n < 0)
+	if ((ExpOperation::nonInteger() != n) && (n < 0))
 	    n = -n;
 	ExpEvaluator::pushOne(stack,new ExpOperation(n));
     }
     else if (oper.name() == YSTRING("max")) {
-	if (!oper.number())
-	    return false;
 	int64_t n = LLONG_MIN;
 	for (int i = (int)oper.number(); i; i--) {
 	    ExpOperation* op = popValue(stack,context);
@@ -1659,11 +1657,11 @@ bool JsMath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 		n = op->number();
 	    TelEngine::destruct(op);
 	}
+	if (LLONG_MIN == n)
+	    n = ExpOperation::nonInteger();
 	ExpEvaluator::pushOne(stack,new ExpOperation(n));
     }
     else if (oper.name() == YSTRING("min")) {
-	if (!oper.number())
-	    return false;
 	int64_t n = LLONG_MAX;
 	for (int i = (int)oper.number(); i; i--) {
 	    ExpOperation* op = popValue(stack,context);
@@ -1671,6 +1669,8 @@ bool JsMath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 		n = op->number();
 	    TelEngine::destruct(op);
 	}
+	if (LLONG_MAX == n)
+	    n = ExpOperation::nonInteger();
 	ExpEvaluator::pushOne(stack,new ExpOperation(n));
     }
     else if (oper.name() == YSTRING("random")) {
