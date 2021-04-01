@@ -49,17 +49,26 @@ class Yate
 
     /**
      * Static function to output a string to Yate's stderr or logfile
+     * NOTE: Yate expects an escaped string for 'debug'
      * @param $str String to output
+     * @param $level Debug level. Send a debug message if greater than 0
+     * @param $escape Escape the string to output
      */
-    static function Output($str)
+    static function Output($str,$level = 0,$escape = false)
     {
 	global $yate_stderr, $yate_output;
 	if ($str === true)
 	    $yate_output = true;
 	else if ($str === false)
 	    $yate_output = false;
-	else if ($yate_output)
-	    _yate_print("%%>output:$str\n");
+	else if ($yate_output) {
+	    if ($escape)
+		$str = Yate::Escape($str);
+	    if ($level <= 0)
+		_yate_print("%%>output:$str\n");
+	    else
+		_yate_print("%%>debug:$level:$str\n");
+	}
 	else
 	    fputs($yate_stderr, "$str\n");
     }
@@ -68,8 +77,10 @@ class Yate
      * Static function to output a string to Yate's stderr or logfile
      *  only if debugging was enabled.
      * @param $str String to output, or boolean (true/false) to set debugging
+     * @param $level Debug level. Send a debug message if greater than 0
+     * @param $escape Escape the string to output
      */
-    static function Debug($str)
+    static function Debug($str,$level = 0,$escape = false)
     {
 	global $yate_stderr, $yate_debug;
 	if ($str === true)
@@ -77,7 +88,7 @@ class Yate
 	else if ($str === false)
 	    $yate_debug = false;
 	else if ($yate_debug)
-	    Yate::Output($str);
+	    Yate::Output($str,$level,$escape);
     }
 
     /**
