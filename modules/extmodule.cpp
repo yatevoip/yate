@@ -213,7 +213,7 @@ private:
     ObjList m_watched;
 };
 
-class ExtModReceiver : public MessageReceiver, public Mutex
+class ExtModReceiver : public MessageReceiver, public Mutex, public DebugEnabler
 {
     friend class MsgWatcher;
 public:
@@ -293,6 +293,7 @@ private:
     ObjList m_relays;
     String m_trackName;
     String m_reason;
+    String m_debugName;
 };
 
 class ExtThread : public Thread
@@ -803,6 +804,8 @@ ExtModReceiver::ExtModReceiver(const char* script, const char* args, File* ain, 
       m_maxQueue(s_maxQueue), m_timeout(s_timeout), m_timebomb(s_timebomb), m_restart(false), m_scripted(false),
       m_buffer(0,DEF_INCOMING_LINE), m_script(script), m_args(args), m_trackName(s_trackName)
 {
+    debugChain(&__plugin);
+    debugName(m_script);
     Debug(DebugAll,"ExtModReceiver::ExtModReceiver(\"%s\",\"%s\") [%p]",script,args,this);
     m_script.trimBlanks();
     m_args.trimBlanks();
@@ -821,6 +824,8 @@ ExtModReceiver::ExtModReceiver(const char* name, Stream* io, ExtModChan* chan, i
       m_maxQueue(s_maxQueue), m_timeout(s_timeout), m_timebomb(s_timebomb), m_restart(false), m_scripted(false),
       m_buffer(0,DEF_INCOMING_LINE), m_script(name), m_args(conn), m_trackName(s_trackName)
 {
+    debugChain(&__plugin);
+    debugName(m_script);
     Debug(DebugAll,"ExtModReceiver::ExtModReceiver(\"%s\",%p,%p) [%p]",name,io,chan,this);
     m_script.trimBlanks();
     m_args.trimBlanks();
@@ -1224,7 +1229,7 @@ void ExtModReceiver::run()
 		Debug("ExtModule",DebugWarn,"Read error %d on %p [%p]",errno,m_in,this);
 	    break;
 	}
-	XDebug(DebugAll,"ExtModReceiver::run() read %d",readsize);
+	XDebug(DebugAll,"ExtModReceiver::run() read %d [%p]",readsize,this);
 	int totalsize = readsize + posinbuf;
 	if (totalsize >= (int)m_buffer.length()) {
 	    Debug("ExtModule",DebugWarn,"Overflow reading in buffer of length %u, closing [%p]",
@@ -1504,6 +1509,14 @@ bool ExtModReceiver::processLine(const char* line)
 	Output("%s",id.safe());
 	return false;
     }
+    else if (id.startSkip("%%>debug:",false)) {
+	int pos = id.find(':');
+	if (pos > 0) {
+	    int level = id.substr(0,pos).toInteger(DebugAll,0,DebugTest,DebugAll);
+	    Debug(this,level,"%s",String::msgUnescape(id.substr(pos + 1)).safe());
+	    return false;
+	}
+    }
     else if (id.startSkip("%%>setlocal:",false)) {
 	int col = id.find(':');
 	if (col > 0) {
@@ -1621,6 +1634,21 @@ bool ExtModReceiver::processLine(const char* line)
 	    else if (id == "runid") {
 		ok = val.null();
 		val = Engine::runId();
+	    }
+	    else if (id == YSTRING("debuglevel")) {
+		ok = true;
+		if (val)
+		    debugLevel(val.toInteger(DebugAll,0,DebugTest,DebugAll));
+		val = debugLevel();
+	    }
+	    else if (id == YSTRING("debugname")) {
+		ok = true;
+		if (val && !m_debugName) {
+		    m_debugName = val;
+		    debugName(m_debugName);
+		}
+		else
+		    val = debugName();
 	    }
 	    DDebug("ExtModReceiver",DebugAll,"Set '%s'='%s' %s",
 		id.c_str(),val.c_str(),ok ? "ok" : "failed");
