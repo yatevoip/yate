@@ -242,12 +242,19 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 				continue;
 			    }
 			    Engine::runParams().replaceParams(s);
+			    bool rev = s.startSkip("$not");
 			    if (s.startSkip("$loaded"))
 				enabled = Engine::self() && Engine::self()->pluginLoaded(s);
 			    else if (s.startSkip("$unloaded"))
 				enabled = !(Engine::self() && Engine::self()->pluginLoaded(s));
+			    else if (s.startSkip("$filled"))
+				enabled = !s.null();
+			    else if (s.startSkip("$empty"))
+				enabled = s.null();
 			    else
-				enabled = s.toBoolean(true);
+				enabled = s.toBoolean(!s.startSkip("$bool"));
+			    if (rev)
+				enabled = !enabled;
 			}
 			continue;
 		    }
