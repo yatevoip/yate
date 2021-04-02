@@ -1652,6 +1652,8 @@ int Engine::engineInit()
 	    }
 	}
     }
+    // Reload configuration file so conditionals will take into account runtime parameters
+    s_cfg.load();
     vars = s_cfg.getSection("variables");
     if (vars) {
 	unsigned int n = vars->length();
