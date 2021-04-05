@@ -3260,14 +3260,29 @@ bool JsFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 	ExpEvaluator::pushOne(stack,ret);
     }
     else if (oper.name() == YSTRING("setContent")) {
-	// len = File.setContent(name,content[,binary])
+	// len = File.setContent(name,content[,binary|params])
+	bool create = true;
+	bool append = false;
 	bool binary = false;
+	bool pubRead = false;
+	bool pubWrite = false;
 	ExpOperation* op = 0;
 	ExpOperation* cont = 0;
 	switch (oper.number()) {
 	    case 3:
 		op = popValue(stack,context);
-		binary = op && op->toBoolean();
+		{
+		    JsObject* obj = YOBJECT(JsObject,op);
+		    if (obj) {
+			obj->getBoolField(YSTRING("create"),create);
+			obj->getBoolField(YSTRING("append"),append);
+			obj->getBoolField(YSTRING("binary"),binary);
+			obj->getBoolField(YSTRING("pubread"),pubRead);
+			obj->getBoolField(YSTRING("pubwrite"),pubWrite);
+		    }
+		    else
+			binary = op && op->toBoolean();
+		}
 		TelEngine::destruct(op);
 		// fall through
 	    case 2:
@@ -3280,11 +3295,11 @@ bool JsFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 	int64_t wr = -1;
 	if (op && cont) {
 	    File f;
-	    if (f.openPath(*op,true,false,true,false,binary)) {
+	    if (f.openPath(*op,true,false,create,append,binary,pubRead,pubWrite)) {
 		if (binary) {
 		    DataBlock buf;
-			if (buf.unHexify(cont->c_str(),cont->length()))
-			    wr = static_cast<Stream&>(f).writeData(buf);
+		    if (buf.unHexify(cont->c_str(),cont->length()))
+			wr = static_cast<Stream&>(f).writeData(buf);
 		}
 		else
 		    wr = static_cast<Stream&>(f).writeData(*cont);
