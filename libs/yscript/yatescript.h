@@ -2571,6 +2571,14 @@ public:
      */
     virtual JsObject* copy(ScriptMutex* mtx, const char* name, const ExpOperation& oper) const;
 
+    /**
+     * Clone function
+     * @param oper ExpOperation that required the clone
+     * @param mtx Pointer to the mutex that serializes the cloning
+     * @return A copy of JsFunction if not already cloned, a reference to itself is function is already a clone
+     */
+    virtual JsFunction* cloneFunction(const ExpOperation& oper, ScriptMutex* mtx = 0);
+
 protected:
     /**
      * Try to evaluate a single native method

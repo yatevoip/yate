@@ -682,8 +682,19 @@ bool JsObject::runAssign(ObjList& stack, const ExpOperation& oper, GenObject* co
 	ExpWrapper* w = YOBJECT(ExpWrapper,&oper);
 	if (w) {
 	    JsFunction* jsf = YOBJECT(JsFunction,w->object());
-	    if (jsf)
-		jsf->firstName(oper.name());
+	    if (jsf) {
+		ScriptRun* runner = YOBJECT(ScriptRun,context);
+		JsFunction* clonedFunc = jsf->cloneFunction(oper,runner && runner->context() ? runner->context()->mutex() : 0);
+		if (clonedFunc) {
+		    clonedFunc->firstName(oper.name());
+		    w = new ExpWrapper(clonedFunc,oper.name(),oper.barrier());
+		    w->lineNumber(oper.lineNumber());
+		    params().setParam(w);
+		    return true;
+		}
+		else
+		    jsf->firstName(oper.name());
+	    }
 	    params().setParam(w->clone(oper.name()));
 	}
 	else

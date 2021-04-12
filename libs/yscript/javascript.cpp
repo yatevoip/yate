@@ -3617,6 +3617,17 @@ JsObject* JsFunction::copy(ScriptMutex* mtx, const char* name, const ExpOperatio
     return new JsFunction(mtx,name,oper.lineNumber(),&args,label(),m_code);
 }
 
+JsFunction* JsFunction::cloneFunction(const ExpOperation& oper, ScriptMutex* mtx)
+{
+    XDebug(DebugInfo,"JsFunction::cloneFunction(mtx=%p) '%s'='%s' (%s) in '%s' [%p]",
+	mtx,oper.name().c_str(),oper.c_str(),oper.typeOf(),toString().c_str(),this);
+    if (mutex() && ref()) {
+	XDebug(DebugAll,"JsFunction::cloneFunction() Function '%s' already cloned [%p]",toString().c_str(),this);
+	return this;
+    }
+    return static_cast<JsFunction*>(copy(mtx,m_func.toString(),oper));
+}
+
 void JsFunction::init()
 {
     params().addParam(new ExpFunction("apply"));
