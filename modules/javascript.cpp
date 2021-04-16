@@ -1323,10 +1323,12 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	String str;
 	for (int i = (int)oper.number(); i; i--) {
 	    ExpOperation* op = popValue(stack,context);
-	    if (str)
-		str = *op + " " + str;
-	    else
-		str = *op;
+	    if (*op) {
+		if (str)
+		    str = *op + " " + str;
+		else
+		    str = *op;
+	    }
 	    TelEngine::destruct(op);
 	}
 	if (str) {
