@@ -37,6 +37,7 @@ public:
     virtual void initConstructor(JsFunction* construct)
 	{
 	    construct->params().addParam(new ExpFunction("keys"));
+	    construct->params().addParam(new ExpFunction("global"));
 	}
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -529,7 +530,7 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
 	buf << String::boolText(oper->valBoolean());
     else if (oper->isNumber()) {
 	if (oper->isInteger())
-	    buf << oper->number();
+	    buf << *oper;
 	else
 	    buf << "null";
     }
@@ -912,6 +913,16 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
 	TelEngine::destruct(op);
+    }
+    else if (oper.name() == YSTRING("global")) {
+	if (oper.number() != 0)
+	    return false;
+	ScriptRun* run = YOBJECT(ScriptRun,context);
+	JsObject* obj = YOBJECT(JsObject,run ? run->context() : context);
+	if (obj && obj->ref())
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(obj,"global"));
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else
 	return JsObject::runNative(stack,oper,context);
