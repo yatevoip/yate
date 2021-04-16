@@ -3606,6 +3606,8 @@ JsFunction::JsFunction(ScriptMutex* mtx, const char* name, unsigned int line, Ob
     }
     unsigned int argc = m_formal.count();
     static_cast<ExpOperation&>(m_func) = argc;
+    if (name)
+	params().addParam("name",name);
     params().addParam("length",String(argc));
 }
 
