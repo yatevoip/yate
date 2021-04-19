@@ -72,7 +72,10 @@ const TokenDict SDPParser::s_payloads[] = {
 };
 
 // SDP Payloads for the AV profile
+// NOTE: put multiple channel media before single channel for proper matching
 const TokenDict SDPParser::s_rtpmap[] = {
+    { "PCMU/8000/2",      117 },
+    { "PCMA/8000/2",      118 },
     { "PCMU/8000",          0 },
     { "PCMA/8000",          8 },
     { "GSM/8000",           3 },
@@ -106,9 +109,6 @@ const TokenDict SDPParser::s_rtpmap[] = {
     { "MPV/90000",         32 },
     { "MP2T/90000",        33 },
     { "MP4V-ES/90000",    110 },
-    // Stereo, dynamic payloads
-    { "PCMU/8000/2",      117 },
-    { "PCMA/8000/2",      118 },
     { 0,                    0 },
 };
 
