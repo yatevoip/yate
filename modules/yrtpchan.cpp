@@ -40,6 +40,7 @@ static TokenDict dict_payloads[] = {
     { "alaw",          8 },
     { "gsm",           3 },
     { "lpc10",         7 },
+    { "2*slin",       10 },
     { "slin",         11 },
     { "g726",          2 },
     { "g722/16000",    9 },
@@ -71,6 +72,8 @@ static TokenDict dict_payloads[] = {
     { "mpv",          32 },
     { "mp2t",         33 },
     { "mp4v",        110 },
+    { "2*mulaw",     117 },
+    { "2*alaw",      118 },
     { 0 ,              0 },
 };
 
