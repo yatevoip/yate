@@ -34,7 +34,7 @@ static const FormatInfo s_formats[] = {
     FormatInfo("slin/32000", 640, 10000, "audio", 32000, 1, true),
     FormatInfo("alaw/32000", 160, 10000, "audio", 32000),
     FormatInfo("mulaw/32000", 160, 10000, "audio", 32000),
-    FormatInfo("2*slin", 320, 10000, "audio", 8000, 2),
+    FormatInfo("2*slin", 320, 10000, "audio", 8000, 2, true),
     FormatInfo("2*slin/16000", 640, 10000, "audio", 16000, 2),
     FormatInfo("2*slin/32000", 1280, 10000, "audio", 32000, 2),
     FormatInfo("2*alaw", 160, 10000, "audio", 8000, 2),
