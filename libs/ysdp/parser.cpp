@@ -32,6 +32,7 @@ const TokenDict SDPParser::s_payloads[] = {
     { "alaw",          8 },
     { "gsm",           3 },
     { "lpc10",         7 },
+    { "2*slin",       10 },
     { "slin",         11 },
     { "g726",          2 },
     { "g722/16000",    9 },
@@ -64,6 +65,9 @@ const TokenDict SDPParser::s_payloads[] = {
     { "mpv",          32 },
     { "mp2t",         33 },
     { "mp4v",        110 },
+    // Stereo
+    { "2*mulaw",     117 },
+    { "2*alaw",      118 },
     { 0,               0 },
 };
 
@@ -73,6 +77,7 @@ const TokenDict SDPParser::s_rtpmap[] = {
     { "PCMA/8000",          8 },
     { "GSM/8000",           3 },
     { "LPC/8000",           7 },
+    { "L16/8000/2",        10 },
     { "L16/8000",          11 },
     { "G726-32/8000",       2 },
     { "G722/8000",          9 },
@@ -101,6 +106,9 @@ const TokenDict SDPParser::s_rtpmap[] = {
     { "MPV/90000",         32 },
     { "MP2T/90000",        33 },
     { "MP4V-ES/90000",    110 },
+    // Stereo, dynamic payloads
+    { "PCMU/8000/2",      117 },
+    { "PCMA/8000/2",      118 },
     { 0,                    0 },
 };
 
@@ -469,13 +477,15 @@ void SDPParser::initialize(const NamedList* codecs, const NamedList* hacks, cons
     if (hacks)
 	m_hacks.copyParams(*hacks);
     bool defcodecs = m_codecs.getBoolValue("default",true);
+    bool stereo = m_codecs.getBoolValue("default_stereo");
     m_audioFormats = "";
     String audio = "audio";
     for (const TokenDict* dict = s_payloads; dict->token; dict++) {
 	DataFormat fmt(dict->token);
 	const FormatInfo* info = fmt.getInfo();
 	if (info && (audio == info->type)) {
-	    if (m_codecs.getBoolValue(fmt,defcodecs && DataTranslator::canConvert(fmt)))
+	    bool defVal = (2 != info->numChannels) ? defcodecs : stereo;
+	    if (m_codecs.getBoolValue(fmt,defVal && DataTranslator::canConvert(fmt)))
 		m_audioFormats.append(fmt,",");
 	}
     }

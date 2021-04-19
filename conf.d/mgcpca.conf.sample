@@ -66,6 +66,9 @@
 ; default: bool: Enable all unlisted codecs by default if a transcoder exists
 ;default=enable
 
+; default_stereo: bool: Enable all unlisted stereo audio codecs by default if a transcoder exists
+;default_stereo=no
+
 ; mulaw: bool: Companded-only G711 mu-law (PCMU/8000)
 ;mulaw=default
 
@@ -106,6 +109,15 @@
 ; amr_octet: bool: Octet aligned AMR RTP payload default (if not in SDP)
 ; NOTE: RFC 4867 (and older 3267) specifies the default is bandwidth efficient
 ;amr_octet=no
+
+; 2*mulaw: bool: Stereo Companded-only G711 mu-law (PCMU/8000)
+;2*mulaw=default_stereo
+
+; 2*alaw: bool: Stereo Companded-only G711 a-law (PCMU/8000)
+;2*alaw=default_stereo
+
+; 2*slin: bool: Stereo Signed Linear 16-bit uncompressed (L16/8000)
+;2*slin=default_stereo
 
 
 [hacks]
