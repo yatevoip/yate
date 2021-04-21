@@ -6093,10 +6093,8 @@ void YateSIPRefer::release(bool fromCleanup)
 	    s << "SIP/2.0 " << m_notifyCode << " " << lookup(m_notifyCode,SIPResponses) << "\r\n";
 	    m_sipNotify->setBody(new MimeStringBody("message/sipfrag;version=2.0",s));
 	    plugin.ep()->engine()->addMessage(m_sipNotify);
-	    m_sipNotify = 0;
 	}
-	else
-	    TelEngine::destruct(m_sipNotify);
+	TelEngine::destruct(m_sipNotify);
 	// If we still have a NOTIFY message in cleanup() the thread
 	//  was cancelled in the hard way
 	if (fromCleanup)
