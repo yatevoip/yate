@@ -600,7 +600,7 @@ bool EngineEventHandler::received(Message &msg)
 	ev = new CapturedEvent(level,*text);
     else {
 	// build a full text with timestamp and sender
-	char tstamp[30];
+	char tstamp[32];
 	Debugger::Formatting fmt = Debugger::getFormatting();
 	if (Debugger::None == fmt)
 	    fmt = Debugger::Relative;

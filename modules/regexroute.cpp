@@ -448,7 +448,7 @@ static void evalFunc(String& str, Message& msg)
 	else if (str == YSTRING("dispatching"))
 	    str = s_dispatching;
 	else if (str == YSTRING("timestamp")) {
-	    char buf[24];
+	    char buf[32];
 	    Debugger::formatTime(buf);
 	    str = buf;
 	}

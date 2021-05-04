@@ -820,7 +820,7 @@ public:
 
     /**
      * Fill a buffer with a current timestamp prefix
-     * @param buf Buffer to fill, must be at least 24 characters long
+     * @param buf Buffer to fill, must be at least 28 characters long
      * @param format Desired timestamp formatting
      * @return Length of the prefix written in buffer excluding final NUL
      */
