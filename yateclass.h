@@ -5253,6 +5253,19 @@ public:
 	int64_t maxvalue = LLONG_MAX, bool clamp = true) const;
 
     /**
+     * Retrieve the unsigned 64-bit numeric value of a parameter.
+     * @param name Name of parameter to locate
+     * @param defvalue Default value to return if not found
+     * @param minvalue Minimum value allowed for the parameter
+     * @param maxvalue Maximum value allowed for the parameter
+     * @param clamp Control the out of bound values: true to adjust to the nearest
+     *  bound, false to return the default value
+     * @return The number contained in the named parameter or the default
+     */
+    uint64_t getUInt64Value(const String& name, uint64_t defvalue = 0, uint64_t minvalue = 0,
+        uint64_t maxvalue = ULLONG_MAX, bool clamp = true) const;
+
+    /**
      * Retrieve the floating point value of a parameter.
      * @param name Name of parameter to locate
      * @param defvalue Default value to return if not found
