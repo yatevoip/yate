@@ -1592,7 +1592,7 @@ bool ExtModReceiver::processLine(const char* line)
 	    }
 	    else if (id == "settime") {
 		m_settime = val.toBoolean(m_settime);
-		val = m_setdata;
+		val = m_settime;
 		ok = true;
 	    }
 	    else if (id == "selfwatch") {
