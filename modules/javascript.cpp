@@ -434,6 +434,7 @@ public:
 	    params().addParam(new ExpFunction("started"));
 	    params().addParam(new ExpFunction("exiting"));
 	    params().addParam(new ExpFunction("accepting"));
+	    params().addParam(new ExpFunction("getCongestion"));
 	    if (name)
 		params().addParam(new ExpOperation(name,"name"));
 	    params().addParam(new ExpWrapper(new JsShared(mtx),"shared"));
@@ -1966,6 +1967,11 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	    default:
 		return false;
 	}
+    }
+    else if (oper.name() == YSTRING("getCongestion")) {
+	if (oper.number() != 0)
+	    return false;
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)Engine::getCongestion()));
     }
     else if (oper.name() == YSTRING("atob")) {
 	// str = Engine.atob(b64_str)
