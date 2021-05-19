@@ -4972,7 +4972,6 @@ void JsEngineWorker::run()
 	    m_engine->resetWorker();
 	    return;
 	}
-	Time t;
 	Lock myLock(m_eventsMutex);
 	ObjList* o = m_events.skipNull();
 	if (!o) {
@@ -4981,21 +4980,18 @@ void JsEngineWorker::run()
 	    continue;
 	}
 	RefPointer<JsTimeEvent> ev = static_cast<JsTimeEvent*>(o->get());
-	myLock.drop();
+	Time t;
 	if (!ev->timeout(t)) {
+	    myLock.drop();
 	    ev = 0;
 	    Thread::idle(true);
 	    continue;
 	}
-	ev->processTimeout(t);
-	if (!ev->repeatable()) {
-	    myLock.acquire(m_eventsMutex);
-	    m_events.remove(ev);
-	    continue;
-	}
-	myLock.acquire(m_eventsMutex);
-	if (m_events.remove(ev,false))
+	if (o->remove(!ev->repeatable()))
 	    postponeEvent(ev);
+	myLock.drop();
+	ev->processTimeout(t);
+	ev = 0;
     }
 }
 
