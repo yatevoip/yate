@@ -9703,7 +9703,7 @@ void SIPDriver::msgStatus(Message& msg)
 void SIPDriver::statusParams(String& str)
 {
     Driver::statusParams(str);
-    if (m_endpoint->engine())
+    if (m_endpoint && m_endpoint->engine())
 	str.append("transactions=",",") << m_endpoint->engine()->transactionCount();
 }
 
