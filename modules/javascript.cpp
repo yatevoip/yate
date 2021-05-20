@@ -4934,6 +4934,7 @@ JsEngineWorker::JsEngineWorker(JsEngine* engine, ScriptContext* context, ScriptC
 JsEngineWorker::~JsEngineWorker()
 {
     DDebug(&__plugin,DebugAll,"Destroying JsEngineWorker engine=%p [%p]",(void*)m_engine,this);
+    m_events.clear();
     if (m_engine)
 	m_engine->resetWorker();
     m_engine = 0;
