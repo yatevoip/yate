@@ -436,8 +436,12 @@ public:
 	    params().addParam(new ExpFunction("accepting"));
 	    params().addParam(new ExpFunction("getCongestion"));
 	    params().addParam(new ExpFunction("setCongestion"));
-	    if (name)
+	    if (name) {
+		m_schedName << "js:" << name;
 		params().addParam(new ExpOperation(name,"name"));
+	    }
+	    else
+		m_schedName = "JsScheduler";
 	    params().addParam(new ExpWrapper(new JsShared(mtx),"shared"));
 	    params().addParam(new ExpFunction("runParams"));
 	    params().addParam(new ExpFunction("configFile"));
@@ -462,12 +466,15 @@ public:
     static void initialize(ScriptContext* context, const char* name = 0);
     inline void resetWorker()
 	{ m_worker = 0; }
+    inline const String& schedName() const
+	{ return m_schedName; }
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
     virtual void destroyed();
 private:
     JsEngineWorker* m_worker;
     String m_debugName;
+    String m_schedName;
 };
 #undef MKDEBUG
 #undef MKTIME
@@ -4925,7 +4932,7 @@ void JsTimeEvent::processTimeout(const Time& when)
  */
 
 JsEngineWorker::JsEngineWorker(JsEngine* engine, ScriptContext* context, ScriptCode* code)
-    : Thread("JsScheduler"), m_eventsMutex(false,"JsEngine"), m_id(0),
+    : Thread(engine->schedName()), m_eventsMutex(false,"JsEngine"), m_id(0),
     m_runner(code->createRunner(context,NATIVE_TITLE)), m_engine(engine)
 {
     DDebug(&__plugin,DebugAll,"Creating JsEngineWorker engine=%p [%p]",(void*)m_engine,this);
