@@ -1182,6 +1182,8 @@ static int supervise(int initDelay)
 	    return err;
 	}
 	if (s_childpid == 0) {
+	    // Running in child now
+	    s_childpid = ::getpid();
 	    s_super_handle = wdogfd[1];
 	    ::close(wdogfd[0]);
 	    if (s_logrotator) {
@@ -1573,6 +1575,10 @@ int Engine::engineInit()
     s_params.addParam("runattempt",String(s_run_attempt));
 #ifndef _WINDOWS
     s_params.addParam("lastsignal",String(s_childsig));
+    if (s_childpid != -1)
+	s_params.addParam("childpid",String(s_childpid));
+    if (s_superpid != -1)
+	s_params.addParam("superpid",String(s_superpid));
 #endif
     s_params.addParam("minworkers",String(s_minworkers));
     s_params.addParam("maxworkers",String(s_maxworkers));
@@ -3051,6 +3057,8 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 #ifndef _WINDOWS
     if (supervised)
 	retcode = supervise(supervised);
+    else
+	s_childpid = ::getpid();
     if (retcode >= 0)
 	return retcode;
 #endif
