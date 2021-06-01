@@ -423,6 +423,12 @@ SslSocket::SslSocket(SOCKET handle, bool server, int verify, SslContext* context
 	context ? context->c_str() : "",this);
     if (Socket::valid()) {
 	m_ssl = ::SSL_new(context ? *context : s_context);
+	if (!m_ssl) {
+	    Debug(&__plugin,DebugNote,"SslSocket::SslSocket(%d) could not create SSL context, terminating [%p]",
+		handle,this);
+	    Socket::terminate();
+	    return;
+	}
 	if (s_index >= 0)
 	    ::SSL_set_ex_data(m_ssl,s_index,this);
 	::SSL_set_verify(m_ssl,verify,0);
