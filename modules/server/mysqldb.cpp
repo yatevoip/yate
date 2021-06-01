@@ -38,6 +38,11 @@
 #define mysql_library_end mysql_server_end
 #endif
 
+// MySQL 8.0.1 removes declaration of my_bool
+#ifndef HAVE_MYSQL_MY_BOOL
+typedef char my_bool;
+#endif
+
 using namespace TelEngine;
 namespace { // anonymous
 
