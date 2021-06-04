@@ -562,6 +562,8 @@ bool EngineStatusHandler::received(Message &msg)
 	msg.retValue() << ",waiting=" << locks;
     msg.retValue() << ",acceptcalls=" << lookup(Engine::accept(),Engine::getCallAcceptStates());
     msg.retValue() << ",congestion=" << Engine::getCongestion();
+    if (msg.getBoolValue("reset",false))
+	Engine::self()->resetMax();
     if (details) {
 	NamedIterator iter(Engine::runParams());
 	char sep = ';';

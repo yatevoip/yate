@@ -1600,6 +1600,12 @@ public:
 	{ m_dispatcher.getStats(enqueued,dequeued,dispatched,queueMax); }
 
     /**
+     * Reset the high water mark of the stat counters
+     */
+    inline void resetMax()
+	{ m_maxMsgRate = m_messageRate; m_dispatcher.m_queuedMax = m_dispatcher.messageCount(); }
+
+    /**
      * Check if a plugin is currently loaded
      * @param name Name of the plugin to check
      * @return True if the named plugin is loaded
