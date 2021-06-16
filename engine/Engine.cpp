@@ -1592,7 +1592,7 @@ int Engine::engineInit()
     if (s_affinity)
 	s_params.addParam("affinity",s_affinity);
 
-    int nodeBits = s_cfg.getIntValue("general","nodebits",0,0,10);
+    int nodeBits = s_cfg.getIntValue("general","nodebits",0,0,12);
     if (nodeBits) {
 	int nodeId = s_cfg.getIntValue("general","nodeid",0);
 	if (0 <= nodeId && nodeId < (1 << nodeBits)) {

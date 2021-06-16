@@ -97,10 +97,11 @@
 ;abortinfo=enable
 
 ; nodeid: int: ID assigned to this node
+;  Range 0 - 2^nodebits-1
 ;nodeid=
 
 ; nodebits: int: Length in bits of the node ID
-;  Range 0 - 10. 0 means that node ID will be ignored
+;  Range 0 - 12. 0 means that node ID will be ignored
 ;nodebits=0
 
 ; msgsniff: bool: Activate message sniffer module (if loaded) at engine init time
