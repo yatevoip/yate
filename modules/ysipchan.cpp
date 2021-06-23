@@ -110,6 +110,20 @@ static const TokenDict info_signals[] = {
     {  0,   0 },
 };
 
+class BodyTrace : public String
+{
+public:
+    inline BodyTrace(const String& body)
+	: m_hash(body.hash()), m_length(body.length())
+	{}
+
+    inline bool sameBody(const String& body) const
+	{ return body.hash() == m_hash && body.length() == m_length; }
+
+    unsigned int m_hash;
+    unsigned int m_length;
+};
+
 // Protocol definition
 class ProtocolHolder
 {
@@ -2003,35 +2017,39 @@ static bool sdpAccept(const SIPMessage* sip, bool def)
 }
 
 // Copy message body to yate message
-static bool copySipBody(NamedList& msg, const MimeBody* body, bool text = false)
+static bool copySipBody(NamedList& msg, const MimeBody* body, bool text = false, unsigned int idx = 0)
 {
     if (!body)
 	return false;
     if (body->isMultipart()) {
+	idx = 0;
 	for (const ObjList* l = static_cast<const MimeMultipartBody*>(body)->bodies().skipNull();
 		l; l = l->skipNext()) {
-	    if (copySipBody(msg,static_cast<const MimeBody*>(l->get()),text))
-		return true;
+	    if (copySipBody(msg,static_cast<const MimeBody*>(l->get()),text,idx))
+		idx++;
 	}
-	return false;
+	return idx > 0;
     }
 
     if (body->isSDP())
 	return false;
+    String suffix;
+    if (idx)
+	suffix << "." << idx;
     // add the body if it's a string one
     MimeStringBody* strBody = YOBJECT(MimeStringBody,body);
     if (strBody) {
-	msg.addParam("xsip_type",strBody->getType());
-	msg.addParam("xsip_body",strBody->text());
+	msg.addParam("xsip_type" + suffix,strBody->getType());
+	msg.addParam("xsip_body" + suffix,strBody->text());
 	if (text)
-	    msg.addParam("text",strBody->text());
+	    msg.addParam("text" + suffix,strBody->text());
     }
     else {
 	MimeLinesBody* txtBody = YOBJECT(MimeLinesBody,body);
 	if (txtBody) {
 	    String bodyText((const char*)txtBody->getBody().data(),txtBody->getBody().length());
-	    msg.addParam("xsip_type",txtBody->getType());
-	    msg.addParam("xsip_body",bodyText);
+	    msg.addParam("xsip_type" + suffix,txtBody->getType());
+	    msg.addParam("xsip_body" + suffix,bodyText);
 	}
 	else if (s_sipt_isup && (body->getType() == YSTRING("application/isup")))
 	    return false;
@@ -2057,9 +2075,19 @@ static bool copySipBody(NamedList& msg, const MimeBody* body, bool text = false)
 			b64.clear(false);
 		    }
 	    }
-	    msg.addParam("xsip_type",body->getType());
-	    msg.addParam("xsip_body_encoding",lookup(enc,SipHandler::s_bodyEnc));
-	    msg.addParam("xsip_body",bodyText);
+	    msg.addParam("xsip_type" + suffix,body->getType());
+	    msg.addParam("xsip_body_encoding" + suffix,lookup(enc,SipHandler::s_bodyEnc));
+	    msg.addParam("xsip_body" + suffix,bodyText);
+	}
+    }
+    const ObjList* o = body->headers().skipNull();
+    if (o) {
+	String hdrPrefix = "xsip_body" + suffix + ".header_";
+	for (; o; o = o->skipNext()) {
+	    const MimeHeaderLine* hdr = static_cast<const MimeHeaderLine*>(o->get());
+	    String val;
+	    hdr->buildLine(val,false);
+	    msg.addParam(hdrPrefix + hdr->name(),val);
 	}
     }
     return true;
@@ -2072,14 +2100,31 @@ static bool copySipBody(NamedList& msg, const SIPMessage& sip, bool text = false
 }
 
 // Create a custom body from Yate message
-static MimeBody* createSipBody(const NamedList& msg)
+static MimeBody* createSipBody(const NamedList& msg, MimeBody* b1 = 0, MimeBody* b2 = 0,
+    const ObjList* bodyTrace = 0)
 {
-    const String& type = msg[YSTRING("xsip_type")];
-    const String& body = msg[YSTRING("xsip_body")];
-    if (type && body) {
-	const String& bodyEnc = msg[YSTRING("xsip_body_encoding")];
+    ObjList extra;
+    for (int i = 0; ; i++) {
+	String suffix;
+	if (i)
+	    suffix << "." << i;
+	String pName = "xsip_body" + suffix;
+	const String& body = msg[pName];
+	if (!body)
+	    break;
+	if (bodyTrace) {
+	    BodyTrace* bt = static_cast<BodyTrace*>(bodyTrace->get());
+	    bodyTrace = bodyTrace->skipNext();
+	    if (bt && bt->sameBody(body))
+		break;
+	}
+	const String& type = msg["xsip_type" + suffix];
+	if (!type)
+	    continue;
+	const String& bodyEnc = msg["xsip_body_encoding" + suffix];
+	MimeBody* bExtra = 0;
 	if (bodyEnc.null())
-	    return new MimeStringBody(type,body.c_str(),body.length());
+	    bExtra = new MimeStringBody(type,body.c_str(),body.length());
 	else {
 	    DataBlock binBody;
 	    bool ok = false;
@@ -2100,20 +2145,55 @@ static MimeBody* createSipBody(const NamedList& msg)
 		    }
 		    break;
 	    }
-
-	    if (ok)
-		return new MimeBinaryBody(type,(const char*)binBody.data(),binBody.length());
-	    else
-		Debug(&plugin,DebugWarn,"Invalid xsip_body_encoding '%s'",bodyEnc.c_str());
+	    if (!ok) {
+		Debug(&plugin,DebugWarn,"Invalid xsip_body_encoding%s '%s'",suffix.safe(),bodyEnc.c_str());
+		continue;
+	    }
+	    bExtra = new MimeBinaryBody(type,(const char*)binBody.data(),binBody.length());
 	}
+	String hdr;
+	hdr << pName << ".header_";
+	for (const ObjList* o = msg.paramList()->skipNull(); o; o = o->skipNext()) {
+	    const NamedString* ns = static_cast<const NamedString*>(o->get());
+	    if (ns->name().startsWith(hdr)) {
+		String name = ns->name().substr(hdr.length());
+		if (name)
+		    bExtra->appendHdr(new MimeHeaderLine(name,*ns));
+	    }
+	}
+	extra.append(bExtra);
     }
-    return 0;
+
+    unsigned int n = 0;
+    if (b1)
+	n++;
+    if (b2)
+	n++;
+    MimeBody* bExtra = static_cast<MimeBody*>(extra.remove(false));
+    if (bExtra) {
+	n++;
+	if (extra.skipNull())
+	    n++;
+    }
+    if (n < 2)
+	return b1 ? b1 : (b2 ? b2 : bExtra);
+
+    MimeMultipartBody* multi = new MimeMultipartBody;
+    if (b1)
+	multi->appendBody(b1);
+    if (b2)
+	multi->appendBody(b2);
+    while (bExtra) {
+	multi->appendBody(bExtra);
+	bExtra = static_cast<MimeBody*>(extra.remove(false));
+    }
+    return multi;
 }
 
 // Copy body from Yate message to SIP message
-static bool copySipBody(SIPMessage& sip, const NamedList& msg)
+static bool copySipBody(SIPMessage& sip, const NamedList& msg, const ObjList* bodyTrace = 0)
 {
-    MimeBody* body = createSipBody(msg);
+    MimeBody* body = createSipBody(msg,0,0,bodyTrace);
     if (!body)
 	return false;
     sip.setBody(body);
@@ -2254,23 +2334,7 @@ static MimeBody* doBuildSIPBody(const DebugEnabler* debug, Message& msg,
 	break;
     }
 
-    MimeBody* custom = createSipBody(msg);
-
-    if (!isup && !custom)
-	return sdp;
-    if (!sdp && !custom)
-	return isup;
-    if (!sdp && !isup)
-	return custom;
-    // Build multipart
-    MimeMultipartBody* body = new MimeMultipartBody;
-    if (sdp)
-	body->appendBody(sdp);
-    if (isup)
-	body->appendBody(isup);
-    if (custom)
-	body->appendBody(custom);
-    return body;
+    return createSipBody(msg,sdp,isup);
 }
 
 // Find an URI parameter separator. Accept '?' or '&'
@@ -5899,12 +5963,16 @@ bool YateSIPEndPoint::generic(const SIPMessage* message, SIPTransaction* t, cons
     doDecodeIsupBody(&plugin,m,message->body);
     copySipBody(m,*message);
     // attempt to find out if the handler modified the body
-    unsigned int bodyHash = YSTRING_INIT_HASH;
-    unsigned int bodyLen = 0;
+    ObjList bodies;
     const String* body = m.getParam(YSTRING("xsip_body"));
     if (body) {
-	bodyHash = body->hash();
-	bodyLen = body->length();
+	bodies.append(new BodyTrace(*body));
+	for (int i = 1; ; i++) {
+	    body = m.getParam("xsip_body." + String(i));
+	    if (!body)
+		break;
+	    bodies.append(new BodyTrace(*body));
+	}
     }
 
     int code = 0;
@@ -5948,9 +6016,7 @@ bool YateSIPEndPoint::generic(const SIPMessage* message, SIPTransaction* t, cons
     if ((code >= 200) && (code < 700)) {
 	SIPMessage* resp = new SIPMessage(message,code);
 	copySipHeaders(*resp,m);
-	body = m.getParam(YSTRING("xsip_body"));
-	if (body && (body->hash() != bodyHash || body->length() != bodyLen))
-	    copySipBody(*resp,m);
+	copySipBody(*resp,m,bodies.skipNull());
 	t->setResponse(resp);
 	resp->deref();
 	return true;
