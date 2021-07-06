@@ -395,8 +395,8 @@ static bool decodeCompat(const SS7ISUP* isup, NamedList& list, const IsupParam* 
 		if (paramName)
 		    name << "." << paramName;
 		else {
-		    Debug(isup,DebugMild,"decodeCompat found unknown parameter %u for %s",val,param->name);
-		    name << "." << (unsigned int)val;
+		    Debug(isup,DebugNote,"decodeCompat found unknown parameter %u for %s",val,param->name);
+		    name << ".Param_" << (unsigned int)val;
 		}
 		SignallingUtils::decodeFlags(isup,list,name,s_flags_paramcompat,buf+i,1);
 		if (buf[i++] & 0x80)
@@ -4632,7 +4632,7 @@ bool SS7ISUP::decodeMessage(NamedList& msg,
 		if (!param) {
 		    Debug(this,DebugMild,"Unknown optional ISUP parameter 0x%02x (size=%u) [%p]",ptype,size,this);
 		    decodeRawParam(this,msg,ptype,paramPtr,size,prefix);
-		    SignallingUtils::appendFlag(unsupported,String((unsigned int)ptype));
+		    SignallingUtils::appendFlag(unsupported,"Param_" + String((unsigned int)ptype));
 		}
 		else if (!decodeParam(this,msg,param,paramPtr,size,prefix)) {
 		    Debug(this,DebugWarn,"Could not decode optional ISUP parameter %s (size=%u) [%p]",param->name,size,this);
