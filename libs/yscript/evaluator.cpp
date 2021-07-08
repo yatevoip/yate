@@ -44,6 +44,10 @@ static const TokenDict s_operators_c[] =
     ASSIGN("&", And),
     ASSIGN("|", Or),
     ASSIGN("^", Xor),
+    ASSIGN("&&",LAnd),
+    ASSIGN("||",LOr),
+    ASSIGN("^^",LXor),
+    ASSIGN("??",Nullish),
     MAKEOP("<<",Shl),
     MAKEOP(">>",Shr),
     MAKEOP("==",Eq),
@@ -55,6 +59,7 @@ static const TokenDict s_operators_c[] =
     MAKEOP("&&",LAnd),
     MAKEOP("||",LOr),
     MAKEOP("^^",LXor),
+    MAKEOP("??",Nullish),
     MAKEOP("+", Add),
     MAKEOP("-", Sub),
     MAKEOP("*", Mul),
@@ -1264,6 +1269,25 @@ bool ExpEvaluator::runOperation(ObjList& stack, const ExpOperation& oper, GenObj
 			break;
 		}
 		TelEngine::destruct(op);
+	    }
+	    break;
+	case OpcNullish:
+	    {
+		ExpOperation* op2 = popValue(stack,context);
+		ExpOperation* op1 = popValue(stack,context);
+		if (!op1 || !op2) {
+		    TelEngine::destruct(op1);
+		    TelEngine::destruct(op2);
+		    return gotError("ExpEvaluator stack underflow",oper.lineNumber());
+		}
+		if (JsParser::isMissing(*op1)) {
+		    TelEngine::destruct(op1);
+		    pushOne(stack,op2);
+		}
+		else {
+		    TelEngine::destruct(op2);
+		    pushOne(stack,op1);
+		}
 	    }
 	    break;
 	case OpcFunc:

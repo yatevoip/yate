@@ -311,6 +311,8 @@ public:
 	OpcLabel,   // ( --- )
 	// Push with deep copy
 	OpcCopy,    // ( --- CopiedA)
+	// Nullish coalescing
+	OpcNullish, // (A B --- A??B)
 	// Field assignment - can be ORed with other binary operators
 	OpcAssign  = 0x0100, // (A B --- B,(&A=B))
 	// Private extension area for derived classes
