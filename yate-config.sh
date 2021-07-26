@@ -97,7 +97,7 @@ s1="@MODULE_CPPFLAGS@"
 s2="-I@includedir@/yate"
 s3="@MODULE_LDFLAGS@"
 s4="@MODULE_SYMBOLS@"
-s5="-lyate -L$libdir"
+s5="-L$libdir -lyate"
 
 while [ "$#" != 0 ]; do
     case "$1" in
