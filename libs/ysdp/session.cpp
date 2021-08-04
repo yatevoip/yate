@@ -152,8 +152,12 @@ bool SDPSession::dispatchRtp(SDPMedia* media, const char* addr, bool start,
 	    if (!param)
 		continue;
 	    String tmp = param->name();
-	    if (tmp.startSkip(sdpPrefix,false) && tmp)
+	    if (tmp.startSkip(sdpPrefix,false) && tmp) {
+		DDebug(m_enabler,DebugInfo,
+		    "Updating (from RTP message) %s parameter '%s' to '%s' [%p]",
+		    media->c_str(),tmp.c_str(),param->c_str(),this);
 	        media->parameter(tmp,*param,false);
+	    }
 	}
     }
     if (m_secure) {
@@ -278,8 +282,11 @@ bool SDPSession::updateSDP(const NamedList& params, bool defaults)
 		if (!param)
 		    continue;
 		tmp = param->name();
-		if (tmp.startSkip(prefix,false) && (tmp.find('_') < 0))
+		if (tmp.startSkip(prefix,false) && (tmp.find('_') < 0)) {
+		    DDebug(m_enabler,DebugInfo,"%s (SDP update) %s parameter '%s' to '%s' [%p]",
+			append ? "Adding" : "Updating",rtp->c_str(),tmp.c_str(),param->c_str(),this);
 		    rtp->parameter(tmp,*param,append);
+		}
 	    }
 	}
 	if (!lst)
@@ -756,8 +763,8 @@ void SDPSession::updateFormats(const NamedList& msg, bool changeMedia)
 	    continue;
 	SDPMedia* rtp = static_cast<SDPMedia*>(m_rtpMedia->operator[](media));
 	if (rtp) {
-	    DDebug(m_enabler,DebugInfo,"Updating %s parameter '%s' to '%s'",
-		media.c_str(),tmp.c_str(),param->c_str());
+	    DDebug(m_enabler,DebugInfo,"Updating (formats update) %s parameter '%s' to '%s' [%p]",
+		media.c_str(),tmp.c_str(),param->c_str(),this);
 	    rtp->parameter(tmp,*param,false);
 	}
     }
