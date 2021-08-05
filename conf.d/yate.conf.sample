@@ -116,6 +116,18 @@
 ; agesniff: float: Display only messages whose age or delay is higher than this value
 ;agesniff=0
 
+; filtersniffparams: string: Default parameter(s) filter to apply to message sniffer at initialization
+; If empty it will not attempt to match message parameters
+; Format: [any] param1=value1 [param2=value2 ...]
+; 'any' indicates that message matches if at least one configured parameter matches
+; Value to match is handled as regexp. It may end with '^' to revert match (i.e. matches if regexp don't match)
+; Value may be empty. In this case the parameter matches if missing in message or present with empty value
+; Example for a filter matching messages with empty route_type or route_type=call
+;  filtersniffparams=route_type=^\(call\)\?$
+; Example for a filter matching message with caller=123 or called=123
+;  filtersniffparams=any caller=^123$ called=^123$
+;filtersniffparams=
+
 
 [modules]
 ; This section should hold one line for each module whose loading behaviour
