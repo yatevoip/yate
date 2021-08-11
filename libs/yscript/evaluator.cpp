@@ -578,45 +578,53 @@ const char* ExpEvaluator::getOperator(ExpEvaluator::Opcode oper) const
 int ExpEvaluator::getPrecedence(ExpEvaluator::Opcode oper) const
 {
     switch (oper) {
-	case OpcIncPre:
-	case OpcDecPre:
 	case OpcIncPost:
 	case OpcDecPost:
-	    return 120;
+	    return 180;
+	case OpcIncPre:
+	case OpcDecPre:
+	    return 175;
 	case OpcNeg:
 	case OpcNot:
 	case OpcLNot:
-	    return 110;
+	    return 170;
 	case OpcMul:
 	case OpcDiv:
 	case OpcMod:
-	case OpcAnd:
-	    return 100;
+	    return 150;
 	case OpcAdd:
 	case OpcSub:
-	case OpcOr:
-	case OpcXor:
-	    return 90;
+	    return 140;
 	case OpcShl:
 	case OpcShr:
-	    return 80;
+	    return 130;
 	case OpcCat:
-	    return 70;
-	// ANY, ALL, SOME = 60
+	    return 125;
 	case OpcLt:
 	case OpcGt:
 	case OpcLe:
 	case OpcGe:
-	    return 50;
+	    return 120;
 	case OpcEq:
 	case OpcNe:
-	    return 40;
-	// IN, BETWEEN, LIKE, MATCHES = 30
+	    return 110;
+	case OpcAnd:
+	    return 100;
+	case OpcXor:
+	    return 90;
+	case OpcOr:
+	    return 80;
 	case OpcLAnd:
-	    return 20;
+	    return 70;
 	case OpcLOr:
 	case OpcLXor:
-	    return 10;
+	    return 60;
+	case OpcNullish:
+	    return 50;
+	case OpcCond:
+	    return 40;
+	case OpcAs:
+	    return 5;
 	default:
 	    return 0;
     }
@@ -632,6 +640,7 @@ bool ExpEvaluator::getRightAssoc(ExpEvaluator::Opcode oper) const
 	case OpcNeg:
 	case OpcNot:
 	case OpcLNot:
+	case OpcCond:
 	    return true;
 	default:
 	    return false;
