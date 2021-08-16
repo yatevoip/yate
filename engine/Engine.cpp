@@ -632,6 +632,8 @@ static const char s_logvOpt[] = "  logview\r\n";
 static const char s_logvMsg[] = "Show log of engine startup and initialization process\r\n";
 static const char s_runpOpt[] = "  runparam name=value\r\n";
 static const char s_runpMsg[] = "Add a new parameter to the Engine's runtime list\r\n";
+static const char s_dispatcherOpt[] = "  dispatcher {trace_msg_time|trace_msg_handler_time} <on|off>\r\n";
+static const char s_dispatcherMsg[] = "Enable or disable dispatcher debugging options\r\n";
 
 // get the base name of a module file
 static String moduleBase(const String& fname)
@@ -738,6 +740,7 @@ void EngineCommand::doCompletion(Message &msg, const String& partLine, const Str
 	completeOne(msg.retValue(),"events",partWord);
 	completeOne(msg.retValue(),"logview",partWord);
 	completeOne(msg.retValue(),"runparam",partWord);
+	completeOne(msg.retValue(),"dispatcher",partWord);
     }
     else if (partLine == YSTRING("status")) {
 	completeOne(msg.retValue(),"engine",partWord);
@@ -781,6 +784,15 @@ void EngineCommand::doCompletion(Message &msg, const String& partLine, const Str
 	completeOne(msg.retValue(),"log",partWord);
 	if (partLine == YSTRING("events"))
 	    completeOne(msg.retValue(),"clear",partWord);
+    }
+    else if (partLine == YSTRING("dispatcher")) {
+	completeOne(msg.retValue(),"trace_msg_time",partWord);
+	completeOne(msg.retValue(),"trace_msg_handler_time",partWord);
+    }
+    else if ((partLine == YSTRING("dispatcher trace_msg_time"))
+	|| (partLine == YSTRING("dispatcher trace_msg_handler_time"))) {
+	completeOne(msg.retValue(),"on",partWord);
+	completeOne(msg.retValue(),"off",partWord);
     }
 }
 
@@ -852,6 +864,19 @@ bool EngineCommand::received(Message &msg)
 		}
 		return true;
 	    }
+	    return false;
+	}
+	if (line.startSkip("dispatcher trace_msg_time")) {
+	    MessageDispatcher* d = Engine::dispatcher();
+	    if (d)
+		d->traceTime(line.toBoolean());
+	    return 0 != d;
+	}
+	if (line.startSkip("dispatcher trace_msg_handler_time")) {
+	    MessageDispatcher* d = Engine::dispatcher();
+	    if (d)
+		d->traceHandlerTime(line.toBoolean());
+	    return 0 != d;
 	}
 	return false;
     }
@@ -920,7 +945,7 @@ bool EngineHelp::received(Message &msg)
     const char* opts = (s_nounload ? s_cmdsOptNoUnload : s_cmdsOpt);
     String line = msg.getValue("line");
     if (line.null()) {
-	msg.retValue() << opts << s_evtsOpt << s_logvOpt << s_runpOpt;
+	msg.retValue() << opts << s_evtsOpt << s_logvOpt << s_runpOpt << s_dispatcherOpt;
 	return false;
     }
     if (line == YSTRING("module"))
@@ -931,6 +956,8 @@ bool EngineHelp::received(Message &msg)
 	msg.retValue() << s_logvOpt << s_logvMsg;
     else if (line == YSTRING("runparam"))
 	msg.retValue() << s_runpOpt << s_runpMsg;
+    else if (line == YSTRING("dispatcher"))
+	msg.retValue() << s_dispatcherOpt << s_dispatcherMsg;
     else
 	return false;
     return true;
@@ -1555,6 +1582,8 @@ int Engine::engineInit()
 	s_timejump = MIN_TIME_JUMP;
     s_timejump *= 1000;
     m_dispatcher.warnTime(1000*(u_int64_t)s_cfg.getIntValue("general","warntime"));
+    m_dispatcher.traceTime(s_cfg.getBoolValue("general","trace_msg_time"));
+    m_dispatcher.traceHandlerTime(s_cfg.getBoolValue("general","trace_msg_handler_time"));
     extraPath(clientMode() ? "client" : "server");
     extraPath(s_cfg.getValue("general","extrapath"));
 

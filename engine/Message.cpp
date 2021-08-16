@@ -37,7 +37,8 @@ private:
 
 Message::Message(const char* name, const char* retval, bool broadcast)
     : NamedList(name),
-      m_return(retval), m_data(0), m_notify(false), m_broadcast(broadcast)
+      m_return(retval), m_timeEnqueue((uint64_t)0), m_timeDispatch((uint64_t)0),
+      m_data(0), m_notify(false), m_broadcast(broadcast)
 {
     XDebug(DebugAll,"Message::Message(\"%s\",\"%s\",%s) [%p]",
 	name,retval,String::boolText(broadcast),this);
@@ -46,7 +47,9 @@ Message::Message(const char* name, const char* retval, bool broadcast)
 Message::Message(const Message& original)
     : NamedList(original),
       m_return(original.retValue()), m_time(original.msgTime()),
-      m_data(0), m_notify(false), m_broadcast(original.broadcast())
+      m_timeEnqueue(original.m_timeEnqueue), m_timeDispatch(original.m_timeDispatch),
+      m_data(0),
+      m_notify(false), m_broadcast(original.broadcast())
 {
     XDebug(DebugAll,"Message::Message(&%p) [%p]",&original,this);
 }
@@ -54,7 +57,9 @@ Message::Message(const Message& original)
 Message::Message(const Message& original, bool broadcast)
     : NamedList(original),
       m_return(original.retValue()), m_time(original.msgTime()),
-      m_data(0), m_notify(false), m_broadcast(broadcast)
+      m_timeEnqueue(original.m_timeEnqueue), m_timeDispatch(original.m_timeDispatch),
+      m_data(0),
+      m_notify(false), m_broadcast(broadcast)
 {
     XDebug(DebugAll,"Message::Message(&%p,%s) [%p]",
 	&original,String::boolText(broadcast),this);
@@ -93,6 +98,14 @@ void Message::dispatched(bool accepted)
     MessageNotifier* hook = YOBJECT(MessageNotifier,m_data);
     if (hook)
 	hook->dispatched(*this,accepted);
+}
+
+void Message::resetMsg(Time tm)
+{
+    m_return.clear();
+    m_time = m_timeEnqueue = m_timeDispatch = tm;
+    if (Engine::trackParam())
+	clearParam(Engine::trackParam());
 }
 
 String Message::encode(const char* id) const
@@ -304,6 +317,7 @@ MessageDispatcher::MessageDispatcher(const char* trackParam)
       m_trackParam(trackParam), m_changes(0), m_warnTime(0),
       m_enqueueCount(0), m_dequeueCount(0), m_dispatchCount(0),
       m_queuedMax(0), m_msgAvgAge(0),
+      m_traceTime(false), m_traceHandlerTime(false),
       m_hookCount(0), m_hookHole(false)
 {
     XDebug(DebugInfo,"MessageDispatcher::MessageDispatcher('%s') [%p]",trackParam,this);
@@ -386,11 +400,21 @@ bool MessageDispatcher::dispatch(Message& msg)
     Debugger debug("MessageDispatcher::dispatch","(%p) (\"%s\")",&msg,msg.c_str());
 #endif
 
-    u_int64_t t = m_warnTime ? Time::now() : 0;
+    u_int64_t t = 0;
+    if (m_warnTime || m_traceTime) {
+	Time now;
+	if (m_warnTime)
+	    t = now;
+	if (m_traceTime)
+	    msg.m_timeDispatch = now;
+    }
 
     bool retv = false;
     bool counting = getObjCounting();
     NamedCounter* saved = Thread::getCurrentObjCounter(counting);
+    String hTrackName;
+    unsigned int hTrackPos = 0;
+    bool hTrackTime = m_traceHandlerTime;
     ObjList *l = &m_handlers;
     Lock mylock(this);
     m_dispatchCount++;
@@ -416,23 +440,43 @@ bool MessageDispatcher::dispatch(Message& msg)
 		    tracked->append(h->trackName(),",");
 		else
 		    msg.addParam(trackParam(),h->trackName());
+		if (hTrackTime) {
+		    hTrackName = h->trackName();
+		    hTrackPos = tracked ? tracked->length() : hTrackName.length();
+		}
 	    }
 	    // mark handler as unsafe to destroy / uninstall
 	    h->m_unsafe++;
 	    mylock.drop();
 
-	    u_int64_t tm = m_warnTime ? Time::now() : 0;
+	    u_int64_t tm = (m_warnTime || hTrackTime) ? Time::now() : 0;
 
 	    retv = h->receivedInternal(msg) || retv;
 
 	    if (tm) {
 		tm = Time::now() - tm;
-		if (tm > m_warnTime) {
+		if (m_warnTime && tm > m_warnTime) {
 		    mylock.acquire(this);
 		    const char* name = (c == m_changes) ? h->trackName().c_str() : 0;
 		    Debug(DebugInfo,"Message '%s' [%p] passed through %p%s%s%s in " FMT64U " usec",
 			msg.c_str(),&msg,h,
 			(name ? " '" : ""),(name ? name : ""),(name ? "'" : ""),tm);
+		}
+		if (hTrackTime && hTrackName) {
+		    NamedString* tracked = msg.getParam(trackParam());
+		    unsigned int start = hTrackPos - hTrackName.length();
+		    if (tracked && start < tracked->length()) {
+			if (0 == ::strncmp(tracked->c_str() + start,hTrackName.c_str(),hTrackName.length())) {
+			    String buf;
+			    buf.printf("#%u.%03u",(unsigned int)(tm / 1000),
+				(unsigned int)(tm % 1000));
+			    char c = (*tracked)[hTrackPos];
+			    if (!c)
+				*tracked << buf;
+			    else if (',' == c) // Message re-dispatched. New handler name added
+				tracked->insert(hTrackPos,buf,buf.length());
+			}
+		    }
 		}
 	    }
 
@@ -529,6 +573,8 @@ bool MessageDispatcher::enqueue(Message* msg)
     Lock lock(this);
     if (!msg || m_messages.find(msg))
 	return false;
+    if (m_traceTime)
+	msg->m_timeEnqueue = Time::now();
     m_msgAppend = m_msgAppend->append(msg);
     u_int64_t count = (++m_enqueueCount) - m_dequeueCount;
     if (m_queuedMax < count)

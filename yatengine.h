@@ -403,6 +403,13 @@ public:
 	{ return m_broadcast; }
 
     /**
+     * Reset message. This method should be used when message is going to be re-dispatched.
+     * Reset message time, track param, return value.
+     * @param tm Time to set, defaults to current time
+     */
+    void resetMsg(Time tm = Time::now());
+
+    /**
      * Retrieve a reference to the creation time of the message.
      * @return A reference to the @ref Time when the message was created
      */
@@ -415,6 +422,38 @@ public:
      */
     inline const Time& msgTime() const
 	{ return m_time; }
+
+    /**
+     * Retrieve a reference to the time when message was put in dispatcher.
+     * @return A reference to the @ref Time when the message was put in dispatcher queue.
+     * May be 0 if the message was not put in queue or time tracking is not enabled in dispatcher
+     */
+    inline Time& msgTimeEnqueue()
+	{ return m_timeEnqueue; }
+
+    /**
+     * Retrieve a const reference to the time when message was put in dispatcher.
+     * @return A reference to the @ref Time when the message was put in dispatcher queue.
+     * May be 0 if the message was not put in queue or time tracking is not enabled in dispatcher
+     */
+    inline const Time& msgTimeEnqueue() const
+	{ return m_timeEnqueue; }
+
+    /**
+     * Retrieve a reference to the time when message was dispatched.
+     * @return A reference to the @ref Time when the message was dispatched
+     * May be 0 if the message was not dispatched yet or time tracking is not enabled in dispatcher
+     */
+    inline Time& msgTimeDispatch()
+	{ return m_timeDispatch; }
+
+    /**
+     * Retrieve a const reference to the time when message was dispatched.
+     * @return A reference to the @ref Time when the message was dispatched
+     * May be 0 if the message was not dispatched yet or time tracking is not enabled in dispatcher
+     */
+    inline const Time& msgTimeDispatch() const
+	{ return m_timeDispatch; }
 
     /**
      * Name assignment operator
@@ -472,6 +511,8 @@ private:
     Message& operator=(const Message& value); // no assignment please
     String m_return;
     Time m_time;
+    Time m_timeEnqueue;
+    Time m_timeDispatch;
     RefObject* m_data;
     bool m_notify;
     bool m_broadcast;
@@ -791,6 +832,20 @@ public:
 	{ m_warnTime = usec; }
 
     /**
+     * Enable or disable message events time (queued / dispatch)
+     * @param on True to enable, false to disable
+     */
+    inline void traceTime(bool on = false)
+	{ m_traceTime = on; }
+
+    /**
+     * Enable or disable message handler duration
+     * @param on True to enable, false to disable
+     */
+    inline void traceHandlerTime(bool on = false)
+	{ m_traceHandlerTime = on; }
+
+    /**
      * Clear all the message handlers and post-dispatch hooks
      */
     inline void clear()
@@ -910,6 +965,8 @@ private:
     u_int64_t m_dispatchCount;
     u_int64_t m_queuedMax;
     u_int64_t m_msgAvgAge;
+    bool m_traceTime;
+    bool m_traceHandlerTime;
     int m_hookCount;
     bool m_hookHole;
 };
@@ -1669,6 +1726,13 @@ public:
      * @return Halt code
      */
     static int cleanupLibrary();
+
+    /**
+     * Retrieve common Engine dispatcher
+     * @return MessageDispatcher pointer, NULL if not set
+     */
+    static inline MessageDispatcher* dispatcher()
+	{ return s_self ? &(s_self->m_dispatcher) : 0; }
 
 protected:
     /**

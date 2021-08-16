@@ -128,6 +128,15 @@
 ;  filtersniffparams=any caller=^123$ called=^123$
 ;filtersniffparams=
 
+; trace_msg_time: boolean: Instruct message dispatcher to set message event(s) time (enqueue / dispatch)
+;trace_msg_time=no
+
+; trace_msg_handler_time: boolean: Enable message dispatcher to trace the time spent by a
+;  message handler to process a message
+; Add the time in message handlers parameter
+; The time will be added to message handler name as #<MSEC>.<USEC>
+;trace_msg_handler_time=no
+
 
 [modules]
 ; This section should hold one line for each module whose loading behaviour
