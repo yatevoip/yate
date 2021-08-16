@@ -1219,6 +1219,42 @@ String& String::append(double value, unsigned int decimals)
     return operator+=(buf);
 }
 
+String& String::insert(unsigned int pos, const char* value, int len)
+{
+    if (!(value && *value && len))
+	return *this;
+    if (pos >= length())
+	return append(value,len);
+    if (len < 0)
+	len = ::strlen(value);
+    if (!len)
+	return *this;
+
+    int olen = length();
+    int sLen = len + olen;
+    char* tmp1 = m_string;
+    char* tmp2 = (char*)::malloc(sLen + 1);
+    if (!tmp2) {
+	Debug("String",DebugFail,"malloc(%d) returned NULL!",sLen + 1);
+	return *this;
+    }
+    if (!pos) {
+	::strncpy(tmp2,value,len);
+	::strncpy(tmp2 + len,m_string,olen);
+    }
+    else {
+	::strncpy(tmp2,m_string,pos);
+	::strncpy(tmp2 + pos,value,len);
+	::strncpy(tmp2 + pos + len,m_string + pos,olen - pos);
+    }
+    tmp2[sLen] = 0;
+    m_string = tmp2;
+    m_length = sLen;
+    ::free(tmp1);
+    changed();
+    return *this;
+}
+
 static char* string_printf(unsigned int& length, const char* format, va_list& va)
 {
     if (TelEngine::null(format) || !length)

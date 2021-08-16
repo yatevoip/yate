@@ -2828,6 +2828,28 @@ public:
     String& append(double value, unsigned int decimals = 3);
 
     /**
+     * Insert a string into current string
+     * @param pos Position to insert. String will be appended if position is greater than curent length
+     * @param value String to insert
+     * @param len Length of the data to copy, -1 for full string
+     * @return Reference to the String
+     */
+    String& insert(unsigned int pos, const char* value, int len = -1);
+
+    /**
+     * Insert a character into current string
+     * @param pos Position to insert. The character will be appended if position is greater than curent length
+     * @param value Character to insert. NUL character will be ignored
+     * @return Reference to the String
+     */
+    inline String& insert(unsigned int pos, char value) {
+	    if (!value)
+		return *this;
+	    char s[] = {value};
+	    return insert(pos,s,1);
+	}
+
+    /**
      * Build a String in a printf style.
      * @param format The output format.
      * NOTE: The length of the resulting string will be at most 128 + length of format
