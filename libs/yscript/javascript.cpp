@@ -2072,14 +2072,14 @@ int JsCode::getPrecedence(ExpEvaluator::Opcode oper) const
     switch ((int)oper) {
 	case OpcEqIdentity:
 	case OpcNeIdentity:
-	    return 40;
+	    return 110;
 	case OpcDelete:
 	case OpcNew:
 	case OpcTypeof:
-	    return 110;
+	    return 170;
 	case OpcFieldOf:
 	case OpcIndex:
-	    return 140;
+	    return 200;
 	default:
 	    return ExpEvaluator::getPrecedence(oper);
     }
