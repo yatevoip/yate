@@ -295,14 +295,21 @@ bool SniffHandler::received(Message &msg)
     u_int64_t dt = Time::now() - mt;
     if (s_minAge && (dt < s_minAge))
 	return false;
+    String extra;
+    if (msg.msgTimeEnqueue() && msg.msgTimeDispatch() > msg.msgTimeEnqueue()) {
+	uint64_t dur = msg.msgTimeDispatch() - msg.msgTimeEnqueue();
+	extra.printf(" queued=%u.%06u",(unsigned int)(dur / 1000000),
+	    (unsigned int)(dur % 1000000));
+    }
     String par;
     dumpParams(msg,par);
-    Output("Sniffed '%s' time=%u.%06u age=%u.%06u%s\r\n  thread=%p '%s'\r\n  data=%p\r\n  retval='%s'%s",
+    Output("Sniffed '%s' time=%u.%06u age=%u.%06u%s%s\r\n  thread=%p '%s'\r\n  data=%p\r\n  retval='%s'%s",
 	msg.c_str(),
 	(unsigned int)(mt / 1000000),
 	(unsigned int)(mt % 1000000),
 	(unsigned int)(dt / 1000000),
 	(unsigned int)(dt % 1000000),
+	extra.safe(),
 	(msg.broadcast() ? " (broadcast)" : ""),
 	Thread::current(),
 	Thread::currentName(),
