@@ -160,7 +160,7 @@ public:
 	}
     inline bool filterMatches(const Message& msg) {
 	    RefPointer<SniffMatch> flt;
-	    return getFilter(flt) && flt->matches(msg);
+	    return !getFilter(flt) || flt->matches(msg);
 	}
 
 private:
