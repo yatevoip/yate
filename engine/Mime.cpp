@@ -437,7 +437,7 @@ const DataBlock& MimeBody::getBody() const
     return m_body;
 }
 
-static const Regexp s_appStringFull("^dtmf\\|json\\|yaml\\|x-yaml$");
+static const Regexp s_appStringFull("^\\(dtmf\\|json\\|yaml\\|x-yaml\\)$");
 static const Regexp s_appStringPlusEnd("+\\(xml\\|json\\)$");
 
 // Method to build a MIME body from a type and data buffer
