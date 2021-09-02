@@ -8025,17 +8025,16 @@ bool YateSIPConnection::msgTone(Message& msg, const char* tone)
     }
     bool retVal = false;
     bool ok = false;
+    int skipMeth = DtmfMethods::MethodCount;
     if (msg.getBoolValue(YSTRING("honor_dtmf_detect"),m_honorDtmfDetect)) {
 	const String& detected = msg[YSTRING("detected")];
-	int meth = lookup(detected,DtmfMethods::s_methodName,DtmfMethods::MethodCount);
-	if (meth != DtmfMethods::MethodCount && methods.hasMethod(meth)) {
-	    ok = sendTone(msg,tone,meth,retVal);
-	    methods.reset(meth);
-	}
+	skipMeth = lookup(detected,DtmfMethods::s_methodName,DtmfMethods::MethodCount);
+	if (skipMeth != DtmfMethods::MethodCount && methods.hasMethod(skipMeth))
+	    ok = sendTone(msg,tone,skipMeth,retVal);
     }
     for (int i = 0; !ok && i < DtmfMethods::MethodCount; i++) {
 	int meth = methods[i];
-	if (meth != DtmfMethods::MethodCount)
+	if (meth != DtmfMethods::MethodCount && meth != skipMeth)
 	    ok = sendTone(msg,tone,meth,retVal);
     }
     if (!ok && debugAt(DebugNote)) {
