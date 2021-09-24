@@ -31,74 +31,148 @@ namespace { // anonymous
 #define BLOCK_STACK 10
 #define MAX_VAR_LEN 8100
 
-static Configuration s_cfg;
-static const char* s_trackName = 0;
-static bool s_extended;
-static bool s_insensitive;
+class RegexConfig;
+class GenericHandler;
+class RouteHandler;
+class PrerouteHandler;
+class StatusHandler;
+class CommandHandler;
+
+
+static RegexConfig* s_cfg;
 static bool s_prerouteall;
-static int s_maxDepth = 5;
-static String s_defRule;
 static Mutex s_mutex(true,"RegexRoute");
 static ObjList s_extra;
+
 static NamedList s_vars("");
-static int s_dispatching = 0;
+static Mutex s_varsMtx(true,"RegexRouteVars");
 
+static NamedCounter s_dispatching("dispatching");
+static NamedCounter s_processing("processing");
+static NamedCounter s_serial("serial_number");
 
-class RouteHandler : public MessageHandler
-{
-public:
-    RouteHandler(int prio)
-	: MessageHandler("call.route",prio,s_trackName)
-	{ }
-    virtual bool received(Message &msg);
-};
+PrerouteHandler* s_preroute = 0;
+RouteHandler* s_route = 0;
+StatusHandler* s_status = 0;
+CommandHandler* s_command = 0;
 
-class PrerouteHandler : public MessageHandler
-{
-public:
-    PrerouteHandler(int prio)
-	: MessageHandler("call.preroute",prio,s_trackName)
-	{ }
-    virtual bool received(Message &msg);
-};
-
-class StatusHandler : public MessageHandler
-{
-public:
-    StatusHandler(int prio)
-	: MessageHandler("engine.status",prio,s_trackName)
-	{ }
-    virtual bool received(Message &msg);
-};
-
-class CommandHandler : public MessageHandler
-{
-public:
-    CommandHandler(int prio)
-	: MessageHandler("engine.command",prio,s_trackName)
-	{ }
-    virtual bool received(Message &msg);
-};
 
 class GenericHandler : public MessageHandler
 {
 public:
-    GenericHandler(const char* name, int prio, const char* context, const char* match)
-	: MessageHandler(name,prio,s_trackName),
-	  m_context(context), m_match(match)
-	{
-	    Debug(DebugAll,"Generic handler for '%s' prio %d to [%s] match '%s%s%s' [%p]",
-		c_str(),prio,context,
-		(match ? "${" : ""),(match ? match : c_str()),(match ? "}" : ""),
-		this);
+    GenericHandler(const char* name, int prio, const char* context, const char* match,
+		const char* trackName, bool addToExtra = true)
+	: MessageHandler(name,prio,trackName),
+	  m_context(context), m_match(match), m_serial(0), m_inExtra(addToExtra)
+    {
+	DDebug("RegexRoute",DebugAll,"Creating generic handler for '%s' prio %d to [%s] match '%s%s%s', track name '%s' [%p]",
+	    toString().c_str(),prio,TelEngine::c_safe(context),
+	    (match ? "${" : ""),(match ? match : toString().c_str()),(match ? "}" : ""),
+	    TelEngine::c_safe(trackName),this);
+	m_hash = getHash(name,prio,context,match,trackName);
+	if (addToExtra) {
+	    Lock l(s_mutex);
 	    s_extra.append(this);
 	}
+	updateSerial();
+    }
     ~GenericHandler()
-	{ s_extra.remove(this,false); }
+    {
+	DDebug("RegexRoute",DebugAll,"Destroying generic handler for '%s' prio %d to [%s] match '%s', track name '%s' [%p]",
+		toString().c_str(),priority(),m_context.c_str(),m_match.c_str(),
+		trackName().c_str(),this);
+	if (m_inExtra) {
+	    Lock l(s_mutex);
+	    s_extra.remove(this,false);
+	}
+    }
     virtual bool received(Message &msg);
+    inline bool sameHash(unsigned int hash) const
+	{ return m_hash == hash; }
+    inline unsigned int serial() const
+	{ return m_serial; }
+    inline void updateSerial()
+	{ m_serial = s_serial.count(); }
+    static inline unsigned int getHash(const char* name, int prio, const char* context,
+	const char* match, const char* trackName)
+	{  return String::hash(String(name) << prio << context << match << trackName); }
+
 private:
     String m_context;
     String m_match;
+    unsigned int m_hash;
+    unsigned int m_serial;
+    bool m_inExtra;
+};
+
+class RouteHandler : public GenericHandler
+{
+public:
+    RouteHandler(int prio, const char* trackName)
+	: GenericHandler("call.route",prio,0,0,trackName,false)
+	{ }
+    virtual bool received(Message &msg);
+};
+
+class PrerouteHandler : public GenericHandler
+{
+public:
+    PrerouteHandler(int prio, const char* trackName)
+	: GenericHandler("call.preroute",prio,0,0,trackName,false)
+	{ }
+    virtual bool received(Message &msg);
+};
+
+class StatusHandler : public GenericHandler
+{
+public:
+    StatusHandler(int prio, const char* trackName)
+	: GenericHandler("engine.status",prio,0,0,trackName,false)
+	{ }
+    virtual bool received(Message &msg);
+};
+
+class CommandHandler : public GenericHandler
+{
+public:
+    CommandHandler(int prio, const char* trackName)
+	: GenericHandler("engine.command",prio,0,0,trackName,false)
+	{ }
+    virtual bool received(Message &msg);
+};
+
+class RegexConfig: public RefObject
+{
+public:
+    enum BlockState {
+	BlockRun  = 0,
+	BlockSkip = 1,
+	BlockDone = 2
+    };
+    RegexConfig(const String& confName)
+	: m_extended(false), m_insensitive(false),
+	  m_maxDepth(5)
+    {
+	Debug("RegexRoute",DebugAll,"Creating new RegexConfig for configuration name '%s' [%p]",
+	    confName.c_str(),this);
+	m_cfg = confName;
+    }
+    void initialize(bool first);
+    void setDefault(Regexp& reg);
+    bool oneMatch(Message& msg, Regexp& reg, String& match, const String& context,
+        unsigned int rule, const String& trace = String::empty(), ObjList* traceLst = 0);
+    bool oneContext(Message &msg, String &str, const String &context, String &ret,
+	const String& trace = String::empty(), int traceLevel = DebugNote, ObjList* traceLst = 0,
+	bool warn = false, int depth = 0);
+    inline unsigned int sectCount() const
+	{ return m_cfg.count(); }
+
+private:
+    Configuration m_cfg;
+    bool m_extended;
+    bool m_insensitive;
+    int m_maxDepth;
+    String m_defRule;
 };
 
 class RegexRoutePlugin : public Plugin
@@ -106,17 +180,12 @@ class RegexRoutePlugin : public Plugin
 public:
     RegexRoutePlugin();
     virtual void initialize();
-private:
     void initVars(NamedList* sect);
-    PrerouteHandler* m_preroute;
-    RouteHandler* m_route;
-    StatusHandler* m_status;
-    CommandHandler* m_command;
+private:
     bool m_first;
 };
 
 INIT_PLUGIN(RegexRoutePlugin);
-
 
 static String& vars(String& s, String* vName = 0)
 {
@@ -124,7 +193,9 @@ static String& vars(String& s, String* vName = 0)
 	s.trimBlanks();
 	if (vName)
 	    *vName = s;
+	s_varsMtx.lock();
 	s = s_vars.getValue(s);
+	s_varsMtx.unlock();
     }
     return s;
 }
@@ -149,6 +220,7 @@ static void mathOper(String& str, String& par, int sep, int oper)
     par = par.substr(sep+1);
     int len = str.length();
     sep = par.find(',');
+    s_varsMtx.lock();
     if (sep >= 0) {
 	String tmp = par.substr(sep+1);
 	len = vars(tmp).toInteger();
@@ -156,6 +228,7 @@ static void mathOper(String& str, String& par, int sep, int oper)
     }
     int p1 = vars(str).toInteger(0,10);
     int p2 = vars(par).toInteger(0,10);
+    s_varsMtx.unlock();
     switch (oper) {
 	case OPER_ADD:
 	    str = p1+p2;
@@ -216,12 +289,14 @@ static void evalFunc(String& str, Message& msg)
 	;
     else if (str.startSkip("++",false)) {
 	String tmp;
+	Lock lck(s_varsMtx);
 	str = vars(str,&tmp).toInteger(0,10) + 1;
 	if (tmp)
 	    s_vars.setParam(tmp,str);
     }
     else if (str.startSkip("--",false)) {
 	String tmp;
+	Lock lck(s_varsMtx);
 	str = vars(str,&tmp).toInteger(0,10) - 1;
 	if (tmp)
 	    s_vars.setParam(tmp,str);
@@ -248,16 +323,20 @@ static void evalFunc(String& str, Message& msg)
 	    bool ret = (str == YSTRING("strne"));
 	    str = par.substr(sep+1);
 	    par = par.substr(0,sep);
+	    s_varsMtx.lock();
 	    vars(str);
 	    vars(par);
+	    s_varsMtx.unlock();
 	    ret ^= (str == par);
 	    str = ret;
 	}
 	else if ((sep >= 0) && (str == YSTRING("strpos"))) {
 	    str = par.substr(sep+1);
 	    par = par.substr(0,sep);
+	    s_varsMtx.lock();
 	    vars(str);
 	    vars(par);
+	    s_varsMtx.unlock();
 	    str = str.find(par);
 	}
 	else if ((sep >= 0) && ((str == "add") || (str == "+")))
@@ -330,6 +409,7 @@ static void evalFunc(String& str, Message& msg)
 	    String vname;
 	    str = par.substr(0,sep);
 	    par = par.substr(sep+1).trimBlanks();
+	    Lock lck(s_varsMtx);
 	    int idx = vars(str,&vname).toInteger(0,10);
 	    ObjList* lst = par.split(',');
 	    str.clear();
@@ -405,13 +485,16 @@ static void evalFunc(String& str, Message& msg)
 	    }
 	    else
 		str.clear();
-	    if (par.null() || par == YSTRING("count"))
+	    if (par.null() || par == YSTRING("count")) {
+		Lock l(s_varsMtx);
 		str = s_vars.count();
+	    }
 	    else if (par == YSTRING("list")) {
 		par = str;
 		if (par.null())
 		    par = ",";
 		str.clear();
+		Lock l(s_varsMtx);
 		for (const ObjList* l = s_vars.paramList()->skipNull(); l; l = l->skipNext()) {
 		    if (str.length() > MAX_VAR_LEN) {
 			Debug("RegexRoute",DebugWarn,"Truncating output of $(variables,list)");
@@ -421,8 +504,10 @@ static void evalFunc(String& str, Message& msg)
 		    str.append(static_cast<const NamedString*>(l->get())->name(),par);
 		}
 	    }
-	    else
+	    else {
+		Lock l(s_varsMtx);
 		str = !!s_vars.getParam(par);
+	    }
 	}
 	else if (str == YSTRING("runid")) {
 	    str.clear();
@@ -446,14 +531,16 @@ static void evalFunc(String& str, Message& msg)
 	    TelEngine::destruct(fmts);
 	}
 	else if (str == YSTRING("dispatching"))
-	    str = s_dispatching;
+	    str = s_dispatching.count();
 	else if (str == YSTRING("timestamp")) {
 	    char buf[32];
 	    Debugger::formatTime(buf);
 	    str = buf;
 	}
-	else if (bare && str.trimBlanks())
+	else if (bare && str.trimBlanks()) {
+	    Lock l(s_varsMtx);
 	    str = s_vars.getValue(str);
+	}
 	else {
 	    Debug("RegexRoute",DebugWarn,"Invalid function '%s'",str.c_str());
 	    str.clear();
@@ -491,6 +578,7 @@ static void setMessage(const String& match, Message& msg, String& line, Message*
     bool first = true;
     for (ObjList *p = strs; p; p=p->next()) {
 	String *s = static_cast<String*>(p->get());
+	Lock l(s_varsMtx);
 	if (s) {
 	    *s = match.replaceMatches(*s);
 	    msg.replaceParams(*s);
@@ -526,19 +614,135 @@ static void setMessage(const String& match, Message& msg, String& line, Message*
     strs->destruct();
 }
 
-// helper function to set the default regexp
-static void setDefault(Regexp& reg)
+#define CHECK_HANDLER(handler,classType,name,priority,trackName) \
+do { \
+    if (!handler) \
+	Engine::install(handler = new classType(priority,trackName)); \
+    else { \
+	unsigned int hash = GenericHandler::getHash(name,priority,0,0,trackName); \
+	if (!handler->sameHash(hash)) { \
+	    classType* tmp = handler; \
+	    Engine::install(handler = new classType(priority,trackName)); \
+	    TelEngine::destruct(tmp); \
+	} \
+    } \
+} while(false);
+
+static GenericHandler* findHandler(unsigned int hash)
 {
-    if (s_defRule.null())
+    Lock l(s_mutex);
+    for (ObjList* o = s_extra.skipNull(); o; o = o->skipNext()) {
+	GenericHandler* h = static_cast<GenericHandler*>(o->get());
+	if (h->sameHash(hash))
+	    return h;
+    }
+    return 0;
+}
+
+void RegexConfig::initialize(bool first)
+{
+    m_cfg.load();
+    if (first)
+	__plugin.initVars(m_cfg.getSection("$once"));
+    __plugin.initVars(m_cfg.getSection("$init"));
+    s_prerouteall = m_cfg.getBoolValue("priorities","prerouteall",false);
+    m_extended = m_cfg.getBoolValue("priorities","extended",false);
+    m_insensitive = m_cfg.getBoolValue("priorities","insensitive",false);
+    int depth = m_cfg.getIntValue("priorities","maxdepth",5);
+    if (depth < 5)
+	depth = 5;
+    else if (depth > 100)
+	depth = 100;
+    m_maxDepth = depth;
+    m_defRule = m_cfg.getValue("priorities","defaultrule",DEFAULT_RULE);
+
+    const char* trackName = m_cfg.getBoolValue("priorities","trackparam",true) ?
+	__plugin.name().c_str() : (const char*)0;
+    unsigned priority = m_cfg.getIntValue("priorities","preroute",100);
+    if (priority) {
+	CHECK_HANDLER(s_preroute,PrerouteHandler,"call.preroute",priority,trackName);
+    }
+    else
+	TelEngine::destruct(s_preroute);
+    priority = m_cfg.getIntValue("priorities","route",100);
+    if (priority) {
+	CHECK_HANDLER(s_route,RouteHandler,"call.route",priority,trackName);
+    }
+    else
+	TelEngine::destruct(s_route);
+    priority = m_cfg.getIntValue("priorities","status",110);
+    if (priority) {
+	CHECK_HANDLER(s_status,StatusHandler,"engine.status",priority,trackName);
+	CHECK_HANDLER(s_command,CommandHandler,"engine.command",priority,trackName);
+    }
+    else {
+	TelEngine::destruct(s_status);
+	TelEngine::destruct(s_command);
+    }
+
+    NamedList* l = m_cfg.getSection("extra");
+    if (l) {
+	unsigned int len = l->length();
+	for (unsigned int i=0; i<len; i++) {
+	    NamedString* n = l->getParam(i);
+	    if (n) {
+		// message=priority[,[parameter][,context]]
+		ObjList* o = n->split(',');
+		const String* s = static_cast<const String*>(o->at(0));
+		int prio = s ? s->toInteger(100) : 100;
+		const char* match = TelEngine::c_str(static_cast<const String*>(o->at(1)));
+		const char* context = TelEngine::c_str(static_cast<const String*>(o->at(2)));
+		if (TelEngine::null(context))
+		    context = n->name().c_str();
+		// check if we have the same handler already installed
+		GenericHandler* old = findHandler(GenericHandler::getHash(n->name(),prio,context,match,trackName));
+		if (m_cfg.getSection(context)) {
+		    if (!old)
+			Engine::install(new GenericHandler(n->name(),prio,context,match,trackName));
+		    else
+			old->updateSerial();
+		}
+		else {
+		    Debug(DebugWarn,"Missing context [%s] for handling %s",context,n->name().c_str());
+		    TelEngine::destruct(old);
+		}
+		TelEngine::destruct(o);
+	    }
+	}
+    }
+    // Remove non-updated handlers
+    Lock lck(s_mutex);
+    for (ObjList* o = s_extra.skipNull(); o; ) {
+	GenericHandler* h = static_cast<GenericHandler*>(o->get());
+	if (h->serial() < (unsigned int)s_serial.count()) {
+	    lck.drop();
+	    Debug(DebugAll,"Removing handler '%s' (%p) on prio '%u' with serial number '%u', current serial number '%u'",
+		    h->toString().c_str(),h,h->priority(),h->serial(),s_serial.count());
+	    TelEngine::destruct(h);
+	    lck.acquire(s_mutex);
+	    o = o->skipNull();
+	    continue;
+	}
+	lck.acquire(s_mutex);
+	o = o->skipNext();
+    }
+}
+
+#undef CHECK_HANDLER
+
+// helper function to set the default regexp
+void RegexConfig::setDefault(Regexp& reg)
+{
+    if (m_defRule.null())
 	return;
     if (reg.null())
-	reg = s_defRule;
+	reg = m_defRule;
     else if (reg == "^") {
 	// deal with double '^' at end
-	if (s_defRule.endsWith("^"))
-	    reg.assign(s_defRule,s_defRule.length()-1);
+	if (m_defRule.endsWith("^"))
+	    reg.assign(m_defRule,m_defRule.length()-1);
 	else
-	    reg = s_defRule + reg;
+	    reg = m_defRule + reg;
     }
 }
 
@@ -574,8 +778,8 @@ do { \
 } while (false)
 
 // helper function to process one match attempt
-static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& context,
-        unsigned int rule, const String& trace = String::empty(), ObjList* traceLst = 0)
+bool RegexConfig::oneMatch(Message& msg, Regexp& reg, String& match, const String& context,
+        unsigned int rule, const String& trace, ObjList* traceLst)
 {
     if (reg.startsWith("${")) {
 	// handle special matching by param ${paramname}regexp
@@ -639,26 +843,19 @@ static bool oneMatch(Message& msg, Regexp& reg, String& match, const String& con
     return (match.matches(reg) == doMatch);
 }
 
-enum BlockState {
-    BlockRun  = 0,
-    BlockSkip = 1,
-    BlockDone = 2
-};
-
 // process one context, can call itself recursively
-static bool oneContext(Message &msg, String &str, const String &context, String &ret,
-    const String& trace = String::empty(), int traceLevel = DebugNote, ObjList* traceLst = 0,
-    bool warn = false, int depth = 0)
+bool RegexConfig::oneContext(Message &msg, String &str, const String &context, String &ret,
+    const String& trace, int traceLevel, ObjList* traceLst, bool warn, int depth)
 {
     if (context.null())
 	return false;
-    if (depth > s_maxDepth) {
+    if (depth > m_maxDepth) {
 	TRACE_DBG(DebugWarn,trace,traceLst,"Possible loop detected, current context '%s'",context.c_str());
 	return false;
     }
 
     TRACE_RULE(traceLevel,trace,traceLst,"Searching match for %s",str.c_str());
-    NamedList *l = s_cfg.getSection(context);
+    NamedList *l = m_cfg.getSection(context);
     if (l) {
 	unsigned int blockDepth = 0;
 	BlockState blockStack[BLOCK_STACK];
@@ -669,7 +866,7 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 		continue;
 	    BlockState blockThis = (blockDepth > 0) ? blockStack[blockDepth-1] : BlockRun;
 	    BlockState blockLast = BlockSkip;
-	    Regexp reg(n->name(),s_extended,s_insensitive);
+	    Regexp reg(n->name(),m_extended,m_insensitive);
 	    if (reg.startSkip("}",false)) {
 		if (!blockDepth) {
 		    TRACE_DBG(DebugWarn,trace,traceLst,"Got '}' outside block in line #%u in context '%s'",
@@ -803,14 +1000,12 @@ static bool oneContext(Message &msg, String &str, const String &context, String 
 			    (disp ? "Dispatching" : "Enqueueing"),
 			    val.c_str(),i+1,n->name().c_str(),context.c_str());
 			if (disp) {
-			    s_dispatching++;
+			    s_dispatching.inc();
 			    Engine::dispatch(m);
-			    s_dispatching--;
+			    s_dispatching.dec();
 			}
-			else {
-			    Engine::enqueue(m);
+			else if (Engine::enqueue(m))
 			    m = 0;
-			}
 		    }
 		    TelEngine::destruct(m);
 		}
@@ -902,21 +1097,26 @@ bool RouteHandler::received(Message &msg)
     String called(msg.getValue(YSTRING("called")));
     if (called.null())
 	return false;
+    s_processing.inc();
     const char *context = msg.getValue(YSTRING("context"),"default");
     const String& traceID = msg[YSTRING("trace_id")];
     int traceLvl = msg.getIntValue(YSTRING("trace_lvl"),DebugNote,DebugGoOn,DebugAll);
     ObjList* traceLst = msg.getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0;
     Lock lock(s_mutex);
-    if (oneContext(msg,called,context,msg.retValue(),traceID,traceLvl,traceLst)) {
+    RefPointer<RegexConfig> cfg = s_cfg;
+    lock.drop();
+    if (cfg && cfg->oneContext(msg,called,context,msg.retValue(),traceID,traceLvl,traceLst)) {
 	TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Routing %s to '%s' in context '%s' via '%s' in " FMT64U " usec",
 	    msg.getValue(YSTRING("route_type"),"call"),called.c_str(),context,
 	    msg.retValue().c_str(),Time::now()-tmr);
 	dumpTraceToMsg(msg,traceLst);
+	s_processing.dec();
 	return true;
     }
     TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Could not route %s to '%s' in context '%s', wasted " FMT64U " usec",
 	msg.getValue(YSTRING("route_type"),"call"),called.c_str(),context,Time::now()-tmr);
     dumpTraceToMsg(msg,traceLst);
+    s_processing.dec();
     return false;
 };
 
@@ -931,13 +1131,16 @@ bool PrerouteHandler::received(Message &msg)
     String caller(msg.getValue(YSTRING("caller")));
     if (!s_prerouteall && caller.null())
 	return false;
+    s_processing.inc();
 
     String ret;
     const String& traceID = msg[YSTRING("trace_id")];
     int traceLvl = msg.getIntValue(YSTRING("trace_lvl"),DebugNote,DebugGoOn,DebugAll);
     ObjList* traceLst = msg.getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0;
     Lock lock(s_mutex);
-    if (oneContext(msg,caller,"contexts",ret,traceID,traceLvl,traceLst)) {
+    RefPointer<RegexConfig> cfg = s_cfg;
+    lock.drop();
+    if (cfg && cfg->oneContext(msg,caller,"contexts",ret,traceID,traceLvl,traceLst)) {
 	TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Classifying caller '%s' in context '%s' in " FMT64 " usec",
 	    caller.c_str(),ret.c_str(),Time::now()-tmr);
 	if (ret == YSTRING("-") || ret == YSTRING("error"))
@@ -945,11 +1148,13 @@ bool PrerouteHandler::received(Message &msg)
 	else
 	    msg.setParam("context",ret);
 	dumpTraceToMsg(msg,traceLst);
+	s_processing.dec();
 	return true;
     }
     TRACE_DBG_ONLY(DebugInfo,traceID,traceLst,"Could not classify call from '%s', wasted " FMT64 " usec",
 	caller.c_str(),Time::now()-tmr);
     dumpTraceToMsg(msg,traceLst);
+    s_processing.dec();
     return false;
 };
 
@@ -957,6 +1162,8 @@ bool PrerouteHandler::received(Message &msg)
 bool GenericHandler::received(Message &msg)
 {
     DDebug(DebugAll,"Handling message '%s' [%p]",c_str(),this);
+    s_processing.inc();
+
     String what(m_match);
     if (what)
 	what = msg.getValue(what);
@@ -966,8 +1173,11 @@ bool GenericHandler::received(Message &msg)
     int traceLvl = msg.getIntValue(YSTRING("trace_lvl"),DebugNote,DebugGoOn,DebugAll);
     ObjList* traceLst = msg.getBoolValue(YSTRING("trace_to_msg"),false) ? new ObjList() : 0;
     Lock lock(s_mutex);
-    bool ok = oneContext(msg,what,m_context,msg.retValue(),traceID,traceLvl,traceLst);
+    RefPointer<RegexConfig> cfg = s_cfg;
+    lock.drop();
+    bool ok = cfg && cfg->oneContext(msg,what,m_context,msg.retValue(),traceID,traceLvl,traceLst);
     dumpTraceToMsg(msg,traceLst);
+    s_processing.dec();
     return ok;
 }
 
@@ -982,9 +1192,13 @@ bool StatusHandler::received(Message &msg)
 	return false;
     Lock lock(s_mutex);
     msg.retValue() << "name=" << __plugin.name()
-	<< ",type=route;sections=" << s_cfg.count()
-	<< ",extra=" << s_extra.count()
-	<< ",variables=" << s_vars.count() << "\r\n";
+	<< ",type=route;sections=" << s_cfg->sectCount()
+	<< ",extra=" << s_extra.count();
+    lock.drop();
+    lock.acquire(s_varsMtx);
+    msg.retValue() << ",variables=" << s_vars.count();
+    lock.drop();
+    msg.retValue() << ",processing=" << s_processing.count() << "\r\n";
     return !dest.null();
 }
 
@@ -1005,7 +1219,7 @@ bool CommandHandler::received(Message &msg)
 
 RegexRoutePlugin::RegexRoutePlugin()
     : Plugin("regexroute"),
-      m_preroute(0), m_route(0), m_status(0), m_first(true)
+      m_first(true)
 {
     Output("Loaded module RegexRoute");
 }
@@ -1015,6 +1229,7 @@ void RegexRoutePlugin::initVars(NamedList* sect)
     if (!sect)
 	return;
     unsigned int len = sect->length();
+    Lock l(s_varsMtx); // we want all set at the same time
     for (unsigned int i=0; i<len; i++) {
 	NamedString* n = sect->getParam(i);
 	if (n)
@@ -1025,64 +1240,16 @@ void RegexRoutePlugin::initVars(NamedList* sect)
 void RegexRoutePlugin::initialize()
 {
     Output("Initializing module RegexRoute");
-    TelEngine::destruct(m_preroute);
-    TelEngine::destruct(m_route);
-    TelEngine::destruct(m_status);
-    TelEngine::destruct(m_command);
-    s_extra.clear();
-    Lock lock(s_mutex);
-    s_cfg = Engine::configFile(name());
-    s_cfg.load();
-    if (m_first) {
+    s_serial.inc();
+    RegexConfig* cfg = new RegexConfig(Engine::configFile(name()));
+    cfg->initialize(m_first);
+    if (m_first)
 	m_first = false;
-	initVars(s_cfg.getSection("$once"));
-    }
-    initVars(s_cfg.getSection("$init"));
-    s_trackName = s_cfg.getBoolValue("priorities","trackparam",true) ?
-	name().c_str() : (const char*)0;
-    s_extended = s_cfg.getBoolValue("priorities","extended",false);
-    s_insensitive = s_cfg.getBoolValue("priorities","insensitive",false);
-    s_prerouteall = s_cfg.getBoolValue("priorities","prerouteall",false);
-    unsigned priority = s_cfg.getIntValue("priorities","preroute",100);
-    if (priority)
-	Engine::install(m_preroute = new PrerouteHandler(priority));
-    priority = s_cfg.getIntValue("priorities","route",100);
-    if (priority)
-	Engine::install(m_route = new RouteHandler(priority));
-    priority = s_cfg.getIntValue("priorities","status",110);
-    if (priority) {
-	Engine::install(m_status = new StatusHandler(priority));
-	Engine::install(m_command = new CommandHandler(priority));
-    }
-    int depth = s_cfg.getIntValue("priorities","maxdepth",5);
-    if (depth < 5)
-	depth = 5;
-    else if (depth > 100)
-	depth = 100;
-    s_maxDepth = depth;
-    s_defRule = s_cfg.getValue("priorities","defaultrule",DEFAULT_RULE);
-    NamedList* l = s_cfg.getSection("extra");
-    if (l) {
-	unsigned int len = l->length();
-	for (unsigned int i=0; i<len; i++) {
-	    NamedString* n = l->getParam(i);
-	    if (n) {
-		// message=priority[,[parameter][,context]]
-		ObjList* o = n->split(',');
-		const String* s = static_cast<const String*>(o->at(0));
-		int prio = s ? s->toInteger(100) : 100;
-		const char* match = TelEngine::c_str(static_cast<const String*>(o->at(1)));
-		const char* context = TelEngine::c_str(static_cast<const String*>(o->at(2)));
-		if (TelEngine::null(context))
-		    context = n->name().c_str();
-		if (s_cfg.getSection(context))
-		    Engine::install(new GenericHandler(n->name(),prio,context,match));
-		else
-		    Debug(DebugWarn,"Missing context [%s] for handling %s",context,n->name().c_str());
-		TelEngine::destruct(o);
-	    }
-	}
-    }
+    Lock lock(s_mutex);
+    RegexConfig* tmp = s_cfg;
+    s_cfg = cfg;
+    lock.drop();
+    TelEngine::destruct(tmp);
 }
 
 }; // anonymous namespace
