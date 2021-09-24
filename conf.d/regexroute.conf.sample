@@ -211,6 +211,7 @@
 ;   parameters are taken from the old message but placed in the new one
 ; echo, output - displays that line after making substitutions
 ; debug - displays line as a debug after making substitutions
+; msleep - sleep for the specified number of milliseconds
 ; noop - no action but evaluates rest of target for side effects
 ; { - starts a block that ends on another line with }
 ; The @jump, @goto, @include and @call forms suppress warning if missing target

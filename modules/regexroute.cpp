@@ -1058,6 +1058,23 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 			val.length(),i+1,n->name().c_str(),context.c_str());
 		ret = val;
 	    }
+	    else if (val.startSkip("msleep")) {
+		val.trimBlanks();
+		if (!val.null()) {
+		    NDebug("RegexRoute",DebugAll,"Sleeping for %s milliseconds by rule #%u '%s' in context '%s'",
+			val.c_str(),i+1,n->name().c_str(),context.c_str());
+		    uint64_t t = val.toInt64(0,0,0);
+		    uint64_t count = t / Thread::idleMsec();
+		    uint64_t rest = t % Thread::idleMsec();
+		    for (uint64_t i = 0; i < count; i++) {
+			Thread::idle();
+			if (Thread::check(false))
+			    break;
+		    }
+		    if (rest && !Thread::check(false))
+			Thread::msleep(rest);
+		}
+	    }
 	    else {
 		DDebug("RegexRoute",DebugAll,"Returning '%s' for '%s' in context '%s' by rule #%u '%s'",
 		    val.c_str(),str.c_str(),context.c_str(),i+1,n->name().c_str());
