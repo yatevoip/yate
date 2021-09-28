@@ -109,6 +109,21 @@ public:
     static void doCompletion(Message &msg, const String& partLine, const String& partWord);
 };
 
+class EngineSharedPrivate
+{
+public:
+    inline EngineSharedPrivate()
+	: vars(new SharedVars),
+	varsListMutex(false,"SharedVarsList")
+	{}
+    inline ~EngineSharedPrivate()
+	{ TelEngine::destruct(vars); }
+
+    SharedVars* vars;
+    ObjList varsList;
+    Mutex varsListMutex;
+};
+
 };
 
 using namespace TelEngine;
@@ -295,7 +310,7 @@ static int s_maxevents = 25;
 static Mutex s_eventsMutex(false,"EventsList");
 static ObjList s_events;
 static String s_startMsg;
-static SharedVars s_vars;
+static EngineSharedPrivate s_vars;
 static Mutex s_hooksMutex(true,"HooksList");
 static ObjList s_hooks;
 static Semaphore* s_semWorkers = 0;
@@ -1449,35 +1464,83 @@ void SharedVars::clear(const String& name)
     unlock();
 }
 
+void SharedVars::clearAll()
+{
+    if (this == &Engine::sharedVars())
+	return;
+    Lock mylock(this);
+    m_vars.clearParams();
+}
+
 bool SharedVars::exists(const String& name)
 {
     Lock mylock(this);
     return m_vars.getParam(name) != 0;
 }
 
-unsigned int SharedVars::inc(const String& name, unsigned int wrap)
+uint64_t SharedVars::inc(const String& name, uint64_t wrap)
 {
     Lock mylock(this);
-    unsigned int val = m_vars.getIntValue(name);
+    uint64_t val = m_vars.getUInt64Value(name);
     if (wrap)
 	val = val % (wrap + 1);
-    unsigned int nval = val + 1;
+    uint64_t nval = val + 1;
     if (wrap)
 	nval = nval % (wrap + 1);
     m_vars.setParam(name,String(nval));
     return val;
 }
 
-unsigned int SharedVars::dec(const String& name, unsigned int wrap)
+uint64_t SharedVars::dec(const String& name, uint64_t wrap)
 {
     Lock mylock(this);
-    unsigned int val = m_vars.getIntValue(name);
+    uint64_t val = m_vars.getUInt64Value(name);
     if (wrap)
 	val = val ? ((val - 1) % (wrap + 1)) : wrap;
     else
 	val = val ? (val - 1) : 0;
     m_vars.setParam(name,String(val));
     return val;
+}
+
+uint64_t SharedVars::add(const String& name, uint64_t value, uint64_t wrap)
+{
+    Lock mylock(this);
+    uint64_t val = m_vars.getUInt64Value(name);
+    if (wrap)
+	val = val % (wrap + 1);
+    uint64_t nval = val + value;
+    if (wrap)
+	nval = nval % (wrap + 1);
+    m_vars.setParam(name,String(nval));
+    return val;
+}
+
+uint64_t SharedVars::sub(const String& name, uint64_t value, uint64_t wrap)
+{
+    Lock mylock(this);
+    uint64_t val = m_vars.getUInt64Value(name);
+    if (wrap)
+	val = (val >= value) ? ((val - value) % (wrap + 1)) : wrap;
+    else
+	val = (val >= value) ? (val - value) : 0;
+    m_vars.setParam(name,String(val));
+    return val;
+}
+
+bool SharedVars::getList(RefPointer<SharedVars>& dest, const String& name)
+{
+    if (!name)
+	return false;
+    Lock lck(s_vars.varsListMutex);
+    ObjList* o = s_vars.varsList.find(name);
+    if (o)
+	dest = static_cast<SharedVars*>(o->get());
+    else {
+	dest = new SharedVars(name);
+	s_vars.varsList.append(dest);
+    }
+    return 0 != dest;
 }
 
 
@@ -1697,7 +1760,7 @@ int Engine::engineInit()
 	for (unsigned int i = 0; i < n; i++) {
 	    NamedString* v = vars->getParam(i);
 	    if (v)
-		s_vars.set(v->name(),*v);
+		s_vars.vars->set(v->name(),*v);
 	}
     }
     DDebug(DebugAll,"Engine::run()");
@@ -2396,7 +2459,7 @@ void Engine::clearEvents(const String& type)
 
 SharedVars& Engine::sharedVars()
 {
-    return s_vars;
+    return *(s_vars.vars);
 }
 
 // Append command line arguments form current config.

@@ -236,14 +236,15 @@ private:
  * Class that implements atomic / locked access and operations to its shared variables
  * @short Atomic access and operations to shared variables
  */
-class YATE_API SharedVars : public Mutex
+class YATE_API SharedVars : public Mutex, public RefObject
 {
 public:
     /**
      * Constructor
+     * @param name Optional name
      */
-    inline SharedVars()
-	: Mutex(false,"SharedVars"), m_vars("")
+    inline SharedVars(const char* name = 0)
+	: Mutex(false,"SharedVars"), m_vars(name)
 	{ }
 
     /**
@@ -275,6 +276,11 @@ public:
     void clear(const String& name);
 
     /**
+     * Clear all variables. Does nothing for Engine (global shared list)
+     */
+    void clearAll();
+
+    /**
      * Check if a variable exists
      * @param name Name of the variable
      * @return True if the variable exists
@@ -287,7 +293,7 @@ public:
      * @param wrap Value to wrap around at, zero disables
      * @return Value of the variable before increment, zero if it was not defined or not numeric
      */
-    unsigned int inc(const String& name, unsigned int wrap = 0);
+    uint64_t inc(const String& name, uint64_t wrap = 0);
 
     /**
      * Atomically decrement a variable as unsigned integer
@@ -295,7 +301,56 @@ public:
      * @param wrap Value to wrap around at, zero disables (stucks at zero)
      * @return Value of the variable after decrement, zero if it was not defined or not numeric
      */
-    unsigned int dec(const String& name, unsigned int wrap = 0);
+    uint64_t dec(const String& name, uint64_t wrap = 0);
+
+    /**
+     * Atomically add a value to a variable as unsigned integer
+     * @param name Name of the variable
+     * @param val Value to add
+     * @param wrap Value to wrap around at, zero disables
+     * @return Value of the variable before addition, zero if it was not defined or not numeric
+     */
+    uint64_t add(const String& name, uint64_t val, uint64_t wrap = 0);
+
+    /**
+     * Atomically substract a value from a variable as unsigned integer
+     * @param name Name of the variable
+     * @param val Value to substract
+     * @param wrap Value to wrap around at, zero disables
+     * @return Value of the variable after substraction, zero if it was not defined or not numeric
+     */
+    uint64_t sub(const String& name, uint64_t val, uint64_t wrap = 0);
+
+    /**
+     * Atomically copy parameters to destination
+     * @param dest Destination list
+     * @param prefix Optional prefix to match in parameter names
+     * @param skipPrefix Skip over the prefix when building new parameter name
+     * @param replace Set to true to replace list parameter instead of adding a new one
+     */
+    inline void copy(NamedList& dest, const String& prefix = String::empty(),
+	bool skipPrefix = true, bool replace = false) {
+	    Lock lck(this);
+	    if (prefix)
+		dest.copySubParams(m_vars,prefix,skipPrefix,replace);
+	    else
+		dest.copyParams(m_vars);
+	}
+
+    /**
+     * Retrieve list name
+     * @return List name
+     */
+    virtual const String& toString() const
+	{ return m_vars; }
+
+    /**
+     * Retrieve a named list of SharedVars. Create it if not found
+     * @param dest Destination to be filled with requested list
+     * @param name Name of the list
+     * @return True id destination is iset. The function will fail if name is empty
+     */
+    static bool getList(RefPointer<SharedVars>& dest, const String& name);
 
 private:
     NamedList m_vars;

@@ -190,17 +190,50 @@ class JsShared : public JsObject
     YCLASS(JsShared,JsObject)
 public:
     inline JsShared(ScriptMutex* mtx)
-	: JsObject("Shared",mtx,true)
+	: JsObject("SharedVars",mtx,true)
 	{
 	    params().addParam(new ExpFunction("inc"));
 	    params().addParam(new ExpFunction("dec"));
 	    params().addParam(new ExpFunction("get"));
 	    params().addParam(new ExpFunction("set"));
+	    params().addParam(new ExpFunction("add"));
+	    params().addParam(new ExpFunction("sub"));
 	    params().addParam(new ExpFunction("clear"));
+	    params().addParam(new ExpFunction("clearAll"));
 	    params().addParam(new ExpFunction("exists"));
+	    params().addParam(new ExpFunction("getVars"));
+	    setVars(String::empty());
 	}
+    inline JsShared(ScriptMutex* mtx, unsigned int line, const String& varsName = String::empty())
+	: JsObject(mtx,"[object SharedVars]",line)
+	{ setVars(varsName); }
+    virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    static void initialize(ScriptContext* context);
+    static inline uint64_t modulo(ExpOperation* mod) {
+	    if (!(mod && mod->isInteger()))
+		return 0;
+	    int64_t m = mod->number();
+	    return m > 1 ? --m : 0;
+	}
+
 protected:
+    inline void setVars(const String& name) {
+	    if (!name)
+		m_vars = &Engine::sharedVars();
+	    else
+		SharedVars::getList(m_vars,name);
+	    m_varsName = name;
+	}
+    inline JsShared(ScriptMutex* mtx, const char* name, unsigned int line, const String& varsName = String::empty())
+	: JsObject(mtx,name,line)
+	{ setVars(varsName); }
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsShared(mutex(),name,oper.lineNumber(),m_varsName); }
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+
+private:
+    RefPointer<SharedVars> m_vars;
+    String m_varsName;
 };
 
 class JsTimeEvent : public RefObject
@@ -459,9 +492,10 @@ public:
 	    params().addParam(new ExpFunction("htoa"));
 	    params().addParam(new ExpFunction("btoh"));
 	    params().addParam(new ExpFunction("htob"));
-	    addConstructor(params(), "Semaphore", new JsSemaphore(mtx));
+	    addConstructor(params(),"Semaphore",new JsSemaphore(mtx));
 	    addConstructor(params(),"HashList",new JsHashList(mtx));
 	    addConstructor(params(),"URI",new JsURI(mtx));
+	    addConstructor(params(),"SharedVars",new JsShared(mtx));
 	}
     static void initialize(ScriptContext* context, const char* name = 0);
     inline void resetWorker()
@@ -1076,6 +1110,7 @@ static void contextInit(ScriptRun* runner, const char* name = 0, JsAssist* assis
     JsHasher::initialize(ctx);
     JsJSON::initialize(ctx);
     JsDNS::initialize(ctx);
+    JsShared::initialize(ctx);
     if (s_autoExt)
 	contextLoad(ctx,name);
 }
@@ -2142,43 +2177,25 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
     XDebug(&__plugin,DebugAll,"JsShared::runNative '%s'(" FMT64 ")",oper.name().c_str(),oper.number());
     if (oper.name() == YSTRING("inc")) {
 	ObjList args;
-	switch (extractArgs(stack,oper,context,args)) {
-	    case 1:
-	    case 2:
-		break;
-	    default:
-		return false;
-	}
-	ExpOperation* param = static_cast<ExpOperation*>(args[0]);
-	ExpOperation* modulo = static_cast<ExpOperation*>(args[1]);
-	int mod = 0;
-	if (modulo && modulo->isInteger())
-	    mod = (int)modulo->number();
-	if (mod > 1)
-	    mod--;
+	ExpOperation* param = 0;
+	ExpOperation* mod = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&param,&mod))
+	    return false;
+	if (m_vars)
+	    ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)m_vars->inc(*param,modulo(mod))));
 	else
-	    mod = 0;
-	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)Engine::sharedVars().inc(*param,mod)));
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else if (oper.name() == YSTRING("dec")) {
 	ObjList args;
-	switch (extractArgs(stack,oper,context,args)) {
-	    case 1:
-	    case 2:
-		break;
-	    default:
-		return false;
-	}
-	ExpOperation* param = static_cast<ExpOperation*>(args[0]);
-	ExpOperation* modulo = static_cast<ExpOperation*>(args[1]);
-	int mod = 0;
-	if (modulo && modulo->isInteger())
-	    mod = (int)modulo->number();
-	if (mod > 1)
-	    mod--;
+	ExpOperation* param = 0;
+	ExpOperation* mod = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&param,&mod))
+	    return false;
+	if (m_vars)
+	    ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)m_vars->dec(*param,modulo(mod))));
 	else
-	    mod = 0;
-	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)Engine::sharedVars().dec(*param,mod)));
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else if (oper.name() == YSTRING("get")) {
 	if (oper.number() != 1)
@@ -2187,7 +2204,8 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	if (!param)
 	    return false;
 	String buf;
-	Engine::sharedVars().get(*param,buf);
+	if (m_vars)
+	    m_vars->get(*param,buf);
 	TelEngine::destruct(param);
 	ExpEvaluator::pushOne(stack,new ExpOperation(buf));
     }
@@ -2202,9 +2220,28 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	    TelEngine::destruct(val);
 	    return false;
 	}
-	Engine::sharedVars().set(*param,*val);
+	if (m_vars)
+	    m_vars->set(*param,*val);
 	TelEngine::destruct(param);
 	TelEngine::destruct(val);
+    }
+    else if (oper.name() == YSTRING("add") || oper.name() == YSTRING("sub")) {
+	ObjList args;
+	ExpOperation* param = 0;
+	ExpOperation* val = 0;
+	ExpOperation* mod = 0;
+	if (!extractStackArgs(2,this,stack,oper,context,args,&param,&val,&mod))
+	    return false;
+	if (m_vars) {
+	    int64_t value = val->isInteger() ? val->number() : 0;
+	    if (oper.name() == YSTRING("add"))
+		value = (int64_t)m_vars->add(*param,value > 0 ? value : 0,modulo(mod));
+	    else
+		value = (int64_t)m_vars->sub(*param,value > 0 ? value : 0,modulo(mod));
+	    ExpEvaluator::pushOne(stack,new ExpOperation(value));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else if (oper.name() == YSTRING("clear")) {
 	if (oper.number() != 1)
@@ -2212,8 +2249,13 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	ExpOperation* param = popValue(stack,context);
 	if (!param)
 	    return false;
-	Engine::sharedVars().clear(*param);
+	if (m_vars)
+	    m_vars->clear(*param);
 	TelEngine::destruct(param);
+    }
+    else if (oper.name() == YSTRING("clearAll")) {
+	if (m_vars)
+	    m_vars->clearAll();
     }
     else if (oper.name() == YSTRING("exists")) {
 	if (oper.number() != 1)
@@ -2221,14 +2263,80 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	ExpOperation* param = popValue(stack,context);
 	if (!param)
 	    return false;
-	ExpEvaluator::pushOne(stack,new ExpOperation(Engine::sharedVars().exists(*param)));
+	ExpEvaluator::pushOne(stack,new ExpOperation(m_vars && m_vars->exists(*param)));
 	TelEngine::destruct(param);
+    }
+    else if (oper.name() == YSTRING("getVars")) {
+	// getVars([params])
+	// params:
+	//   js_props: Boolean. Force Javascript ExpOperation in returned result. Default: true
+	//   autonum: Boolean. Force ExpOperation auto number in returned result. Default: false.
+	//     Ignored if not returning ExpOperation
+	//   prefix: String. Optional prefix for variables
+	//   skip_prefix: Boolean. Skip prefix when returned. Default: true. Ignored if prefix is empty
+	ObjList args;
+	ExpOperation* pOp = 0;
+	if (!extractStackArgs(0,this,stack,oper,context,args,&pOp))
+	    return false;
+	if (m_vars) {
+	    bool expOper = true;
+	    bool autoNum = false;
+	    String prefix;
+	    bool skipPrefix = true;
+	    JsObject* params = YOBJECT(JsObject,pOp);
+	    if (params) {
+		params->getBoolField(YSTRING("js_props"),expOper);
+		if (expOper)
+		    params->getBoolField(YSTRING("autonum"),autoNum);
+		params->getStringField(YSTRING("prefix"),prefix);
+		if (prefix)
+		    params->getBoolField(YSTRING("skip_prefix"),skipPrefix);
+	    }
+	    JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
+	    if (expOper) {
+		NamedList tmp("");
+		m_vars->copy(tmp,prefix,skipPrefix);
+		for (ObjList* o = tmp.paramList()->skipNull(); o; o = o->skipNext()) {
+		    NamedString* ns = static_cast<NamedString*>(o->get());
+		    jso->params().addParam(new ExpOperation(*ns,ns->name(),autoNum));
+		}
+	    }
+	    else
+		m_vars->copy(jso->params(),prefix,skipPrefix);
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(jso,"vars"));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else
 	return JsObject::runNative(stack,oper,context);
     return true;
 }
 
+JsObject* JsShared::runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    ObjList args;
+    ExpOperation* sharedOp = 0;
+    if (!extractStackArgs(1,this,stack,oper,context,args,&sharedOp))
+	return 0;
+    JsShared* obj = new JsShared(mutex(),oper.lineNumber(),*sharedOp);
+    if (ref())
+	obj->params().addParam(new ExpWrapper(this,protoName()));
+    else
+	TelEngine::destruct(obj);
+    return obj;
+}
+
+void JsShared::initialize(ScriptContext* context)
+{
+    if (!context)
+	return;
+    ScriptMutex* mtx = context->mutex();
+    Lock mylock(mtx);
+    NamedList& params = context->params();
+    if (!params.getParam(YSTRING("SharedVars")))
+	addObject(params,"SharedVars",new JsShared(mtx));
+}
 
 void* JsMessage::getObject(const String& name) const
 {
