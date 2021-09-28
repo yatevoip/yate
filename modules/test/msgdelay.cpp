@@ -27,7 +27,7 @@ namespace { // anonymous
 class DelayHandler : public MessageHandler
 {
 public:
-    DelayHandler(int prio) : MessageHandler(0,prio) { }
+    DelayHandler(int prio, const char* trackName) : MessageHandler(0,prio,trackName) { }
     virtual bool received(Message &msg);
 };
 
@@ -100,7 +100,8 @@ void MsgDelay::initialize()
 	int prio = Engine::config().getIntValue("general","msgdelay",50);
 	if (prio > 0) {
 	    Output("Initializing module MsgDelay priority %d",prio);
-	    m_handler = new DelayHandler(prio);
+	    m_handler = new DelayHandler(prio,"msgdelay");
+	    m_handler->setFilter(new NamedPointer("message_delay",new Regexp("^[1-9]")));
 	    Engine::install(m_handler);
 	}
     }
