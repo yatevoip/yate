@@ -1176,10 +1176,10 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
     {
     public:
 	Header(const char* name)
-	    : m_name(name), m_rows(0)
-	    { m_width = m_name.length(); }
+	    : m_name(new String(name)), m_rows(0)
+	    { set(m_name); m_width = m_name->length(); }
 	virtual const String& toString() const
-	    { return m_name; }
+	    { return *m_name; }
 	inline unsigned int width() const
 	    { return m_width; }
 	inline unsigned int rows() const
@@ -1188,14 +1188,18 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 	    { if (m_width < w) m_width = w; }
 	inline void addString(const String& val, unsigned int row)
 	    {
+		if (row <= m_rows)
+		    return;
+		setWidth(val.length());
+		ObjList* a = this;
 		while (++m_rows < row)
-		    append(0,false);
-		append(new String(val),(row <= 1));
+		    a = a->append(0,false);
+		a->append(new String(val),false);
 	    }
 	inline const String* getString(unsigned int row) const
-	    { return (row < m_rows) ? static_cast<const String*>(at(row)) : 0; }
+	    { return (row < m_rows) ? static_cast<const String*>(at(++row)) : 0; }
     private:
-	String m_name;
+	String* m_name;
 	unsigned int m_width;
 	unsigned int m_rows;
     };
@@ -1211,14 +1215,50 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
     ObjList header;
     const JsArray* jsa = YOBJECT(JsArray,jso);
     if (jsa) {
-	// Array of Objects
+	// Array. Each item is a table row
+	// Array of Objects: each row is an object, property names are header string
 	// [ { name1: "val11", name2: "val12" }, { name1: "val21", name3: "val23" } ]
+	// Array of Arrays: each row is an array of strings, first row contains header strings
+	// [ [ "name1", "name2", "name3" ], [ "val11", "val12" ], ["val21", undefined, "val23" ] ]
+	const JsArray* jsaRow = 0;
+	unsigned int cols = 0;
 	unsigned int row = 0;
 	for (int i = 0; i < jsa->length(); i++) {
 	    jso = YOBJECT(JsObject,jsa->params().getParam(String(i)));
 	    if (!jso)
 		continue;
-	    bool newRow = true;
+	    if (!i)
+		jsaRow = YOBJECT(JsArray,jso);
+	    if (jsaRow) {
+		const JsArray* a = i ? YOBJECT(JsArray,jso) : jsaRow;
+		if (!a)
+		    continue;
+		if (i) {
+		    row++;
+		    unsigned int n = a->length();
+		    if (n > cols)
+			n = cols;
+		    ObjList* hdr = &header;
+		    for (unsigned int j = 0; j < n; j++, hdr = hdr->next()) {
+			const NamedString* ns = a->params().getParam(String(j));
+			if (ns)
+			    (static_cast<Header*>(hdr->get()))->addString(*ns,row);
+		    }
+		}
+		else {
+		    for (unsigned int j = 0; j < (unsigned int)a->length(); j++) {
+			const NamedString* ns = a->params().getParam(String(j));
+			if (!ns)
+			    continue;
+			cols++;
+			header.append(new Header(*ns));
+		    }
+		    if (!cols)
+			break;
+		}
+		continue;
+	    }
+	    row++;
 	    for (ObjList* l = jso->params().paramList()->skipNull(); l; l = l->skipNext()) {
 		const NamedString* ns = static_cast<const NamedString*>(l->get());
 		if (ns->name() == JsObject::protoName())
@@ -1228,17 +1268,13 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 		    h = new Header(ns->name());
 		    header.append(h);
 		}
-		h->setWidth(ns->length());
-		if (newRow) {
-		    newRow = false;
-		    row++;
-		}
 		h->addString(*ns,row);
 	    }
 	}
     }
     else {
 	// Object containing Arrays
+	// Each propery is a column in table
 	// { name1: [ "val11", "val21" ], name2: [ "val12" ], name3: [ undefined, "val23" ] }
 	for (ObjList* l = jso->params().paramList()->skipNull(); l; l = l->skipNext()) {
 	    const NamedString* ns = static_cast<const NamedString*>(l->get());
@@ -1249,10 +1285,8 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 	    header.append(h);
 	    for (int r = 0; r < jsa->length(); r++) {
 		ns = jsa->params().getParam(String(r));
-		if (ns) {
-		    h->setWidth(ns->length());
+		if (ns)
 		    h->addString(*ns,r + 1);
-		}
 	    }
 	}
     }
