@@ -9903,12 +9903,14 @@ bool SIPDriver::onHelp(Message& msg)
 {
     static const char* s_cmds = "  sip drop transport <name>\r\n";
     static const char* s_cmdsDesc = "Drop a tcp/tls transport\r\n";
-    
-    if (msg[YSTRING("line")] == name()) {
+
+    const String& line = msg[YSTRING("line")];
+    if (line == name()) {
 	msg.retValue() << s_cmds << s_cmdsDesc;
 	return true;
     }
-    msg.retValue() << s_cmds;
+    if (!line)
+	msg.retValue() << s_cmds;
     return false;
 }
 
