@@ -49,6 +49,163 @@ class ExpOperation;
 class ScriptMutex;
 
 /**
+ * This class holds a JSON Pointer as specified in RFC 6901
+ * @short JSON path
+ */
+class YSCRIPT_API JPath : public String
+{
+    YCLASS(JPath,String)
+public:
+    /**
+     * Constructor
+     * @param value Initial value
+     */
+    JPath(const char* value = 0);
+
+    /**
+     * Copy constructor
+     * @param other Object to copy
+     */
+    JPath(const JPath& other);
+
+    /**
+     * Destructor
+     */
+    ~JPath();
+
+    /**
+     * Check if path is valid
+     * @return True if valid, false otherwise
+     */
+    inline bool valid() const
+	{ return m_data || !c_str(); }
+
+    /**
+     * Retrieve the number of items in path
+     * @return The number of items in path
+     */
+    inline unsigned int count() const
+	{ return m_count; }
+
+    /**
+     * Retrieve path item at a index
+     * @param idx Index to retrieve
+     * @return Path item at requested index, empty string if not found
+     */
+    inline const String& at(unsigned int idx) const
+	{ return idx < count() ? m_data[idx] : String::empty(); }
+
+    /**
+     * Retrieve path item at a index
+     * @param idx Index to retrieve
+     * @return Path item at requested index, empty string if not found
+     */
+    inline const String& at(unsigned int idx)
+	{ return idx < count() ? m_data[idx] : String::empty(); }
+
+    /**
+     * Retrieve path item at a index
+     * @param idx Index to retrieve
+     * @return Path item at requested index, empty string if not found
+     */
+    inline const String& operator[](unsigned int idx) const
+	{ return at(idx); }
+
+    /**
+     * Retrieve path item at a index
+     * @param idx Index to retrieve
+     * @return Path item at requested index, empty string if not found
+     */
+    inline const String& operator[](unsigned int idx)
+	{ return at(idx); }
+
+    /**
+     * Add a path item to path
+     * @param path Destination string
+     * @param value Item value to add
+     * @return Given 'path' string reference
+     */
+    static inline String& addItem(String& path, const char* value) {
+	    if (!value)
+		return path;
+	    String tmp;
+	    char* s = (char*)value;
+	    for (unsigned int i = 0; *s; ++i, ++s) {
+		char c = escapeChar(*s);
+		if (!c)
+		    continue;
+		if (!tmp)
+		    tmp = value;
+		tmp.insert(i,'~');
+		s = (char*)(tmp.c_str() + (++i));
+		*s = c;
+	    }
+	    return path << '/' << tmp.safe(value);
+	}
+
+    /**
+     * Check if an item is a valid Array index
+     * A valid array index is a decimal string with no leading/trailing spaces or leading 0
+     * @param str String to check
+     * @return Array index, negative if invalid
+     */
+    static inline int validArrayIndex(const String& str)
+	{ return str.toInteger(-1,10); }
+
+    /**
+     * Retrieve escape char
+     * @param value Requested character
+     * @return Escape character, 0 if given character doesn't need to be escaped
+     */
+    static inline char escapeChar(char value) {
+	    if (value == '~')
+		return '0';
+	    if (value == '/')
+		return '1';
+	    return 0;
+	}
+
+    /**
+     * Retrieve unescape char
+     * @param value Requested character
+     * @return Unescape character, 0 if given character is not an escaped one
+     */
+    static inline char unescapeChar(char value) {
+	    if (value == '0')
+		return '~';
+	    if (value == '1')
+		return '/';
+	    return 0;
+	}
+
+protected:
+    /**
+     * Called whenever the String value changed.
+     * Reset data, parse the path
+     */
+    virtual void changed();
+
+    /**
+     * Parse the path
+     */
+    void parse();
+
+    /**
+     * Reset data
+     */
+    inline void reset() {
+	    m_count = 0;
+	    if (m_data) {
+		delete[] m_data;
+		m_data = 0;
+	    }
+	}
+
+    String* m_data;
+    unsigned int m_count;
+};
+
+/**
  * This class allows extending ExpEvaluator to implement custom fields and functions
  * @short ExpEvaluator extending interface
  */
@@ -1310,6 +1467,17 @@ public:
     GenObject* object() const
 	{ return m_object; }
 
+    /**
+     * Replace held object if given object is not NULL and different from held one
+     * @param gen Pointer to the new held object
+     */
+    inline void setObject(GenObject* gen) {
+	    if (!gen || gen == m_object)
+		return;
+	    TelEngine::destruct(m_object);
+	    m_object = gen;
+	}
+
 private:
     GenObject* m_object;
 };
@@ -2433,6 +2601,21 @@ public:
      */
     static ExpOperation* toJSON(const ExpOperation* oper, int spaces);
 
+    /**
+     * 
+     * @param oper Object to handle
+     * @return 
+     */
+    static bool resolveReferences(ExpOperation* oper);
+
+    /**
+     * Find a value in object by path
+     * @param oper Object to handle
+     * @param path Path to use
+     * @return Found property value, NULL if not found
+     */
+    static ExpOperation* find(ExpOperation* oper, const JPath& path);
+
 protected:
     /**
      * Try to evaluate a single native method
@@ -2464,9 +2647,13 @@ protected:
      * @param buf String used as output for the JSON represantion
      * @param spaces Number of spaces used for one indentation level
      * @param indent Current number of spaces used for indentation
+     * @param data Internal data used for various purposes
+     * @param path Current path if any
+     * @param crtProp Current property if any
      */
-    static inline void toJSON(const NamedString* ns, String& buf, int spaces, int indent = 0)
-	{ internalToJSON(ns,true,buf,spaces,indent); }
+    static inline void toJSON(const NamedString* ns, String& buf, int spaces, int indent = 0,
+	void* data = 0, const String& path = String::empty(), const String& crtProp = String::empty())
+	{ internalToJSON(ns,true,buf,spaces,indent,data,path,crtProp); }
 
     /**
      * Static helper method for escaping special characters when JSON stringifying
@@ -2476,7 +2663,11 @@ protected:
     static String strEscape(const char* str);
 
 private:
-    static void internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces, int indent = 0);    
+    static bool recursiveToJSON(String& newPath, JsObject* jso, String& buf, int spaces, int indent,
+	void* data, const String& path, const String& crtProp);
+    static void internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces,
+	int indent = 0, void* data = 0, const String& path = String::empty(),
+	const String& crtProp = String::empty());
     static const String s_protoName;
     bool m_frozen;
     ScriptMutex* m_mutex;
@@ -2825,6 +3016,96 @@ protected:
 
 private:
     Regexp m_regexp;
+};
+
+/**
+ * Javascript JSON path class
+ * @short Javascript JSON path
+ */
+class JsJPath : public JsObject
+{
+public:
+    /**
+     * Constructor
+     * @param mtx Pointer to the mutex that serializes this object
+     */
+    JsJPath(ScriptMutex* mtx);
+
+    /**
+     * JPath object constructor, it's run on the prototype
+     * @param stack Evaluation stack in use
+     * @param oper Constructor function to evaluate
+     * @param context Pointer to arbitrary object passed from evaluation methods
+     * @return Newly created and populated Javascript JSON path
+     */
+    virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
+
+    /**
+     * Retrieve held path
+     * @return Held path reference
+     */
+    virtual const JPath& path() const
+	{ return m_path; }
+
+    /**
+     * Retrieve path string
+     * @return Held path value
+     */
+    virtual const String& toString() const
+	{ return m_path; }
+
+    /**
+     * Get a pointer to a derived class given that class name
+     * @param name Name of the class we are asking for
+     * @return Pointer to the requested class or NULL if this object doesn't implement it
+     */
+    virtual void* getObject(const String& name) const;
+
+protected:
+    /**
+     * Constructor from existing path
+     * @param mtx Pointer to the mutex that serializes this object
+     * @param line Code line where this object was created
+     * @param path Path to copy
+     */
+    inline JsJPath(ScriptMutex* mtx, unsigned int line, const char* path)
+	: JsObject(mtx,path,line),
+	  m_path(path)
+	{ }
+
+    /**
+     * Constructor for a JPath object
+     * @param mtx Pointer to the mutex that serializes this object
+     * @param name Full name of the object
+     * @param line Code line where this object was created
+     * @param path JSON path
+     */
+    inline JsJPath(ScriptMutex* mtx, const char* name, unsigned int line, const JPath& path)
+	: JsObject(mtx,name,line),
+	  m_path(path)
+	{ }
+
+    /**
+     * Clone and rename method
+     * @param name Name of the cloned object
+     * @param oper ExpOperation that required the clone
+     * @return New object instance
+     */
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsJPath(mutex(),name,oper.lineNumber(),m_path); }
+
+    /**
+     * Try to evaluate a single native method
+     * @param stack Evaluation stack in use, parameters are popped off this stack
+     *  and results are pushed back on stack
+     * @param oper Function to evaluate
+     * @param context Pointer to arbitrary object passed from evaluation methods
+     * @return True if evaluation succeeded
+     */
+    bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+
+private:
+    JPath m_path;                        // Held JPath
 };
 
 /**

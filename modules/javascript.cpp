@@ -41,6 +41,34 @@
 using namespace TelEngine;
 namespace { // anonymous
 
+// Temporary class used to store an object from received parameter or build a new one to be used
+// Safely release created object
+template <class Obj> class ExpOpTmpObj
+{
+public:
+    inline ExpOpTmpObj(Obj* obj, ExpOperation& op)
+	: m_obj(obj), m_del(!m_obj) 
+	{ if (m_del) m_obj = new Obj(op); }
+    inline ~ExpOpTmpObj()
+	{ if (m_del) TelEngine::destruct(m_obj); }
+    inline Obj* operator->() const
+	{ return m_obj; }
+    inline Obj& operator*() const
+	{ return *m_obj; }
+private:
+    inline ExpOpTmpObj() : m_obj(0), m_del(false) {}
+    Obj* m_obj;
+    bool m_del;
+};
+
+class JPathTmpParam : public ExpOpTmpObj<JPath>
+{
+public:
+    inline JPathTmpParam(ExpOperation& op)
+	: ExpOpTmpObj(YOBJECT(JPath,&op),op)
+	{}
+};
+
 static inline void dumpTraceToMsg(Message* msg, ObjList* lst)
 {
     if (!(msg && lst))
@@ -898,6 +926,8 @@ public:
 	    params().addParam(new ExpFunction("loadFile"));
 	    params().addParam(new ExpFunction("saveFile"));
 	    params().addParam(new ExpFunction("replaceParams"));
+	    params().addParam(new ExpFunction("replaceReferences"));
+	    params().addParam(new ExpFunction("findPath"));
 	}
     static void initialize(ScriptContext* context);
 protected:
@@ -4805,6 +4835,29 @@ bool JsJSON::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 		extraEsc = static_cast<ExpOperation*>(args[3])->at(0);
 	    replaceParams(args[0],*params,sqlEsc,extraEsc);
 	}
+    }
+    else if (oper.name() == YSTRING("replaceReferences")) {
+	// JSON.replaceReferences(obj)
+	// Return boolean (success/failure)
+	ExpOperation* op = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&op))
+	    return false;
+	bool ok = JsObject::resolveReferences(op);
+	ExpEvaluator::pushOne(stack,new ExpOperation(ok));
+    }
+    else if (oper.name() == YSTRING("findPath")) {	
+	// JSON.findPath(obj,path). 'path' may be a JPath object or string
+	// Return found data, undefined if not found
+	ExpOperation* op = 0;
+	ExpOperation* pathOp = 0;
+	if (!extractStackArgs(2,this,stack,oper,context,args,&op,&pathOp))
+	    return false;
+	JPathTmpParam jp(*pathOp);
+	ExpOperation* res = JsObject::find(op,*jp);
+	if (res)
+	    ExpEvaluator::pushOne(stack,res->clone());
+	else
+	    ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
     }
     else
 	return JsObject::runNative(stack,oper,context);

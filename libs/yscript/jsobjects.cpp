@@ -122,12 +122,118 @@ protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 };
 
+class RecursiveTraceItem : public String
+{
+public:
+    inline RecursiveTraceItem(const GenObject* obj, const char* path = 0)
+	: String(path), m_traced((GenObject*)obj), m_jpath(0)
+	{}
+    ~RecursiveTraceItem()
+	{ setJPath(0); }
+    inline const GenObject* traced() const
+	{ return m_traced; }
+    inline GenObject* traced()
+	{ return m_traced; }
+    inline GenObject* getJPath() const
+	{ return m_jpath; }
+    inline void setJPath(GenObject* obj) {
+	    if (obj == m_jpath)
+		return;
+	    TelEngine::destruct(m_jpath);
+	    m_jpath = obj;
+	}
+
+protected:
+    GenObject* m_traced;
+    GenObject* m_jpath;
+};
+
+#ifdef XDEBUG
+#define JS_DEBUG_RECURSIVE_TRACE
+#else
+//#define JS_DEBUG_RECURSIVE_TRACE
+#endif
+class RecursiveTrace
+{
+public:
+    inline RecursiveTrace(bool toJSON, JsObject* rootJS, const GenObject* root)
+	: m_json(toJSON), m_root(root), m_rootJS(rootJS) {
+	    m_append = &m_trace;
+#ifdef JS_DEBUG_RECURSIVE_TRACE
+	    Debug(DebugNote,"Start%s tracing root %p (%p)",m_json ? " JSON" : "",root,rootJS);
+#endif
+	}
+    inline bool isRoot(const GenObject* gen) const
+	{ return m_root == gen; }
+    inline RecursiveTraceItem* find(const GenObject* gen) const {
+	    if (gen)
+		for (ObjList* o = m_trace.skipNull(); o; o = o->skipNext()) {
+		    RecursiveTraceItem* it = static_cast<RecursiveTraceItem*>(o->get());
+		    if (it->traced() == gen) {
+#ifdef JS_DEBUG_RECURSIVE_TRACE
+			Debug(DebugNote,"Found traced %p path='%s'",gen,it->safe());
+#endif
+			return it;
+
+		    }
+		}
+	    return 0;
+	}
+    inline RecursiveTraceItem* findPath(const String& path) const {
+	    GenObject* gen = m_trace[path];
+	    if (!gen)
+		return 0;
+	    RecursiveTraceItem* it = static_cast<RecursiveTraceItem*>(gen);
+#ifdef JS_DEBUG_RECURSIVE_TRACE
+	    Debug(DebugNote,"Found traced %p path='%s'",gen,it->safe());
+#endif
+	    return it;
+	}
+    inline void trace(const GenObject* obj, const String& path = String::empty()) {
+	    if (!obj)
+		return;
+	    debugTrace(false,obj,path);
+	    addTrace(obj,isRoot(obj),path);
+	}
+    inline void traceJsObj(const JsObject* obj, const String& path = String::empty()) {
+	    if (!obj)
+		return;
+	    debugTrace(true,obj,path);
+	    addTrace(obj,m_rootJS == obj,path);
+	}
+
+protected:
+    inline void addTrace(const GenObject* obj, bool root, const String& path) {
+	    if (root)
+		m_append = m_append->append(new RecursiveTraceItem(obj,"#"));
+	    else if (path)
+		m_append = m_append->append(new RecursiveTraceItem(obj,"#" + path));
+	    else
+		m_append = m_append->append(new RecursiveTraceItem(obj,"#/"));
+	}
+    inline void debugTrace(bool js, const void* ptr, const String& path = String::empty()) {
+#ifdef JS_DEBUG_RECURSIVE_TRACE
+	    if ((js && m_rootJS == ptr) || (!js && ptr == m_root))
+		Debug(DebugNote,"Tracing%s root %p",(js ? " JS" : ""),ptr);
+	    else
+		Debug(DebugNote,"Tracing%s %p path='%s'",(js ? " JS" : ""),ptr,path.safe());
+#endif
+	}
+
+    bool m_json;
+    const GenObject* m_root;
+    JsObject* m_rootJS;
+    ObjList m_trace;
+    ObjList* m_append;
+};
+#undef JS_DEBUG_RECURSIVE_TRACE
+
 }; // anonymous namespace
 
 
 // Helper function that does the actual object printing
-static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int depth, ObjList& seen,
-    unsigned int flags)
+static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int depth, RecursiveTrace& seen,
+    unsigned int flags, const String& path)
 {
     if (!obj)
 	return;
@@ -138,8 +244,10 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
     if (!dump)
 	return;
     String str(' ',2 * depth);
-    if (seen.find(obj)) {
+    RecursiveTraceItem* objRecursed = seen.find(obj);
+    if (objRecursed) {
 	str << "(recursivity encountered)";
+	str.append(*objRecursed," ");
 	buf.append(str,"\r\n");
 	return;
     }
@@ -153,14 +261,20 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
     const char* subType = 0;
     const ScriptContext* scr = YOBJECT(ScriptContext,obj);
     const ExpWrapper* wrap = 0;
-    bool objRecursed = false;
     bool isFunc = false;
+    String nextPath = path;
+    if (!seen.isRoot(obj)) {
+	if (nstr)
+	    JPath::addItem(nextPath,nstr->name().safe());
+	else
+	    JPath::addItem(nextPath,"");
+    }
     if (scr) {
 	const JsObject* jso = YOBJECT(JsObject,scr);
 	if (jso) {
-	    objRecursed = (seen.find(jso) != 0);
+	    objRecursed = seen.find(jso);
 	    if ((jso != obj) && !objRecursed)
-		seen.append(jso)->setDelete(false);
+		seen.traceJsObj(jso,nextPath);
 	    if (YOBJECT(JsArray,scr))
 		type = "JsArray";
 	    else if (YOBJECT(JsFunction,scr)) {
@@ -171,13 +285,15 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 		type = "JsRegExp";
 	    else if (YOBJECT(JsDate,scr))
 		type = "JsDate";
+	    else if (YOBJECT(JsJPath,scr))
+		type = "JsJPath";
 	    else
 		type = "JsObject";
 	}
 	else
 	    type = "ScriptContext";
     }
-    seen.append(obj)->setDelete(false);
+    seen.trace(obj,nextPath);
     const ExpOperation* exp = YOBJECT(ExpOperation,nstr);
     if (exp && !scr) {
 	if ((wrap = YOBJECT(ExpWrapper,exp)))
@@ -205,6 +321,8 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 		    str << " = null";
 		else if (YOBJECT(JsRegExp,scr))
 		    str << " = /" << *nstr << "/";
+		else if (YOBJECT(JsJPath,scr))
+		    str << " = '" << *nstr << "'";
 		else if (flags & JsObject::DumpPropObjType) {
 		    if (YOBJECT(JsObject,scr))
 			str << " = " << *nstr;
@@ -236,33 +354,38 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 	str << "'" << obj->toString() << "'";
     if (dumpType)
 	str << " (" << type << (subType ? ", " : "") << subType << ")";
-    if (objRecursed)
+    if (objRecursed) {
 	str << " (already seen)";
+	//String tmpP; str << tmpP.printf(" (%p)",objRecursed->traced());
+	str.append(*objRecursed," ");
+    }
     buf.append(str,"\r\n");
     if (objRecursed)
+	return;
+    const JsObject* jso = YOBJECT(JsObject,obj);
+    if (!(scr || wrap || nptr || jso))
 	return;
     if (scr) {
 	NamedIterator iter(scr->params());
 	while (const NamedString* p = iter.get())
-	    dumpRecursiveObj(p,buf,depth + 1,seen,flags);
+	    dumpRecursiveObj(p,buf,depth + 1,seen,flags,nextPath);
 	if (scr->nativeParams()) {
 	    iter = *scr->nativeParams();
 	    while (const NamedString* p = iter.get())
-		dumpRecursiveObj(p,buf,depth + 1,seen,flags);
+		dumpRecursiveObj(p,buf,depth + 1,seen,flags,nextPath);
 	}
     }
     else if (wrap)
-	dumpRecursiveObj(wrap->object(),buf,depth + 1,seen,flags);
+	dumpRecursiveObj(wrap->object(),buf,depth + 1,seen,flags,nextPath);
     else if (nptr)
-	dumpRecursiveObj(nptr->userData(),buf,depth + 1,seen,flags);
-    const JsObject* jso = YOBJECT(JsObject,obj);
+	dumpRecursiveObj(nptr->userData(),buf,depth + 1,seen,flags,nextPath);
     if (jso) {
 	const HashList* hash = jso->getHashListParams();
 	if (hash) {
 	    for (unsigned int i = 0; i < hash->length(); i++) {
 		ObjList* lst = hash->getList(i);
 		for (lst ? lst = lst->skipNull() : 0; lst; lst = lst->skipNext())
-		    dumpRecursiveObj(lst->get(),buf,depth + 1,seen,flags);
+		    dumpRecursiveObj(lst->get(),buf,depth + 1,seen,flags,nextPath);
 	    }
 	}
     }
@@ -320,8 +443,9 @@ JsObject* JsObject::copy(ScriptMutex* mtx, const ExpOperation& oper) const
 
 void JsObject::dumpRecursive(const GenObject* obj, String& buf, unsigned int flags)
 {
-    ObjList seen;
-    dumpRecursiveObj(obj,buf,0,seen,flags);
+    RecursiveTrace seen(false,YOBJECT(JsObject,obj),obj);
+    String path;
+    dumpRecursiveObj(obj,buf,0,seen,flags,path);
 }
 
 void JsObject::printRecursive(const GenObject* obj, unsigned int flags)
@@ -374,9 +498,119 @@ ExpOperation* JsObject::toJSON(const ExpOperation* oper, int spaces)
 	spaces = 0;
     else if (spaces > 10)
 	spaces = 10;
+    RecursiveTrace trace(true,YOBJECT(JsObject,oper),0);
     ExpOperation* ret = new ExpOperation("","JSON");
-    toJSON(oper,*ret,spaces);
+    toJSON(oper,*ret,spaces,0,&trace);
     return ret;
+}
+
+static bool internalResolveReferences(ExpOperation* root, ExpWrapper* param, RecursiveTrace& trace);
+
+static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTrace& trace)
+{
+    if (!(root && crt))
+	return true;
+    JsObject* jso = YOBJECT(JsObject,crt);
+    if (!jso)
+	return true;
+    String str;
+    if (!jso->getStringField(YSTRING("$ref"),str)) {
+	trace.trace(jso,"-");
+	internalResolveReferences(root,crt,trace);
+	return true;
+    }
+    ExpOperation* found = 0;
+    if ("#" == str)
+	found = root;
+    else if ('#' == str[0]) {
+	RecursiveTraceItem* it = trace.findPath(str);
+	if (it)
+	    found = static_cast<ExpOperation*>(it->traced());
+	else {
+	    JPath path(str.substr(1));
+	    found = JsObject::find(root,path);
+	    if (!found)
+		return false;
+	    trace.trace(found,path);
+	}
+    }
+    else {
+	Debug(DebugMild,"Invalid JSON path '%s'",str.c_str());
+	return false;
+    }
+
+    jso = YOBJECT(JsObject,found);
+    if (!jso) {
+	Debug(DebugMild,"Found non object for JSON path '%s'",str.c_str());
+	return false;
+    }
+    if (jso == crt->object())
+	return true;
+    if (jso->ref()) {
+	crt->setObject(jso);
+	return true;
+    }
+    return false;
+}
+
+static bool internalResolveReferences(ExpOperation* root, ExpWrapper* wrap, RecursiveTrace& trace)
+{
+    if (!root)
+	return true;
+    JsObject* jso = wrap ? YOBJECT(JsObject,wrap) : YOBJECT(JsObject,root);
+    JsArray* jsa = YOBJECT(JsArray,jso);
+    bool rVal = true;
+    if (jsa) {
+	unsigned int n = jsa->length();
+	for (unsigned int i = 0; i < n; i++) {
+	    wrap = YOBJECT(ExpWrapper,jsa->params().getParam(String(i)));
+	    if (wrap)
+		rVal = resolveJsReference(root,wrap,trace) && rVal;
+	}
+    }
+    else if (jso) {
+	for (ObjList* o = jso->params().paramList()->skipNull(); o; o = o->skipNext()) {
+	    wrap = YOBJECT(ExpWrapper,o->get());
+	    if (wrap)
+		rVal = resolveJsReference(root,wrap,trace) && rVal;
+	}
+    }
+    return rVal;
+}
+
+bool JsObject::resolveReferences(ExpOperation* oper)
+{
+    if (!oper)
+	return true;
+    RecursiveTrace trace(true,YOBJECT(JsObject,oper),0);
+    return internalResolveReferences(oper,0,trace);
+}
+
+ExpOperation* JsObject::find(ExpOperation* oper, const JPath& path)
+{
+    if (!path.valid())
+	return 0;
+    JsObject* obj = YOBJECT(JsObject,oper);
+    if (!obj)
+	return 0;
+
+    if (!path.count())
+	return oper;
+    for (unsigned int i = 0; i < path.count(); ) {
+	const String& prop = path[i++];
+	if (prop == JsObject::protoName())
+	    return 0;
+	JsArray* jsa = YOBJECT(JsArray,obj);
+	if (jsa && (0 > JPath::validArrayIndex(prop)))
+	    return 0;
+	ExpOperation* found = YOBJECT(ExpOperation,obj->params().getParam(prop));
+	if (!found || i == path.count())
+	    return found;
+	obj = YOBJECT(JsObject,found);
+	if (!obj)
+	    return 0;
+    }
+    return 0;
 }
 
 // Utility: retrieve a JSON candidate from given list item
@@ -424,7 +658,34 @@ static inline GenObject* nextJSONCandidate(const HashList& hash, unsigned int& i
     return 0;
 }
 
-void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces, int indent)
+// Utility used in internalToJSON to handle recursivity
+// Return true if handled
+bool JsObject::recursiveToJSON(String& newPath, JsObject* jso, String& buf, int spaces, int indent,
+    void* data, const String& path, const String& crtProp)
+{
+    if (!(jso && data))
+	return false;
+    RecursiveTrace* trace = (RecursiveTrace*)data;
+    RecursiveTraceItem* it = trace->find(jso);
+    if (!it) {
+	newPath = path;
+	JPath::addItem(newPath,crtProp);
+	trace->traceJsObj(jso,newPath);
+	return false;
+    }
+    GenObject* obj = it->getJPath();
+    if (!obj) {
+	JsObject* jobj = new JsObject;
+	jobj->setStringField("$ref",*it);
+	obj = new ExpWrapper(jobj);
+	it->setJPath(obj);
+    }
+    internalToJSON(obj,false,buf,spaces,indent);
+    return true;
+}
+
+void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces, int indent,
+    void* data, const String& path, const String& crtProp)
 {
     if (!obj) {
 	buf << "null";
@@ -447,6 +708,9 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
     JsObject* jso = YOBJECT(JsObject,oper);
     JsArray* jsa = YOBJECT(JsArray,jso);
     if (jsa) {
+	String newPath;
+	if (recursiveToJSON(newPath,jsa,buf,spaces,indent,data,path,crtProp))
+	    return;
 	if (jsa->length() <= 0) {
 	    buf << "[]";
 	    return;
@@ -458,7 +722,7 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
 	    buf << ci;
 	    const NamedString* p = jsa->params().getParam(String(i));
 	    if (p)
-		toJSON(p,buf,spaces,indent + spaces);
+		toJSON(p,buf,spaces,indent + spaces,data,newPath,p->name());
 	    else
 		buf << "null";
 	    if (++i < jsa->length())
@@ -472,10 +736,13 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
 	return;
     }
     if (jso) {
-	if (YOBJECT(JsDate,jso)) {
+	if (YOBJECT(JsDate,jso) || YOBJECT(JsJPath,jso)) {
 	    buf << strEscape(jso->toString());
 	    return;
 	}
+	String newPath;
+	if (recursiveToJSON(newPath,jso,buf,spaces,indent,data,path,crtProp))
+	    return;
 	const HashList* hash = jso->getHashListParams();
 	if (hash) {
 	    ObjList* crt = hash->getList(0);
@@ -491,7 +758,7 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
 	    buf << "{" << nl;
 	    while (gen) {
 		buf << ci << strEscape(gen->toString()) << sep;
-		internalToJSON(gen,false,buf,spaces,indent + spaces);
+		internalToJSON(gen,false,buf,spaces,indent + spaces,data,newPath,gen->toString());
 		gen = static_cast<NamedString*>(nextJSONCandidate(*hash,idx,crt));
 		if (gen)
 		    buf << ",";
@@ -517,7 +784,7 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
 	const NamedString* p = static_cast<NamedString*>(nextJSONCandidate(l));
 	while (p) {
 	    buf << ci << strEscape(p->name()) << sep;
-	    internalToJSON(p,true,buf,spaces,indent + spaces);
+	    internalToJSON(p,true,buf,spaces,indent + spaces,data,newPath,p->name());
 	    p = static_cast<NamedString*>(nextJSONCandidate(l));
 	    if (p)
 		buf << ",";
@@ -807,6 +1074,8 @@ void JsObject::initialize(ScriptContext* context)
 	addConstructor(p,"Date",new JsDate(mtx));
     if (!p.getParam(YSTRING("Math")))
 	addObject(p,"Math",new JsMath(mtx));
+    if (!p.getParam(YSTRING("JPath")))
+	addConstructor(p,"JPath",new JsJPath(mtx));
 }
 
 void JsObject::setLineForObj(JsObject* obj,unsigned int lineNo, bool recursive)
@@ -1982,5 +2251,169 @@ bool JsDate::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 	return JsObject::runNative(stack,oper,context);
     return true;
 }
+
+
+//
+// JPath
+//
+JPath::JPath(const char* value)
+    : String(value),
+    m_data(0), m_count(0)
+{
+    parse();
+}
+
+JPath::JPath(const JPath& other)
+    : String(other),
+    m_data(0), m_count(0)
+{
+    if (!(other.m_data && other.m_count))
+	return;
+    m_data = new String[other.m_count];
+    m_count = other.m_count;
+    for (unsigned int i = 0; i < m_count; i++)
+	m_data[i] = other.m_data[i];
+}
+
+JPath::~JPath()
+{
+    reset();
+}
+
+void JPath::changed()
+{
+    parse();
+}
+
+void JPath::parse()
+{
+    reset();
+    if (!c_str())
+	return;
+    if ('/' != *c_str()) {
+	Debug(DebugWarn,"JPath(%s): invalid path - not starting with '/'",c_str());
+	return;
+    }
+
+    ObjList* lst = split('/');
+    ObjList* o = lst->skipNull();
+    m_count = lst->count();
+    if (o)
+	o = o->skipNext();
+    if (m_count)
+	m_count--;
+    bool ok = true;
+    if (m_count) {
+	m_data = new String[m_count];
+	unsigned int itemIdx = 0;
+	for (; o && ok && itemIdx < m_count; o = o->skipNext(), itemIdx++) {
+	    String& str = *static_cast<String*>(o->get());
+	    if (!str)
+		continue;
+	    char* start = (char*)(str.c_str());
+	    for (char* s = start; *s; s++) {
+		if ('~' != *s)
+		    continue;
+		char c = unescapeChar(s[1]);
+		if (!c) {
+		    Debug(DebugWarn,"JPath(%s): invalid item %u - %s",
+			c_str(),itemIdx,(s[1] ? "unknown escape char" : "unexpected end after escape"));
+		    ok = false;
+		    break;
+		}
+		*s = 0;
+		m_data[itemIdx] << start << c;
+		start = s + 2;
+		*s++ = '~';
+	    }
+	    if (*start)
+		m_data[itemIdx] << start;
+	}
+    }
+    TelEngine::destruct(lst);
+    if (!ok)
+	reset();
+}
+
+
+//
+// JsJPath
+//
+JsJPath::JsJPath(ScriptMutex* mtx)
+    : JsObject("JPath",mtx,true)
+{
+    params().addParam(new ExpFunction("getItems"));
+    params().addParam(new ExpFunction("at"));
+    params().addParam(new ExpFunction("count"));
+    params().addParam(new ExpFunction("valid"));
+}
+
+JsObject* JsJPath::runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    XDebug(DebugAll,"JsJPath::runConstructor '%s'(" FMT64 ")",oper.name().c_str(),oper.number());
+    ObjList args;
+    JsObject* obj = 0;
+    int n = extractArgs(stack,oper,context,args);
+    if (1 == n) {
+	ExpOperation* val = static_cast<ExpOperation*>(args[0]);
+	if (!val)
+	    return 0;
+	obj = new JsJPath(mutex(),oper.lineNumber(),val->c_str());
+    }
+    else
+	return 0;
+    if (obj) {
+	if (ref())
+	    obj->params().addParam(new ExpWrapper(this,protoName()));
+	else
+	    TelEngine::destruct(obj);
+    }
+    return obj;
+}
+
+bool JsJPath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    XDebug(DebugAll,"JsJPath::runNative() '%s' in '%s' [%p]",
+	oper.name().c_str(),toString().c_str(),this);
+    if (oper.name() == YSTRING("getItems")) {
+	// Returns array of items
+	JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+	for (unsigned int i = 0; i < m_path.count(); i++)
+	    jsa->push(new ExpOperation(m_path[i]));
+	ExpEvaluator::pushOne(stack,new ExpWrapper(jsa));
+    }
+    else if (oper.name() == YSTRING("at")) {
+	// Retrieve path item at given index
+	ObjList args;
+	if (!extractArgs(this,stack,oper,context,args))
+	    return false;
+	unsigned int idx = m_path.count();
+	if (m_path.count()) {
+	    ExpOperation* op = static_cast<ExpOperation*>(args[0]);
+	    if (op && op->isInteger())
+		idx = (unsigned int)op->number();
+	}
+	if (idx < m_path.count())
+	    ExpEvaluator::pushOne(stack,new ExpOperation(m_path[idx]));
+	else
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(0,"undefined"));
+    }
+    else if (oper.name() == YSTRING("count"))
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)m_path.count()));
+    else if (oper.name() == YSTRING("valid"))
+	ExpEvaluator::pushOne(stack,new ExpOperation(m_path.valid()));
+    else
+	return JsObject::runNative(stack,oper,context);
+
+    return true;
+}
+
+void* JsJPath::getObject(const String& name) const
+{
+    void* obj = (name == YATOM("JsJPath")) ? const_cast<JsJPath*>(this)
+	: JsObject::getObject(name);
+    return obj ? obj : m_path.getObject(name);
+}
+
 
 /* vi: set ts=8 sw=4 sts=4 noet: */
