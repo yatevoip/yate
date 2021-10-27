@@ -153,6 +153,13 @@ protected:
 #else
 //#define JS_DEBUG_RECURSIVE_TRACE
 #endif
+
+#ifdef XDEBUG
+#define JS_DEBUG_REPLACE_REFERENCES
+#else
+//#define JS_DEBUG_REPLACE_REFERENCES
+#endif
+
 class RecursiveTrace
 {
 public:
@@ -506,7 +513,8 @@ ExpOperation* JsObject::toJSON(const ExpOperation* oper, int spaces)
 
 static bool internalResolveReferences(ExpOperation* root, ExpWrapper* param, RecursiveTrace& trace);
 
-static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTrace& trace)
+static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTrace& trace,
+    const String& prop)
 {
     if (!(root && crt))
 	return true;
@@ -514,10 +522,16 @@ static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTra
     if (!jso)
 	return true;
     String str;
-    if (!jso->getStringField(YSTRING("$ref"),str)) {
+    bool ok = jso->getStringField(YSTRING("$ref"),str);
+#ifdef JS_DEBUG_REPLACE_REFERENCES
+    Debug(DebugAll,"resolveJsReference%s root=(%p '%s') current=(%p) prop='%s' ref='%s'",
+	(ok ? "" : " (no ref)"),root,root->toString().c_str(),crt,prop.safe(),str.safe());
+#endif
+    if (!ok) {
+	if (trace.find(jso))
+	    return true;
 	trace.trace(jso,"-");
-	internalResolveReferences(root,crt,trace);
-	return true;
+	return internalResolveReferences(root,crt,trace);
     }
     ExpOperation* found = 0;
     if ("#" == str)
@@ -544,6 +558,10 @@ static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTra
 	Debug(DebugMild,"Found non object for JSON path '%s'",str.c_str());
 	return false;
     }
+#ifdef JS_DEBUG_REPLACE_REFERENCES
+    Debug(DebugAll,"resolveJsReference root: %p '%s' found %p '%s'",
+	root,root->toString().c_str(),jso,jso->toString().c_str());
+#endif
     if (jso == crt->object())
 	return true;
     if (jso->ref()) {
@@ -559,20 +577,29 @@ static bool internalResolveReferences(ExpOperation* root, ExpWrapper* wrap, Recu
 	return true;
     JsObject* jso = wrap ? YOBJECT(JsObject,wrap) : YOBJECT(JsObject,root);
     JsArray* jsa = YOBJECT(JsArray,jso);
+#ifdef JS_DEBUG_REPLACE_REFERENCES
+    Debugger dbg(DebugInfo,"internalResolveReferences",
+	" root=(%p '%s') wrap=(%p) object=(%p '%s') array=%u",
+	root,root->toString().c_str(),wrap,jso,(jso ? jso->toString().safe() : ""),jsa);
+#endif
     bool rVal = true;
     if (jsa) {
 	unsigned int n = jsa->length();
 	for (unsigned int i = 0; i < n; i++) {
-	    wrap = YOBJECT(ExpWrapper,jsa->params().getParam(String(i)));
+	    String name(i);
+	    wrap = YOBJECT(ExpWrapper,jsa->params().getParam(name));
 	    if (wrap)
-		rVal = resolveJsReference(root,wrap,trace) && rVal;
+		rVal = resolveJsReference(root,wrap,trace,name) && rVal;
 	}
     }
     else if (jso) {
 	for (ObjList* o = jso->params().paramList()->skipNull(); o; o = o->skipNext()) {
 	    wrap = YOBJECT(ExpWrapper,o->get());
-	    if (wrap)
-		rVal = resolveJsReference(root,wrap,trace) && rVal;
+	    if (!wrap)
+		continue;
+	    const String& name = wrap->name();
+	    if (name != JsObject::protoName())
+		rVal = resolveJsReference(root,wrap,trace,name) && rVal;
 	}
     }
     return rVal;
@@ -582,6 +609,9 @@ bool JsObject::resolveReferences(ExpOperation* oper)
 {
     if (!oper)
 	return true;
+#ifdef JS_DEBUG_REPLACE_REFERENCES
+    Debugger dbg(DebugInfo,"JsObject::resolveReferences"," %p '%s'",oper,oper->toString().c_str());
+#endif
     RecursiveTrace trace(true,YOBJECT(JsObject,oper),0);
     return internalResolveReferences(oper,0,trace);
 }
