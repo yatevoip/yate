@@ -133,8 +133,19 @@
 ; realm: string: Authentication realm to offer in authentication requests
 ;realm=Yate
 
-; transfer: bool: Allow handling the REFER message to perform transfers
+; transfer: bool/keyword: Allow handling the REFER message to perform transfers
+; 'chan-disable': Enable global transfer flag (advertise REFER is supported)
+;   REFER handling is disabled in call legs
+;   REFER handling MUST be explicitly enabled per call leg when routing
+;   Parameter: 'enable_refer' for outgoing leg, 'ienable_refer' for incoming leg
 ;transfer=enable in server mode, disable in client mode
+
+; refer_update: boolean: Emit a call.update with 'operation'='transfer' when handling REFER
+; If enabled the message MUST succeed (must be handled and return value not '-' or 'error')
+; REFER will fail if call.update fails
+; The handler may set a 'transferred' parameter to boolean 'true' to stop further REFER processing
+;  and notify success to implicit subscription
+;refer_update=no
 
 ; registrar: bool: Allow the SIP module to receive registration requests
 ; OBSOLETE - please use "enable" in section [registar]

@@ -897,11 +897,22 @@ class YateSIPRefer : public Thread
 public:
     YateSIPRefer(const String& transferorID, const String& transferredID,
 	Driver* transferredDrv, Message* msg, SIPMessage* sipNotify,
-	SIPTransaction* transaction);
+	SIPTransaction* transaction, Message* validate);
     virtual void run(void);
     virtual void cleanup(void)
 	{ release(true); }
 private:
+    inline void setSuccess() {
+	    m_rspCode = 202;
+	    m_notifyCode = 200;
+	}
+    inline bool setFailure(int code) {
+	    m_rspCode = m_notifyCode = code;
+	    return false;
+	}
+    // Check success after message dispatch
+    // Return true if succeeded. Set response on failure
+    bool checkSuccess(const Message& msg, bool ok, void* chan);
     // Respond the transaction and deref() it
     void setTrResponse(int code);
     // Set transaction response. Send the notification message. Notify the
@@ -916,6 +927,7 @@ private:
     int m_notifyCode;                // The result to send with NOTIFY
     SIPTransaction* m_transaction;   // The transaction to respond to
     int m_rspCode;                   // The transaction response
+    Message* m_validate;             // Message to dispatch before further handling
 };
 
 class YateSIPRegister : public Thread
@@ -1084,6 +1096,16 @@ private:
 	    m_silent = true;
 	    clearTransaction();
 	}
+    inline void setRefer(const NamedList& params) {
+	    if (isIncoming()) {
+		m_refer = params.getBoolValue(YSTRING("ienable_refer"),m_refer);
+		m_referUpdate = m_refer && params.getBoolValue(YSTRING("irefer_update"),m_referUpdate);
+	    }
+	    else {
+		m_refer = params.getBoolValue(YSTRING("enable_refer"),m_refer);
+		m_referUpdate = m_refer && params.getBoolValue(YSTRING("refer_update"),m_referUpdate);
+	    }
+	}
 
     SIPTransaction* m_tr;
     SIPTransaction* m_tr2;
@@ -1112,8 +1134,9 @@ private:
     bool m_missingAllowInfoDefVal;       // Default INFO support if Allow header is missing
     DtmfMethods m_dtmfMethods;
     bool m_honorDtmfDetect;
-    // REFER already running
-    bool m_referring;
+    bool m_referring;                    // REFER already running
+    bool m_refer;                        // REFER enabled
+    bool m_referUpdate;                  // Send call.update on REFER
     // reINVITE requested or in progress
     int m_reInviting;
     // sequence number of last transmitted PRACK
@@ -1171,7 +1194,7 @@ public:
     YateSIPConnection* findCall(const String& callid, bool incRef = false);
     YateSIPConnection* findDialog(const SIPDialog& dialog, bool incRef = false);
     YateSIPConnection* findDialog(const String& dialog, const String& fromTag,
-	const String& toTag, bool incRef = false);
+	const String& toTag, bool incRef = false, RefPointer<YateSIPConnection>* conn = 0);
     YateSIPLine* findLine(const String& line) const;
     YateSIPLine* findLine(const String& addr, int port, const String& user = String::empty(),
 	SIPParty* party = 0);
@@ -1260,6 +1283,8 @@ static bool s_1xx_formats = true;
 static bool s_sdp_implicit = true;
 static bool s_rtp_preserve = false;
 static bool s_enable_transfer = false;
+static bool s_referChan = false;         // Handle REFER in channel only
+static bool s_refer_update = false;      // Send call.update when handling REFER
 static bool s_enable_options = false;
 static bool s_enable_message = false;
 static bool s_enable_register = false;
@@ -6033,11 +6058,12 @@ bool YateSIPEndPoint::generic(const SIPMessage* message, SIPTransaction* t, cons
 // sipNotify: already populated SIPMessage("NOTIFY")
 YateSIPRefer::YateSIPRefer(const String& transferorID, const String& transferredID,
     Driver* transferredDrv, Message* msg, SIPMessage* sipNotify,
-    SIPTransaction* transaction)
+    SIPTransaction* transaction, Message* validate)
     : Thread("YSIP Transfer"),
     m_transferorID(transferorID), m_transferredID(transferredID),
     m_transferredDrv(transferredDrv), m_msg(msg), m_sipNotify(sipNotify),
-    m_notifyCode(200), m_transaction(0), m_rspCode(500)
+    m_notifyCode(200), m_transaction(0), m_rspCode(500),
+    m_validate(validate)
 {
     if (transaction && transaction->ref())
 	m_transaction = transaction;
@@ -6058,29 +6084,55 @@ void YateSIPRefer::run()
 
     // Use a while() to break to the end
     while (m_transferredDrv && m_msg) {
+	RefPointer<YateSIPConnection> attendedConn;
+	String* from = 0;
+	String* to = 0;
+	if (attended) {
+	    from = m_msg->getParam(YSTRING("transfer_fromtag"));
+	    to = m_msg->getParam(YSTRING("transfer_totag"));
+	    if (!(null(from) && null(to)))
+		plugin.findDialog(*attended,*from,*to,false,&attendedConn);
+	}
+	if (m_validate) {
+	    if (attended) {
+		if (attendedConn) {
+		    m_validate->addParam("attended_id",attendedConn->id());
+		    RefPointer<CallEndpoint> peer = YOBJECT(CallEndpoint,attendedConn->getPeer());
+		    if (peer)
+			m_validate->addParam("attended_peerid",peer->id());
+		}
+	    }
+	    bool ok = Engine::dispatch(m_validate);
+	    if (!checkSuccess(*m_validate,ok,plugin.find(m_transferorID)))
+		break;
+	    // Done ?
+	    if (m_validate->getBoolValue(YSTRING("transferred"))) {
+		// TODO: Check if request was sent to a remote party
+		//       We may want to wait for notify ...
+		setSuccess();
+		break;
+	    }
+	}
 	// Attended transfer: check if the requested channel is owned by our plugin
 	// NOTE: Remove the whole 'if' when a routing module will be able to route
 	//  attended transfer requests
 	if (attended) {
-	    String* from = m_msg->getParam(YSTRING("transfer_fromtag"));
-	    String* to = m_msg->getParam(YSTRING("transfer_totag"));
-	    if (null(from) || null(to)) {
-		m_rspCode = m_notifyCode = 487;     // Request Terminated
-		break;
-	    }
-	    YateSIPConnection* conn = plugin.findDialog(*attended,*from,*to,true);
-	    if (conn) {
+	    if (attendedConn) {
 		m_transferredDrv->lock();
 		RefPointer<Channel> chan = m_transferredDrv->find(m_transferredID);
 		m_transferredDrv->unlock();
-		if (chan && conn->getPeer() &&
-		    chan->connect(conn->getPeer(),m_msg->getValue(YSTRING("reason")))) {
-		    m_rspCode = 202;
-		    m_notifyCode = 200;
-		}
+		DDebug(&plugin,DebugAll,"%s conn=(%p '%s') found transferred (%p '%s') [%p]",
+		    name(),(void*)attendedConn,attendedConn->id().c_str(),
+		    (void*)chan,(chan ? chan->id().safe() : ""),this);
+		if (chan && attendedConn->getPeer() &&
+		    chan->connect(attendedConn->getPeer(),m_msg->getValue(YSTRING("reason"))))
+		    setSuccess();
 		else
-		    m_rspCode = m_notifyCode = 487;     // Request Terminated
-		TelEngine::destruct(conn);
+		    setFailure(487);
+		break;
+	    }
+	    if (null(from) || null(to)) {
+		setFailure(487);
 		break;
 	    }
 	    // Not ours
@@ -6093,45 +6145,48 @@ void YateSIPRefer::run()
 	m_transferredDrv->lock();
 	RefPointer<Channel> chan = m_transferredDrv->find(m_transferredID);
 	m_transferredDrv->unlock();
-	if (!(ok && chan)) {
-#ifdef DEBUG
-	    if (ok)
-		Debug(&plugin,DebugAll,"%s(%s). Connection vanished while routing! [%p]",
-		    name(),m_transferorID.c_str(),this);
-	    else
-		Debug(&plugin,DebugAll,"%s(%s). 'call.route' failed [%p]",
-		    name(),m_transferorID.c_str(),this);
-#endif
-	    m_rspCode = m_notifyCode = (ok ? 487 : 481);
+	if (!checkSuccess(*m_msg,ok,chan))
 	    break;
-	}
+	DDebug(&plugin,DebugAll,"%s(%s). Call succesfully routed [%p]",
+	    name(),m_transferorID.c_str(),this);
 	m_msg->userData(chan);
-	if ((m_msg->retValue() == "-") || (m_msg->retValue() == YSTRING("error")))
-	    m_rspCode = m_notifyCode = 603; // Decline
-	else if (m_msg->getIntValue(YSTRING("antiloop"),1) <= 0)
-	    m_rspCode = m_notifyCode = 482; // Loop Detected
-	else {
-	    DDebug(&plugin,DebugAll,"%s(%s). Call succesfully routed [%p]",
+	*m_msg = "call.execute";
+	m_msg->setParam(YSTRING("callto"),m_msg->retValue());
+	m_msg->clearParam(YSTRING("error"));
+	m_msg->retValue().clear();
+	if (Engine::dispatch(m_msg)) {
+	    DDebug(&plugin,DebugAll,"%s(%s). 'call.execute' succeeded [%p]",
 		name(),m_transferorID.c_str(),this);
-	    *m_msg = "call.execute";
-	    m_msg->setParam("callto",m_msg->retValue());
-	    m_msg->clearParam(YSTRING("error"));
-	    m_msg->retValue().clear();
-	    if (Engine::dispatch(m_msg)) {
-		DDebug(&plugin,DebugAll,"%s(%s). 'call.execute' succeeded [%p]",
-		    name(),m_transferorID.c_str(),this);
-		m_rspCode = 202;
-		m_notifyCode = 200;
-	    }
-	    else {
-		DDebug(&plugin,DebugAll,"%s(%s). 'call.execute' failed [%p]",
-		    name(),m_transferorID.c_str(),this);
-		m_rspCode = m_notifyCode = 603; // Decline
-	    }
+	    setSuccess();
+	}
+	else {
+	    DDebug(&plugin,DebugAll,"%s(%s). 'call.execute' failed [%p]",
+		name(),m_transferorID.c_str(),this);
+	    setFailure(603); // Decline
 	}
 	break;
     }
     release();
+}
+
+bool YateSIPRefer::checkSuccess(const Message& msg, bool ok, void* chan)
+{
+    if (!(ok && chan)) {
+#ifdef DEBUG
+	if (ok)
+	    Debug(&plugin,DebugAll,"%s(%s). Connection vanished while %s [%p]",
+		name(),m_transferorID.c_str(),msg.c_str(),this);
+	else
+	    Debug(&plugin,DebugAll,"%s(%s). %s failed [%p]",
+		name(),m_transferorID.c_str(),msg.c_str(),this);
+#endif
+	return setFailure(ok ? 487 : 481);
+    }
+    if ((msg.retValue() == "-") || (msg.retValue() == YSTRING("error")))
+	return setFailure(msg.getIntValue(YSTRING("code"),dict_errors,603)); // Decline
+    if (msg.getIntValue(YSTRING("antiloop"),1) <= 0)
+	return setFailure(482); // Loop Detected
+    return true;
 }
 
 // Respond the transaction and deref() it
@@ -6152,6 +6207,7 @@ void YateSIPRefer::release(bool fromCleanup)
 {
     setTrResponse(m_rspCode);
     TelEngine::destruct(m_msg);
+    TelEngine::destruct(m_validate);
     // Set NOTIFY response and send it (only if the transaction was accepted)
     if (m_sipNotify) {
 	if (m_rspCode < 300 && plugin.ep() && plugin.ep()->engine()) {
@@ -6189,7 +6245,8 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
       m_authBye(true), m_autoChangeParty(tr->getEngine()->autoChangeParty()),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
-      m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
+      m_referring(false), m_refer(s_referChan), m_referUpdate(s_refer_update),
+      m_reInviting(ReinviteNone), m_lastRseq(0),
       m_revert(""), m_silent(false), m_stopOCall(false), m_traceId(tr->traceId())
 {
     m_ipv6 = s_ipv6;
@@ -6390,13 +6447,15 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
       m_authBye(false), m_autoChangeParty(true),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
-      m_referring(false), m_reInviting(ReinviteNone), m_lastRseq(0),
+      m_referring(false), m_refer(s_referChan), m_referUpdate(s_refer_update),
+      m_reInviting(ReinviteNone), m_lastRseq(0),
       m_revert(""), m_silent(false), m_stopOCall(msg.getBoolValue(YSTRING("stop_call"))),
       m_traceId(msg.getValue(YSTRING("trace_id")))
 {
     TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,'%s') [%p]",
 	&msg,uri.c_str(),this);
     setChanParams(msg);
+    setRefer(msg);
     m_autoChangeParty = msg.getBoolValue(YSTRING("oautochangeparty"),
 	plugin.ep()->engine()->autoChangeParty());
     m_line = msg.getValue(YSTRING("line"));
@@ -7762,6 +7821,10 @@ bool YateSIPConnection::doInfo(SIPTransaction* t)
 
 void YateSIPConnection::doRefer(SIPTransaction* t)
 {
+    if (!m_refer) {
+	t->setResponse(603);
+	return;
+    }
     if (m_authBye && !checkUser(t))
 	return;
     DDebug(this,DebugAll,"doRefer(%p) [%p]",t,this);
@@ -7851,15 +7914,30 @@ void YateSIPConnection::doRefer(SIPTransaction* t)
 
     Message* msg = 0;
     SIPMessage* sipNotify = 0;
-    Channel* ch = YOBJECT(Channel,getPeer());
-    if (ch && ch->driver() &&
-	initTransfer(msg,sipNotify,t->initialMessage(),refHdr,uri,replaces)) {
-	(new YateSIPRefer(id(),ch->id(),ch->driver(),msg,sipNotify,t))->startup();
+    RefPointer<Channel> ch = YOBJECT(Channel,getPeer());
+    if (ch && !ch->driver())
+	ch = 0;
+    if (!(ch && initTransfer(msg,sipNotify,t->initialMessage(),refHdr,uri,replaces))) {
+	DDebug(this,DebugAll,"doRefer(%p). Transfer init failed%s [%p]",
+	    t,(ch ? "" : ": no peer or peer has no driver"),this);
+	t->setResponse(503);       // Service Unavailable
+	m_referring = false;
+	ch = 0;
 	return;
     }
-    DDebug(this,DebugAll,"doRefer(%p). No peer or peer has no driver [%p]",t,this);
-    t->setResponse(503);       // Service Unavailable
-    m_referring = false;
+    Message* upd = 0;
+    if (m_referUpdate) {
+	upd = message("call.update");
+	upd->setParam(YSTRING("operation"),"transfer");
+	upd->copyParams(*msg,"transfer_callid,transfer_fromtag,transfer_totag,diverter,divertername");
+	const SIPMessage& refer = *(t->initialMessage());
+	copySipHeaders(*upd,refer,false,
+	    static_cast<const YateSIPEngine*>(t->getEngine())->foreignAuth(),s_initialHeaders);
+	doDecodeIsupBody(&plugin,*upd,refer.body);
+	copySipBody(*upd,refer);
+    }
+    (new YateSIPRefer(id(),ch->id(),ch->driver(),msg,sipNotify,t,upd))->startup();
+    ch = 0;
 }
 
 void YateSIPConnection::doMessage(SIPTransaction* t)
@@ -8086,6 +8164,12 @@ bool YateSIPConnection::msgUpdate(Message& msg)
     Lock lock(driver());
     if (m_hungup)
 	return false;
+    if (*oper == YSTRING("transfer")) {
+	// TODO: Forward REFER.
+	//       Build Refer-To: identify requested chan, use its call id and from/to tag instead of requested
+	Debug(this,DebugNote,"Update 'transfer' not implemented [%p]",this);
+	return false;
+    }
     if (*oper == YSTRING("request")) {
 	if (m_tr || m_tr2) {
 	    DDebug(this,DebugWarn,"Update request rejected, pending:%s%s [%p]",
@@ -8365,6 +8449,7 @@ void YateSIPConnection::callAccept(Message& msg)
 	if (m_tr && !infoAllowed(m_tr->initialMessage()))
 	    m_dtmfMethods.reset(DtmfMethods::Info);
     }
+    setRefer(msg);
     Channel::callAccept(msg);
 
     if ((m_reInviting == ReinviteNone) && !m_rtpForward && !isAnswered() &&
@@ -8550,7 +8635,6 @@ bool YateSIPConnection::initTransfer(Message*& msg, SIPMessage*& sipNotify,
     //  we won't need it if the transfer fails
     // Set notify party from received REFER?
     // Remember: createDlgMsg() sets the party from channel's party
-    TraceDebug(m_traceId,this,DebugStub,"initTransfer. Possible incomplete NOTIFY party creation [%p]",this);
     if (co) {
 	tmp = *co;
 	static const Regexp r("^[^<]*<\\([^>]*\\)>.*$");
@@ -9263,15 +9347,19 @@ YateSIPConnection* SIPDriver::findDialog(const SIPDialog& dialog, bool incRef)
 }
 
 YateSIPConnection* SIPDriver::findDialog(const String& dialog, const String& fromTag,
-    const String& toTag, bool incRef)
+    const String& toTag, bool incRef, RefPointer<YateSIPConnection>* conn)
 {
     XDebug(this,DebugAll,"SIPDriver finding dialog '%s' fromTag='%s' toTag='%s'",
 	dialog.c_str(),fromTag.c_str(),toTag.c_str());
     Lock mylock(this);
     for (ObjList* o = channels().skipNull(); o; o = o->skipNext()) {
 	YateSIPConnection* c = static_cast<YateSIPConnection*>(o->get());
-	if (c->isDialog(dialog,fromTag,toTag))
+	if (!c->isDialog(dialog,fromTag,toTag))
+	    continue;
+	if (!conn)
 	    return (incRef ? c->ref() : c->alive()) ? c : 0;
+	*conn = c;
+	return *conn;
     }
     return 0;
 }
@@ -9483,7 +9571,9 @@ void SIPDriver::initialize()
     s_cfg = Engine::configFile("ysipchan");
     s_globalMutex.lock();
     s_cfg.load();
+    NamedList empty("");
     NamedList* general = s_cfg.getSection("general");
+    NamedList& gen = general ? *general : empty;
     TelEngine::destruct(s_authCopyHeader);
     if (general) {
 	String* dtmfMethods = general->getParam("dtmfmethods");
@@ -9539,7 +9629,14 @@ void SIPDriver::initialize()
     s_defEncoding = s_cfg.getIntValue("general","body_encoding",SipHandler::s_bodyEnc,SipHandler::BodyBase64);
     s_gen_async = s_cfg.getBoolValue("general","async_generic",true);
     s_sipt_isup = s_cfg.getBoolValue("sip-t","isup",false);
-    s_enable_transfer = s_cfg.getBoolValue("general","transfer",!Engine::clientMode());
+    const String& transfer = gen[YSTRING("transfer")];
+    if (transfer == YSTRING("chan-disable")) {
+	s_enable_transfer = true;
+	s_referChan = false;
+    }
+    else
+	s_referChan = s_enable_transfer = transfer.toBoolean(!Engine::clientMode());
+    s_refer_update = gen.getBoolValue(YSTRING("refer_update"));
     s_enable_options = s_cfg.getBoolValue("options","enable",
 	s_cfg.getBoolValue("general","options",true));
     s_enable_message = s_cfg.getBoolValue("message","enable",false);
