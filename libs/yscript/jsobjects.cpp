@@ -533,10 +533,14 @@ static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTra
 	trace.trace(jso,"-");
 	return internalResolveReferences(root,crt,trace);
     }
+    if ('#' != str[0]) {
+	Debug(DebugMild,"Invalid JSON path '%s'",str.c_str());
+	return false;
+    }
     ExpOperation* found = 0;
-    if ("#" == str)
-	found = root;
-    else if ('#' == str[0]) {
+    if (1 == str.length())
+        found = root;
+    else {
 	RecursiveTraceItem* it = trace.findPath(str);
 	if (it)
 	    found = static_cast<ExpOperation*>(it->traced());
@@ -547,10 +551,6 @@ static bool resolveJsReference(ExpOperation* root, ExpWrapper* crt, RecursiveTra
 		return false;
 	    trace.trace(found,path);
 	}
-    }
-    else {
-	Debug(DebugMild,"Invalid JSON path '%s'",str.c_str());
-	return false;
     }
 
     jso = YOBJECT(JsObject,found);
