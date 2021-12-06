@@ -138,7 +138,7 @@ class Yate
 	$s = "";
 	$n = strlen($str);
 	for ($i=0; $i<$n; $i++) {
-	    $c = $str{$i};
+	    $c = $str[$i];
 	    if ((ord($c) < 32) || ($c == ':') || ($c == $extra)) {
 		$c = chr(ord($c) + 64);
 		$s .= '%';
@@ -160,10 +160,10 @@ class Yate
 	$s = "";
 	$n = strlen($str);
 	for ($i=0; $i<$n; $i++) {
-	    $c = $str{$i};
+	    $c = $str[$i];
 	    if ($c == '%') {
 		$i++;
-		$c = $str{$i};
+		$c = $str[$i];
 		if ($c != '%')
 		    $c = chr(ord($c) - 64);
 	    }
