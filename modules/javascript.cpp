@@ -1200,7 +1200,8 @@ static inline const NamedList* getReplaceParams(GenObject* gen)
 }
 
 // Build a tabular dump of an Object or Array
-static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
+static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
+    const NamedList* hdrMap = 0, bool forceEmpty = false, bool allHeaders = false)
 {
     class Header : public ObjList
     {
@@ -1216,8 +1217,13 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 	    { return m_rows; }
 	inline void setWidth(unsigned int w)
 	    { if (m_width < w) m_width = w; }
-	inline void addString(const String& val, unsigned int row)
-	    {
+	inline void setName(const char* n) {
+		if (TelEngine::null(n))
+		    return;
+		*m_name = n;
+		setWidth(m_name->length());
+	    }
+	inline void addString(const String& val, unsigned int row) {
 		if (row <= m_rows)
 		    return;
 		setWidth(val.length());
@@ -1288,6 +1294,7 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 		}
 		continue;
 	    }
+	    // Array of objects
 	    row++;
 	    for (ObjList* l = jso->params().paramList()->skipNull(); l; l = l->skipNext()) {
 		const NamedString* ns = static_cast<const NamedString*>(l->get());
@@ -1320,10 +1327,45 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 	    }
 	}
     }
+    if (!header.skipNull()) {
+	if (!(hdrMap && forceEmpty))
+	    return;
+	for (ObjList* o = hdrMap->paramList()->skipNull(); o; o = o->skipNext()) {
+	    NamedString* ns = static_cast<NamedString*>(o->get());
+	    if (ns->name() != JsObject::protoName())
+		header.append(new Header(ns->name()));
+	}
+	if (!header.skipNull())
+	    return;
+    }
+    // Re-arrange headers
+    ObjList* hdrs = &header;
+    ObjList newHdrs;
+    if (hdrMap) {
+	hdrs = &newHdrs;
+	ObjList* hAdd = hdrs;
+	for (ObjList* o = hdrMap->paramList()->skipNull(); o; o = o->skipNext()) {
+	    NamedString* ns = static_cast<NamedString*>(o->get());
+	    if (ns->name() == JsObject::protoName())
+		continue;
+	    ObjList* oh = header.find(ns->name());
+	    Header* h = oh ? static_cast<Header*>(oh->remove(false)) : new Header(ns->name());
+	    h->setName(*ns);
+	    hAdd = hAdd->append(h);
+	}
+	if (allHeaders) {
+	    while (true) {
+		ObjList* o = header.skipNull();
+		if (!o)
+		    break;
+		hAdd = hAdd->append(o->remove(false));
+	    }
+	}
+    }
     str.clear();
     String tmp;
     unsigned int rows = 0;
-    for (ObjList* l = header.skipNull(); l; l = l->skipNext()) {
+    for (ObjList* l = hdrs->skipNull(); l; l = l->skipNext()) {
 	Header* h = static_cast<Header*>(l->get());
 	if (rows < h->rows())
 	    rows = h->rows();
@@ -1333,13 +1375,15 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol)
 	    str << String(' ',sp);
 	tmp.append(String('-',h->width())," ",true);
     }
-    if (!rows)
+    if (!tmp)
+	return;
+    if (!(rows || forceEmpty))
 	return;
     str << eol << tmp << eol;
     for (unsigned int r = 0; r < rows; r++) {
 	tmp.clear();
 	// add each row data
-	for (ObjList* l = header.skipNull(); l; l = l->skipNext()) {
+	for (ObjList* l = hdrs->skipNull(); l; l = l->skipNext()) {
 	    Header* h = static_cast<Header*>(l->get());
 	    const String* s = h->getString(r);
 	    if (!s)
@@ -1764,27 +1808,30 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	printRecursive(run ? run->context() : context,
 	    flags ? flags->valInteger(DumpPropOnly) : DumpPropOnly);
     }
-    else if (oper.name() == YSTRING("dump_t")) {
-	if (oper.number() != 1)
+    else if (oper.name() == YSTRING("dump_t") || oper.name() == YSTRING("print_t")) {
+	ObjList args;
+	ExpOperation* opObj = 0;
+	ExpOperation* opHdrMap = 0;
+	ExpOperation* params = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&opObj,&opHdrMap,&params))
 	    return false;
-	ExpOperation* op = popValue(stack,context);
-	if (!op)
-	    return false;
+	NamedList* hdrMap = 0;
+	bool forceEmpty = false;
+	bool allHeaders = false;
+	JsObject* jso = YOBJECT(JsObject,opHdrMap);
+	if (jso)
+	    hdrMap = jso->nativeParams() ? jso->nativeParams() : &jso->params();
+	jso = YOBJECT(JsObject,params);
+	if (jso) {
+	    jso->getBoolField(YSTRING("force_empty"),forceEmpty);
+	    jso->getBoolField(YSTRING("all_headers"),allHeaders);
+	}
 	String buf;
-	dumpTable(*op,buf,"\r\n");
-	TelEngine::destruct(op);
-	ExpEvaluator::pushOne(stack,new ExpOperation(buf));
-    }
-    else if (oper.name() == YSTRING("print_t")) {
-	if (oper.number() != 1)
-	    return false;
-	ExpOperation* op = popValue(stack,context);
-	if (!op)
-	    return false;
-	String buf;
-	dumpTable(*op,buf,"\r\n");
-	TelEngine::destruct(op);
-	Output("%s",buf.safe());
+	dumpTable(*opObj,buf,"\r\n",hdrMap,forceEmpty,allHeaders);
+	if (oper.name() == YSTRING("dump_t"))
+	    ExpEvaluator::pushOne(stack,new ExpOperation(buf));
+	else
+	    Output("%s",buf.safe());
     }
     else if (oper.name() == YSTRING("debugName")) {
 	if (oper.number() == 0)
