@@ -1107,31 +1107,37 @@ void* Module::getObject(const String& name) const
     return Plugin::getObject(name);
 }
 
-bool Module::installRelay(int id, const char* name, unsigned priority)
+bool Module::installRelay(int id, const char* name, unsigned priority, NamedString* filter)
 {
-    if (!(id && name && priority))
+    if (!(id && name && priority)) {
+	TelEngine::destruct(filter);
 	return false;
+    }
 
     TempObjectCounter cnt(objectsCounter(),true);
     Lock lock(this);
-    if (m_relays & id)
+    if (m_relays & id) {
+	TelEngine::destruct(filter);
 	return true;
+    }
     m_relays |= id;
 
     MessageRelay* relay = new MessageRelay(name,this,id,priority,Module::name());
+    if (filter)
+	relay->setFilter(filter);
     m_relayList.append(relay)->setDelete(false);
     Engine::install(relay);
     return true;
 }
 
-bool Module::installRelay(int id, unsigned priority)
+bool Module::installRelay(int id, unsigned priority, NamedString* filter)
 {
-    return installRelay(id,messageName(id),priority);
+    return installRelay(id,messageName(id),priority,filter);
 }
 
-bool Module::installRelay(const char* name, unsigned priority)
+bool Module::installRelay(const char* name, unsigned priority, NamedString* filter)
 {
-    return installRelay(lookup(name,s_messages),name,priority);
+    return installRelay(lookup(name,s_messages),name,priority,filter);
 }
 
 bool Module::installRelay(MessageRelay* relay)
