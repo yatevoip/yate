@@ -752,6 +752,8 @@ public:
 	    params().addParam(new ExpFunction("getBoolValue"));
 	    params().addParam(new ExpFunction("setValue"));
 	    params().addParam(new ExpFunction("addValue"));
+	    params().addParam(new ExpFunction("setValues"));
+	    params().addParam(new ExpFunction("addValues"));
 	    params().addParam(new ExpFunction("clearSection"));
 	    params().addParam(new ExpFunction("clearKey"));
 	    params().addParam(new ExpFunction("keys"));
@@ -791,6 +793,8 @@ protected:
 	    params().addParam(new ExpFunction("getBoolValue"));
 	    params().addParam(new ExpFunction("setValue"));
 	    params().addParam(new ExpFunction("addValue"));
+	    params().addParam(new ExpFunction("setValues"));
+	    params().addParam(new ExpFunction("addValues"));
 	    params().addParam(new ExpFunction("clearKey"));
 	    params().addParam(new ExpFunction("keys"));
 	}
@@ -3689,6 +3693,33 @@ void* JsConfigFile::getObject(const String& name) const
     return obj;
 }
 
+static void handleCfgSetValues(bool set, Configuration& cfg, const String& sName,
+    GenObject* params, const String* prefix)
+{
+    const NamedList* pList = sName ? getReplaceParams(params) : 0;
+    if (!pList)
+	return;
+    NamedList* sect = cfg.createSection(sName);
+    if (TelEngine::null(prefix))
+	prefix = 0;
+    for (ObjList* o = pList->paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* ns = static_cast<NamedString*>(o->get());
+	JsObject* jso = YOBJECT(JsObject,ns);
+	if (jso || ns->name() == JsObject::protoName())
+	    continue;
+	if (set) {
+	    if (prefix)
+		sect->setParam(*prefix + ns->name(),*ns);
+	    else
+		sect->setParam(ns->name(),*ns);
+	}
+	else if (prefix)
+	    sect->addParam(*prefix + ns->name(),*ns);
+	else
+	    sect->addParam(ns->name(),*ns);
+    }
+}
+
 bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
     XDebug(&__plugin,DebugAll,"JsConfigFile::runNative '%s'(" FMT64 ")",oper.name().c_str(),oper.number());
@@ -3828,6 +3859,16 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
 	    return false;
 	m_config.addValue(*static_cast<ExpOperation*>(args[0]),*static_cast<ExpOperation*>(args[1]),
 	    *static_cast<ExpOperation*>(args[2]));
+    }
+    else if (oper.name() == YSTRING("setValues") || oper.name() == YSTRING("addValues")) {
+	// setValues(sect,params[,prefix])
+	// addValues(sect,params[,prefix])
+	ExpOperation* sName = 0;
+	ExpOperation* params = 0;
+	ExpOperation* prefix = 0;
+	if (!extractStackArgs(2,this,stack,oper,context,args,&sName,&params,&prefix))
+	    return false;
+	handleCfgSetValues(oper.name() == YSTRING("setValues"),m_config,*sName,params,prefix);
     }
     else if (oper.name() == YSTRING("clearSection")) {
 	ExpOperation* op = 0;
@@ -4004,6 +4045,15 @@ bool JsConfigSection::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 	NamedList* sect = m_owner->config().getSection(toString());
 	if (sect)
 	    sect->addParam(*static_cast<ExpOperation*>(args[0]),*static_cast<ExpOperation*>(args[1]));
+    }
+    else if (oper.name() == YSTRING("setValues") || oper.name() == YSTRING("addValues")) {
+	// setValues(params[,prefix])
+	// addValues(params[,prefix])
+	ExpOperation* params = 0;
+	ExpOperation* prefix = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&params,&prefix))
+	    return false;
+	handleCfgSetValues(oper.name() == YSTRING("setValues"),m_owner->config(),toString(),params,prefix);
     }
     else if (oper.name() == YSTRING("clearKey")) {
 	if (extractArgs(stack,oper,context,args) != 1)
