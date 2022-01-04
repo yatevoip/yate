@@ -35,8 +35,6 @@ class RegexConfig;
 class GenericHandler;
 class RouteHandler;
 class PrerouteHandler;
-class StatusHandler;
-class CommandHandler;
 
 
 static RegexConfig* s_cfg;
@@ -53,39 +51,14 @@ static NamedCounter s_serial("serial_number");
 
 PrerouteHandler* s_preroute = 0;
 RouteHandler* s_route = 0;
-StatusHandler* s_status = 0;
-CommandHandler* s_command = 0;
 
 
 class GenericHandler : public MessageHandler
 {
 public:
     GenericHandler(const char* name, int prio, const char* context, const char* match,
-		const char* trackName, bool addToExtra = true)
-	: MessageHandler(name,prio,trackName),
-	  m_context(context), m_match(match), m_serial(0), m_inExtra(addToExtra)
-    {
-	DDebug("RegexRoute",DebugAll,"Creating generic handler for '%s' prio %d to [%s] match '%s%s%s', track name '%s' [%p]",
-	    toString().c_str(),prio,TelEngine::c_safe(context),
-	    (match ? "${" : ""),(match ? match : toString().c_str()),(match ? "}" : ""),
-	    TelEngine::c_safe(trackName),this);
-	m_hash = getHash(name,prio,context,match,trackName);
-	if (addToExtra) {
-	    Lock l(s_mutex);
-	    s_extra.append(this);
-	}
-	updateSerial();
-    }
-    ~GenericHandler()
-    {
-	DDebug("RegexRoute",DebugAll,"Destroying generic handler for '%s' prio %d to [%s] match '%s', track name '%s' [%p]",
-		toString().c_str(),priority(),m_context.c_str(),m_match.c_str(),
-		trackName().c_str(),this);
-	if (m_inExtra) {
-	    Lock l(s_mutex);
-	    s_extra.remove(this,false);
-	}
-    }
+	const char* trackName, bool addToExtra = true);
+    ~GenericHandler();
     virtual bool received(Message &msg);
     inline bool sameHash(unsigned int hash) const
 	{ return m_hash == hash; }
@@ -123,24 +96,6 @@ public:
     virtual bool received(Message &msg);
 };
 
-class StatusHandler : public GenericHandler
-{
-public:
-    StatusHandler(int prio, const char* trackName)
-	: GenericHandler("engine.status",prio,0,0,trackName,false)
-	{ }
-    virtual bool received(Message &msg);
-};
-
-class CommandHandler : public GenericHandler
-{
-public:
-    CommandHandler(int prio, const char* trackName)
-	: GenericHandler("engine.command",prio,0,0,trackName,false)
-	{ }
-    virtual bool received(Message &msg);
-};
-
 class RegexConfig: public RefObject
 {
 public:
@@ -149,14 +104,7 @@ public:
 	BlockSkip = 1,
 	BlockDone = 2
     };
-    RegexConfig(const String& confName)
-	: m_extended(false), m_insensitive(false),
-	  m_maxDepth(5)
-    {
-	Debug("RegexRoute",DebugAll,"Creating new RegexConfig for configuration name '%s' [%p]",
-	    confName.c_str(),this);
-	m_cfg = confName;
-    }
+    RegexConfig(const String& confName);
     void initialize(bool first);
     void setDefault(Regexp& reg);
     bool oneMatch(Message& msg, Regexp& reg, String& match, const String& context,
@@ -175,17 +123,32 @@ private:
     String m_defRule;
 };
 
-class RegexRoutePlugin : public Plugin
+class RegexRoutePlugin : public Module
 {
 public:
     RegexRoutePlugin();
     virtual void initialize();
     void initVars(NamedList* sect);
+    virtual void statusParams(String& str);
+
 private:
     bool m_first;
 };
 
+class RegexRouteDebug : public Module
+{
+public:
+    RegexRouteDebug();
+    inline bool enabled() const
+	{ return m_enabled; }
+    virtual void initialize();
+
+private:
+    bool m_enabled;
+};
+
 INIT_PLUGIN(RegexRoutePlugin);
+static RegexRouteDebug __plugin_debug;
 
 static String& vars(String& s, String* vName = 0)
 {
@@ -497,7 +460,7 @@ static void evalFunc(String& str, Message& msg)
 		Lock l(s_varsMtx);
 		for (const ObjList* l = s_vars.paramList()->skipNull(); l; l = l->skipNext()) {
 		    if (str.length() > MAX_VAR_LEN) {
-			Debug("RegexRoute",DebugWarn,"Truncating output of $(variables,list)");
+			Debug(&__plugin,DebugWarn,"Truncating output of $(variables,list)");
 			str.append("...",par);
 			break;
 		    }
@@ -542,7 +505,7 @@ static void evalFunc(String& str, Message& msg)
 	    str = s_vars.getValue(str);
 	}
 	else {
-	    Debug("RegexRoute",DebugWarn,"Invalid function '%s'",str.c_str());
+	    Debug(&__plugin,DebugWarn,"Invalid function '%s'",str.c_str());
 	    str.clear();
 	}
     }
@@ -557,13 +520,13 @@ static void replaceFuncs(String &str, Message& msg)
 	if (p2 > 0) {
 	    String v = str.substr(p1+2,p2-p1-2);
 	    v.trimBlanks();
-	    DDebug("RegexRoute",DebugAll,"Replacing function '%s'",
+	    DDebug(&__plugin,DebugAll,"Replacing function '%s'",
 		v.c_str());
 	    evalFunc(v,msg);
 	    str = str.substr(0,p1) + v + str.substr(p2+1);
 	}
 	else {
-	    Debug("RegexRoute",DebugWarn,"Unmatched function end: '%s'",str.c_str()+p1);
+	    Debug(&__plugin,DebugWarn,"Unmatched function end: '%s'",str.c_str()+p1);
 	    break;
 	}
     }
@@ -596,14 +559,14 @@ static void setMessage(const String& match, Message& msg, String& line, Message*
 		String v = s->substr(q+1);
 		n.trimBlanks();
 		v.trimBlanks();
-		DDebug("RegexRoute",DebugAll,"Setting '%s' to '%s'",n.c_str(),v.c_str());
+		DDebug(&__plugin,DebugAll,"Setting '%s' to '%s'",n.c_str(),v.c_str());
 		if (n.startSkip("$",false))
 		    s_vars.setParam(n,v);
 		else
 		    target->setParam(n,v);
 	    }
 	    else {
-		DDebug("RegexRoute",DebugAll,"Clearing parameter '%s'",s->c_str());
+		DDebug(&__plugin,DebugAll,"Clearing parameter '%s'",s->c_str());
 		if (s->startSkip("$",false))
 		    s_vars.clearParam(*s);
 		else
@@ -639,6 +602,15 @@ static GenericHandler* findHandler(unsigned int hash)
     return 0;
 }
 
+RegexConfig::RegexConfig(const String& confName)
+    : m_extended(false), m_insensitive(false),
+    m_maxDepth(5)
+{
+    Debug(&__plugin,DebugAll,"Creating new RegexConfig for configuration name '%s' [%p]",
+	confName.c_str(),this);
+    m_cfg = confName;
+}
+
 void RegexConfig::initialize(bool first)
 {
     m_cfg.load();
@@ -670,15 +642,6 @@ void RegexConfig::initialize(bool first)
     }
     else
 	TelEngine::destruct(s_route);
-    priority = m_cfg.getIntValue("priorities","status",110);
-    if (priority) {
-	CHECK_HANDLER(s_status,StatusHandler,"engine.status",priority,trackName);
-	CHECK_HANDLER(s_command,CommandHandler,"engine.command",priority,trackName);
-    }
-    else {
-	TelEngine::destruct(s_status);
-	TelEngine::destruct(s_command);
-    }
 
     NamedList* l = m_cfg.getSection("extra");
     if (l) {
@@ -749,7 +712,7 @@ void RegexConfig::setDefault(Regexp& reg)
 
 #define TRACE_RULE(dbgLevel,traceId,lst,args,...) \
 do { \
-    Trace(traceId,"Regexroute",dbgLevel,args,##__VA_ARGS__); \
+    Trace(traceId,&__plugin,dbgLevel,args,##__VA_ARGS__); \
     if (lst) { \
 	String* tmp = new String(); \
 	tmp->printf(args,##__VA_ARGS__); \
@@ -759,7 +722,7 @@ do { \
 
 #define TRACE_DBG(dbgLevel,traceId,lst,args,...) \
 do { \
-    TraceDebug(traceId,"Regexroute",dbgLevel,args,##__VA_ARGS__); \
+    TraceDebug(traceId,&__plugin,dbgLevel,args,##__VA_ARGS__); \
     if (lst) { \
 	String* tmp = new String(); \
 	tmp->printf(args,##__VA_ARGS__); \
@@ -807,7 +770,7 @@ bool RegexConfig::oneMatch(Message& msg, Regexp& reg, String& match, const Strin
 		rule,context.c_str());
 	    return false;
 	}
-	DDebug("RegexRoute",DebugAll,"Using message parameter '%s' default '%s'",
+	DDebug(&__plugin,DebugAll,"Using message parameter '%s' default '%s'",
 	    match.c_str(),def.c_str());
 	match = msg.getValue(match,def);
     }
@@ -828,7 +791,7 @@ bool RegexConfig::oneMatch(Message& msg, Regexp& reg, String& match, const Strin
 		rule,context.c_str());
 	    return false;
 	}
-	DDebug("RegexRoute",DebugAll,"Using function '%s'",match.c_str());
+	DDebug(&__plugin,DebugAll,"Using function '%s'",match.c_str());
 	msg.replaceParams(match);
 	replaceFuncs(match,msg);
     }
@@ -900,7 +863,7 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 	    }
 	    else if (BlockSkip != blockLast)
 		blockThis = BlockDone;
-	    XDebug("RegexRoute",DebugAll,"%s:%d(%u:%s) %s=%s",context.c_str(),i+1,
+	    XDebug(&__plugin,DebugAll,"%s:%d(%u:%s) %s=%s",context.c_str(),i+1,
 		blockDepth,String::boolText(BlockRun == blockThis),
 		n->name().c_str(),n->c_str());
 	    if (BlockRun != blockThis)
@@ -940,7 +903,7 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 			reg.trimBlanks();
 			val.trimBlanks();
 			if (!reg.null()) {
-			    NDebug("RegexRoute",DebugAll,"Secondary match rule '%s' by rule #%u in context '%s'",
+			    NDebug(&__plugin,DebugAll,"Secondary match rule '%s' by rule #%u in context '%s'",
 				reg.c_str(),i+1,context.c_str());
 			    continue;
 			}
@@ -970,10 +933,12 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 		val = match.replaceMatches(val);
 		msg.replaceParams(val);
 		replaceFuncs(val,msg);
-		if (level)
-		    Debug(level,"%s",val.safe());
-		else
+		if (!level)
 		    Output("%s",val.safe());
+		else if (!__plugin_debug.enabled())
+		    Debug(level,"%s",val.safe());
+		else if (__plugin_debug.filterDebug(val))
+		    Debug(&__plugin_debug,level,"%s",val.safe());
 		continue;
 	    }
 	    else if (val == "{") {
@@ -996,7 +961,7 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 		    if (val) {
 			*m = val;
 			m->userData(msg.userData());
-			NDebug("RegexRoute",DebugAll,"%s new message '%s' by rule #%u '%s' in context '%s'",
+			NDebug(&__plugin,DebugAll,"%s new message '%s' by rule #%u '%s' in context '%s'",
 			    (disp ? "Dispatching" : "Enqueueing"),
 			    val.c_str(),i+1,n->name().c_str(),context.c_str());
 			if (disp) {
@@ -1020,48 +985,48 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 	    }
 	    else if (val.startSkip("return")) {
 		bool ok = val.toBoolean();
-		NDebug("RegexRoute",DebugAll,"Returning %s from context '%s'",
+		NDebug(&__plugin,DebugAll,"Returning %s from context '%s'",
 		    String::boolText(ok),context.c_str());
 		return ok;
 	    }
 	    else if (val.startSkip("goto") || val.startSkip("jump") ||
 		((val.startSkip("@goto") || val.startSkip("@jump")) && !(warn = false))) {
-		NDebug("RegexRoute",DebugAll,"Jumping to context '%s' by rule #%u '%s'",
+		NDebug(&__plugin,DebugAll,"Jumping to context '%s' by rule #%u '%s'",
 		    val.c_str(),i+1,n->name().c_str());
 		return oneContext(msg,str,val,ret,trace,traceLevel,traceLst,warn,depth+1);
 	    }
 	    else if (val.startSkip("include") || val.startSkip("call") ||
 		((val.startSkip("@include") || val.startSkip("@call")) && !(warn = false))) {
-		NDebug("RegexRoute",DebugAll,"Including context '%s' by rule #%u '%s'",
+		NDebug(&__plugin,DebugAll,"Including context '%s' by rule #%u '%s'",
 		    val.c_str(),i+1,n->name().c_str());
 		if (oneContext(msg,str,val,ret,trace,traceLevel,traceLst,warn,depth+1)) {
-		    DDebug("RegexRoute",DebugAll,"Returning true from context '%s'", context.c_str());
+		    DDebug(&__plugin,DebugAll,"Returning true from context '%s'", context.c_str());
 		    return true;
 		}
 	    }
 	    else if (val.startSkip("match") || val.startSkip("newmatch")) {
 		if (!val.null()) {
-		    NDebug("RegexRoute",DebugAll,"Setting match string '%s' by rule #%u '%s' in context '%s'",
+		    NDebug(&__plugin,DebugAll,"Setting match string '%s' by rule #%u '%s' in context '%s'",
 			val.c_str(),i+1,n->name().c_str(),context.c_str());
 		    str = val;
 		}
 	    }
 	    else if (val.startSkip("rename")) {
 		if (!val.null()) {
-		    NDebug("RegexRoute",DebugAll,"Renaming message '%s' to '%s' by rule #%u '%s' in context '%s'",
+		    NDebug(&__plugin,DebugAll,"Renaming message '%s' to '%s' by rule #%u '%s' in context '%s'",
 			msg.c_str(),val.c_str(),i+1,n->name().c_str(),context.c_str());
 		    msg = val;
 		}
 	    }
 	    else if (val.startSkip("retval")) {
-		NDebug("RegexRoute",DebugAll,"Setting retValue length %u by rule #%u '%s' in context '%s'",
+		NDebug(&__plugin,DebugAll,"Setting retValue length %u by rule #%u '%s' in context '%s'",
 			val.length(),i+1,n->name().c_str(),context.c_str());
 		ret = val;
 	    }
 	    else if (val.startSkip("msleep")) {
 		val.trimBlanks();
 		if (!val.null()) {
-		    NDebug("RegexRoute",DebugAll,"Sleeping for %s milliseconds by rule #%u '%s' in context '%s'",
+		    NDebug(&__plugin,DebugAll,"Sleeping for %s milliseconds by rule #%u '%s' in context '%s'",
 			val.c_str(),i+1,n->name().c_str(),context.c_str());
 		    uint64_t t = val.toInt64(0,0,0);
 		    uint64_t count = t / Thread::idleMsec();
@@ -1076,7 +1041,7 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 		}
 	    }
 	    else {
-		DDebug("RegexRoute",DebugAll,"Returning '%s' for '%s' in context '%s' by rule #%u '%s'",
+		DDebug(&__plugin,DebugAll,"Returning '%s' for '%s' in context '%s' by rule #%u '%s'",
 		    val.c_str(),str.c_str(),context.c_str(),i+1,n->name().c_str());
 		ret = val;
 		return true;
@@ -1085,7 +1050,7 @@ bool RegexConfig::oneContext(Message &msg, String &str, const String &context, S
 	if (blockDepth)
 	    TRACE_DBG(DebugWarn,trace,traceLst,"There are %u blocks still open at end of context '%s'",
 		blockDepth,context.c_str());
-	DDebug("RegexRoute",DebugAll,"Returning false at end of context '%s'", context.c_str());
+	DDebug(&__plugin,DebugAll,"Returning false at end of context '%s'", context.c_str());
     }
     else if (warn)
 	TRACE_DBG(DebugWarn,trace,traceLst,"Missing target context '%s'",context.c_str());
@@ -1176,6 +1141,36 @@ bool PrerouteHandler::received(Message &msg)
 };
 
 
+GenericHandler::GenericHandler(const char* name, int prio, const char* context, const char* match,
+    const char* trackName, bool addToExtra)
+    : MessageHandler(name,prio,trackName),
+    m_context(context), m_match(match), m_serial(0), m_inExtra(addToExtra)
+{
+    DDebug(&__plugin,DebugAll,
+	"Creating generic handler for '%s' prio %d to [%s] match '%s%s%s', track name '%s' [%p]",
+	toString().c_str(),prio,TelEngine::c_safe(context),
+	(match ? "${" : ""),(match ? match : toString().c_str()),(match ? "}" : ""),
+	TelEngine::c_safe(trackName),this);
+    m_hash = getHash(name,prio,context,match,trackName);
+    if (m_inExtra) {
+	Lock l(s_mutex);
+	s_extra.append(this);
+    }
+    updateSerial();
+}
+
+GenericHandler::~GenericHandler()
+{
+    DDebug(&__plugin,DebugAll,
+	"Destroying generic handler for '%s' prio %d to [%s] match '%s', track name '%s' [%p]",
+	toString().c_str(),priority(),m_context.c_str(),m_match.c_str(),
+	trackName().c_str(),this);
+    if (m_inExtra) {
+	Lock l(s_mutex);
+	s_extra.remove(this,false);
+    }
+}
+
 bool GenericHandler::received(Message &msg)
 {
     DDebug(DebugAll,"Handling message '%s' [%p]",c_str(),this);
@@ -1202,42 +1197,12 @@ bool GenericHandler::received(Message &msg)
 #undef TRACE_DBG
 #undef TRACE
 
-bool StatusHandler::received(Message &msg)
-{
-    const String& dest = msg[YSTRING("module")];
-    if (dest && (dest != __plugin.name()))
-	return false;
-    Lock lock(s_mutex);
-    msg.retValue() << "name=" << __plugin.name()
-	<< ",type=route;sections=" << s_cfg->sectCount()
-	<< ",extra=" << s_extra.count();
-    lock.drop();
-    lock.acquire(s_varsMtx);
-    msg.retValue() << ",variables=" << s_vars.count();
-    lock.drop();
-    msg.retValue() << ",processing=" << s_processing.count() << "\r\n";
-    return !dest.null();
-}
-
-
-bool CommandHandler::received(Message &msg)
-{
-    if (msg.getValue(YSTRING("line")))
-	return false;
-    const String& partLine = msg[YSTRING("partline")];
-    if (partLine != YSTRING("status"))
-	return false;
-    const String& partWord = msg[YSTRING("partword")];
-    if (partWord)
-	Module::itemComplete(msg.retValue(),__plugin.name(),partWord);
-    return false;
-}
-
 
 RegexRoutePlugin::RegexRoutePlugin()
-    : Plugin("regexroute"),
+    : Module("regexroute","route"),
       m_first(true)
 {
+    debugName("RegexRoute");
     Output("Loaded module RegexRoute");
 }
 
@@ -1256,17 +1221,72 @@ void RegexRoutePlugin::initVars(NamedList* sect)
 
 void RegexRoutePlugin::initialize()
 {
+    static int s_priority = 0;
+
     Output("Initializing module RegexRoute");
+
+    Configuration cfg(Engine::configFile(__plugin.name()),false);
+    int prio = cfg.getIntValue(YSTRING("priorities"),YSTRING("status"),110);
+    if (prio != s_priority) {
+	s_priority = prio;
+	if (prio) {
+	    installRelay(Status,prio);
+	    installRelay(Command,prio);
+	    installRelay(Level,prio);
+	}
+	else {
+	    uninstallRelay(Status);
+	    uninstallRelay(Command);
+	    uninstallRelay(Level);
+	}
+    }
+
     s_serial.inc();
-    RegexConfig* cfg = new RegexConfig(Engine::configFile(name()));
-    cfg->initialize(m_first);
+    RegexConfig* rCfg = new RegexConfig(Engine::configFile(name()));
+    rCfg->initialize(m_first);
     if (m_first)
 	m_first = false;
     Lock lock(s_mutex);
     RegexConfig* tmp = s_cfg;
-    s_cfg = cfg;
+    s_cfg = rCfg;
     lock.drop();
     TelEngine::destruct(tmp);
+}
+
+void RegexRoutePlugin::statusParams(String& str)
+{
+    Lock lock(s_mutex);
+    str.append("sections=",";");
+    str << s_cfg->sectCount() << ",extra=" << s_extra.count();
+    lock.acquire(s_varsMtx);
+    str << ",variables=" << s_vars.count();
+    lock.drop();
+    str << ",processing=" << s_processing.count();
+}
+
+
+RegexRouteDebug::RegexRouteDebug()
+    : Module("rex_debug","misc"),
+    m_enabled(false)
+{
+    debugName("RegexRoute");
+    debugChain(&__plugin);
+}
+
+void RegexRouteDebug::initialize()
+{
+    Configuration cfg(Engine::configFile(__plugin.name()),false);
+    m_enabled = cfg.getBoolValue(YSTRING("priorities"),YSTRING("rex_debug"),true);
+    if (m_enabled) {
+	installRelay(Status);
+	installRelay(Command);
+	installRelay(Level);
+    }
+    else {
+	uninstallRelay(Status);
+	uninstallRelay(Command);
+	uninstallRelay(Level);
+    }
 }
 
 }; // anonymous namespace

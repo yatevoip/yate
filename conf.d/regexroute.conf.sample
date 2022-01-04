@@ -126,6 +126,11 @@
 ; Set it to false to disable defaults and do all tracking in user rules
 ;trackparam=true
 
+; rex_debug: boolean: Enable the separate debug enabler for messages
+;  showed when debug function is used in matching rules
+; This parameter is applied on reload
+;rex_debug=true
+
 
 [$once]
 ; First-time only global variables initialization.
