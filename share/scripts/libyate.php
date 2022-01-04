@@ -316,9 +316,7 @@ class Yate
 	$t=(int)$this->origin;
 	$n=Yate::Escape($this->name);
 	$r=Yate::Escape($this->retval);
-	$p="";
-	$pa = array(&$p);
-	array_walk($this->params, "_yate_message_walk", $pa);
+	$p = _yate_escaped_params($this->params);
 	_yate_print("%%>message:$i:$t:$n:$r$p\n");
 	$this->type="dispatched";
     }
@@ -337,9 +335,7 @@ class Yate
 	$k=Yate::Bool2str($this->handled);
 	$n=Yate::Escape($this->name);
 	$r=Yate::Escape($this->retval);
-	$p="";
-	$pa = array(&$p);
-	array_walk($this->params, "_yate_message_walk", $pa);
+	$p = _yate_escaped_params($this->params);
 	_yate_print("%%<message:$i:$k:$n:$r$p\n");
 	$this->type="acknowledged";
     }
@@ -597,6 +593,15 @@ function _yate_print($str)
 	else
 	    usleep(1000);
     }
+}
+
+// Internal function: escape and concatenate a list of parameters
+function _yate_escaped_params($params)
+{
+    $ep = "";
+    foreach ($params as $key=>$item)
+	$ep .= ':' . Yate::Escape($key,'=') . '=' . Yate::Escape($item);
+    return $ep;
 }
 
 /* Internal function */
