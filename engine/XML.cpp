@@ -30,7 +30,7 @@ static const String s_name("name");
 
 
 // Return a replacement char for the given string
-char replace(const char* str, const XmlEscape* esc)
+static inline char replace(const char* str, const XmlEscape* esc)
 {
     if (!str)
 	return 0;
@@ -43,7 +43,7 @@ char replace(const char* str, const XmlEscape* esc)
 }
 
 // Return a replacement string for the given char
-const char* replace(char replace, const XmlEscape* esc)
+static inline const char* replace(char replace, const XmlEscape* esc)
 {
     if (esc) {
 	for (; esc->value; esc++)
@@ -878,24 +878,10 @@ void XmlSaxParser::reset()
     m_unparsed = None;
 }
 
-// Verify if the given character is in the range allowed
-bool XmlSaxParser::checkFirstNameCharacter(unsigned char ch)
-{
-    return ch == ':' || (ch >= 'A' && ch <= 'Z') || ch == '_' || (ch >= 'a' && ch <= 'z')
-	|| (ch >= 0xc0 && ch <= 0xd6) || (ch >= 0xd8 && ch <= 0xf6) || (ch >= 0xf8);
-}
-
 // Check if the given character is in the range allowed for an xml char
 bool XmlSaxParser::checkDataChar(unsigned char c)
 {
     return  c == 0x9 || c == 0xA || c == 0xD || (c >= 0x20);
-}
-
-// Verify if the given character is in the range allowed for a xml name
-bool XmlSaxParser::checkNameCharacter(unsigned char ch)
-{
-    return checkFirstNameCharacter(ch) || ch == '-' || ch == '.' || (ch >= '0' && ch <= '9')
-	|| ch == 0xB7;
 }
 
 // Remove blank characters from the beginning of the buffer
@@ -925,14 +911,64 @@ inline unsigned char getDec(String& dec)
 // Unescape the given text
 void XmlSaxParser::unEscape(String& text)
 {
+    String error;
+    if (unEscape(text,&error))
+	return;
+    Debug(this,DebugNote,"Unescape. %s [%p]",error.c_str(),this);
+    setError(NotWellFormed);
+}
+
+// Check if a given string is a valid xml tag name
+bool XmlSaxParser::validTag(const String& buf)
+{
+    if (!(buf && checkFirstNameCharacter(buf[0])))
+	return false;
+    for (unsigned int i = 1; i < buf.length(); i++)
+	if (!checkNameCharacter(buf[i]))
+	    return false;
+    return true;
+}
+
+// XmlEscape the given text
+String& XmlSaxParser::escape(String& buf, const String& text)
+{
     const char* str = text.c_str();
     if (!str)
-	return;
-    String buf;
+	return buf;
+    const char* accum = str;
+    unsigned int aLen = 0;
+    while (*str) {
+	const char* rep = replace(*str++,XmlSaxParser::s_escape);
+	if (!rep) {
+	    aLen++;
+	    continue;
+	}
+	if (aLen)
+	    buf.append(accum,aLen);
+	accum = str;
+	aLen = 0;
+	buf += rep;
+    }
+    if (aLen)
+	return buf.append(accum,aLen);
+    return buf;
+}
+
+// Unescape the given text
+bool XmlSaxParser::unEscape(String& text, const char* str, unsigned int n, String* error,
+    bool inText, bool* escFound)
+{
+    if (escFound)
+	*escFound = false;
+    if (!(str && n))
+	return true;
+    inText = inText && (str != text.c_str());
+    String tmp;
+    String& buf = inText ? text : tmp;
     String aux = "&";
     unsigned int len = 0;
     int found = -1;
-    while (str[len]) {
+    for (unsigned int i = 0; i < n; ++i) {
 	if (str[len] == '&' && found < 0) {
 	    found = len++;
 	    continue;
@@ -942,9 +978,9 @@ void XmlSaxParser::unEscape(String& text)
 	    continue;
 	}
 	if (str[len] == '&') {
-	    Debug(this,DebugNote,"Unescape. Duplicate '&' in expression [%p]",this);
-	    setError(NotWellFormed);
-	    return;
+	    if (error)
+		*error = "Duplicate '&' in expression";
+	    return false;
 	}
 	if (str[len] != ';')
 	    len++;
@@ -970,7 +1006,7 @@ void XmlSaxParser::unEscape(String& text)
 	    }
 	    if (re == '&') {
 		if (str[len] == '#') {
-		    aux = String(str + len,4);
+		    aux.assign(str + len,4);
 		    if (aux == "#60;") {
 			re = '<';
 			len += 4;
@@ -983,61 +1019,38 @@ void XmlSaxParser::unEscape(String& text)
 	    }
 	    else if (!re)
 		re = replace(aux,s_escape);
-	    if (re) { // We have an valid escape character
-		buf << String(str,found) << re;
-		str += len;
-		len = 0;
-		found = -1;
+	    if (!re) {
+		if (error)
+		    error->printf("No replacement found for '%s'",(String(str + found,len - found)).c_str());
+		return false;
 	    }
-	    else {
-		Debug(this,DebugNote,"Unescape. No replacement found for '%s' [%p]",
-		    String(str + found,len - found).c_str(),this);
-		setError(NotWellFormed);
-		return;
-	    }
+	    if (escFound)
+		*escFound = true;
+	    // We have an valid escape character
+	    buf.append(str,found) << re;
+	    str += len;
+	    len = 0;
+	    found = -1;
 	}
     }
     if (found >= 0) {
-	Debug(this,DebugNote,"Unescape. Unexpected end of expression [%p]",this);
-	setError(NotWellFormed);
-	return;
+	if (error)
+	    *error = "Unexpected end of expression";
+	return false;
     }
-    if (len) {
+    if (inText) {
+	if (len)
+	    buf.append(str,len);
+    }
+    else if (len) {
 	if (str != text.c_str()) {
-	    buf << String(str,len);
+	    buf.append(str,len);
 	    text = buf;
 	}
     }
     else
 	text = buf;
-}
-
-// Check if a given string is a valid xml tag name
-bool XmlSaxParser::validTag(const String& buf)
-{
-    if (!(buf && checkFirstNameCharacter(buf[0])))
-	return false;
-    for (unsigned int i = 1; i < buf.length(); i++)
-	if (!checkNameCharacter(buf[i]))
-	    return false;
     return true;
-}
-
-// XmlEscape the given text
-void XmlSaxParser::escape(String& buf, const String& text)
-{
-    const char* str = text.c_str();
-    if (!str)
-	return;
-    char c;
-    while ((c = *str++)) {
-	const char* rep = replace(c,XmlSaxParser::s_escape);
-	if (!rep) {
-	    buf += c;
-	    continue;
-	}
-	buf += rep;
-    }
 }
 
 // Calls gotElement(). Reset parsed if ok
@@ -1418,41 +1431,41 @@ void XmlFragment::toString(String& dump, bool escape, const String& indent,
     dump.append(buffers);
 }
 
-// Find a completed xml element in a list
-XmlElement* XmlFragment::findElement(ObjList* list, const String* name, const String* ns,
+XmlElement* XmlFragment::getElement(ObjList*& lst, const String* name, const String* ns,
     bool noPrefix)
 {
-    XmlElement* e = 0;
-    for (; list; list = list->skipNext()) {
-	e = (static_cast<XmlChild*>(list->get()))->xmlElement();
-	if (!(e && e->completed()))
+    for (; lst; lst = lst->skipNext()) {
+	XmlElement* x = (static_cast<XmlChild*>(lst->get()))->xmlElement();
+	if (!(x && x->completed()))
 	    continue;
 	if (name || ns) {
 	    if (!ns) {
+		// Compare tag
 		if (noPrefix) {
-		    if (*name == e->unprefixedTag())
-			break;
+		    if (*name != x->unprefixedTag())
+			continue;
 		}
-		else if (*name == e->toString())
-		    break;
+		else if (*name != x->toString())
+		    continue;
 	    }
 	    else if (name) {
+		// Compare tag and namespace
 		const String* t = 0;
 		const String* n = 0;
-		if (e->getTag(t,n) && *t == *name && n && *n == *ns)
-		    break;
+		if (!(x->getTag(t,n) && *t == *name && n && *n == *ns))
+		    continue;
 	    }
 	    else {
-		const String* n = e->xmlns();
-		if (n && *n == *ns)
-		    break;
+		// Compare namespace
+		const String* n = x->xmlns();
+		if (!n || *n != *ns)
+		    continue;
 	    }
 	}
-	else
-	    break;
-	e = 0;
+	lst = lst->skipNext();
+	return x;
     }
-    return e;
+    return 0;
 }
 
 // Replaces all ${paramname} in fragment's children with the corresponding parameters
@@ -2265,6 +2278,1672 @@ XmlDoctype::~XmlDoctype()
 void XmlDoctype::toString(String& dump, const String& indent) const
 {
     dump << indent << "<!DOCTYPE " << m_doctype << ">";
+}
+
+
+/*
+ * XPath
+ */
+// Maximul number of predicates in step
+#ifndef XPATH_MAX_PREDICATES
+#define XPATH_MAX_PREDICATES 5
+#endif
+
+#ifdef XDEBUG
+#define XPATH_DEBUG_PARSE
+#define XPATH_XDEBUG_PARSE
+#define XPATH_DEBUG_FIND
+#define XPATH_XDEBUG_FIND
+#else
+//#define XPATH_DEBUG_PARSE
+//#define XPATH_XDEBUG_PARSE
+//#define XPATH_DEBUG_FIND
+//#define XPATH_XDEBUG_FIND
+#endif
+
+#ifdef XPATH_DEBUG_PARSE
+#define XPathDebugParse Debug
+#ifdef XPATH_XDEBUG_PARSE
+#define XPathXDebugParse XPathDebugParse
+#endif
+#else
+#define XPathDebugParse XDebug
+#define XPathXDebugParse XDebug
+#endif
+
+#ifdef XPATH_DEBUG_FIND
+#define XPathDebugFind Debug
+#else
+#define XPathDebugFind XDebug
+#endif
+
+static const TokenDict s_xpathErrors[] = {
+    {"Empty item",               XPath::EEmptyItem},
+    {"Syntax error",             XPath::ESyntax},
+    {"Semantic error",           XPath::ESemantic},
+    {"Value out of range",       XPath::ERange},
+    {"Always empty result",      XPath::EEmptyResult},
+    {0,0}
+};
+
+/**
+ * Internal processing action
+ */
+enum XPathProcessAction {
+    // Not matched
+    XPathProcStop = -1,                  // Don't handle current element. Stop further handling
+    XPathProcCont = 0,                   // Don't handle current element. Continue handling
+    // Matched
+    XPathProcHandleCont = 1,             // Handle curent element. Continue handling other elements in the same list
+    XPathProcHandleStop = 2,             // Handle curent element. Stop handling other elements
+};
+
+static const TokenDict s_xpathProcAct[] = {
+    {"Stop",           XPathProcStop},
+    {"Continue",       XPathProcCont},
+    {"HandleContinue", XPathProcHandleCont},
+    {"HandleStop",     XPathProcHandleStop},
+    {0,0}
+};
+
+namespace TelEngine {
+class XPathParseData
+{
+public:
+    enum Opc {
+	OpcNone = 0,
+	OpcEq,
+	OpcNotEq,
+    };
+    inline XPathParseData(const char* b, unsigned int l, unsigned int flags)
+	: strictParse(0 != (flags & XPath::StrictParse)),
+	checkEmptyRes(0 == (flags & XPath::IgnoreEmptyResult)),
+	checkXmlName(0 == (flags & XPath::NoXmlNameCheck)),
+	m_step(0), m_buf(b), m_idx(0), m_length(b ? l : 0)
+	{}
+
+    inline unsigned int step() const
+	{ return m_step; }
+    // Retrieve original buffer length
+    inline unsigned int origLength() const
+	{ return m_length; }
+    // Return index in original buffer
+    inline unsigned int index() const
+	{ return m_idx; }
+    // Retrieve current buffer
+    inline const char* c_str() const
+	{ return m_buf; }
+    // Retrieve current buffer length
+    inline unsigned int length() const
+	{ return (m_length > m_idx) ? m_length - m_idx : 0; }
+    // Retrieve char in current buffer
+    inline char crt() const
+	{ return *m_buf; }
+    // Retrieve char in current buffer at index (not original !)
+    inline char at(unsigned int i) const
+	{ return m_buf[i]; }
+    // Advance 1 char in buffer
+    inline void advance() { m_buf++; m_idx++; }
+    // Advance 1 char in buffer. Return char before advance
+    inline char getCrtAdvance() { char c = *m_buf++; m_idx++; return c; }
+    // Advance n char(s) in buffer
+    inline void skip(unsigned int n) { m_buf += n; m_idx += n; }
+    // Advance step and buffer
+    inline void advanceStep() { m_step++; if (haveData()) advance(); }
+    inline bool haveData()
+	{ return index() < origLength(); }
+    inline bool ended()
+	{ return index() >= origLength(); }
+    inline bool isChar(char c)
+	{ return c == crt(); }
+    inline bool isSep()
+	{ return isSep(crt()); }
+    inline bool isBlank()
+	{ return XmlSaxParser::blank(crt()); }
+    inline bool isDigit()
+	{ return isDigit(crt()); }
+    inline bool isStepEnd()
+	{ return ended() || isSep(); }
+    inline bool isPredicatedEnd()
+	{ return isStepEnd() || isChar(']'); }
+    // Skip blanks in buffer. Return false if buffer ended
+    inline bool skipBlanks() {
+	    while (haveData() && isBlank())
+		advance();
+	    return haveData();
+	}
+    // Parse an operator. Return it and skip data if found
+    inline int parseOperator() {
+	    if (ended())
+		return 0;
+	    if (isChar('=')) {
+		advance();
+		return OpcEq;
+	    }
+	    if (isChar('!')) {
+		if (length() < 2 || at(1) != '=')
+		    return 0;
+		skip(2);
+		return OpcNotEq;
+	    }
+	    return 0;
+	}
+    // Parse a string literal
+    inline const char* parseStringLiteral(const char*& start, unsigned int& n,
+	char& delimiter, bool& esc, bool req = true) {
+	    delimiter = isStringLiteralDelimiter(crt()) ? getCrtAdvance() : 0;
+	    if (!delimiter)
+		return req ? "Expecting string literal" : 0;
+	    start = c_str();
+	    n = 0;
+	    for (; haveData(); ++n, advance()) {
+		if (!isChar(delimiter))
+		    continue;
+		advance();
+		// Check for escaped delimiter (char repeated)
+		// See https://www.w3.org/TR/xpath-30/#prod-xpath30-EscapeQuot
+		if (!isChar(delimiter))
+		    return 0;
+		n++;
+		esc = true;
+	    }
+	    start = 0;
+	    n = 0;
+	    return "Unexpected end of data while parsing string literal";
+	}
+    // Parse an XML string (possible escapes!)
+    inline const char* parseStringXml(const char*& start, unsigned int& n,
+	char& delimiter, bool& esc, bool req = true) {
+	    delimiter = isStringLiteralDelimiter(crt()) ? getCrtAdvance() : 0;
+	    if (!delimiter)
+		return req ? "Expecting string" : 0;
+	    esc = true;
+	    start = c_str();
+	    n = 0;
+	    for (; haveData(); ++n, advance()) {
+		if (!isChar(delimiter))
+		    continue;
+		advance();
+		return 0;
+	    }
+	    start = 0;
+	    n = 0;
+	    return "Unexpected end of data while parsing string";
+	}
+    // Check a buffer for a valid XML name if check is enabled
+    // Return 0 on success, offending char otherwise
+    inline char validXmlName(const char* b, unsigned int n) {
+	    if (!(checkXmlName && b && n))
+		return 0;
+	    if (!XmlSaxParser::checkFirstNameCharacter(*b))
+		return *b;
+	    for (unsigned int i = 1; i < n; ++b, ++i)
+		if (!XmlSaxParser::checkNameCharacter(*b))
+		    return *b;
+	    return 0;
+	}
+    // Check if current buffer char equals a given char
+    inline bool operator==(char c) const
+	{ return crt() == c; }
+    // Check if current buffer char id different than a given char
+    inline bool operator!=(char c) const
+	{ return crt() != c; }
+
+    static inline bool isSep(char c)
+	{ return '/' == c; }
+    static inline bool isDigit(char c)
+	{ return c >= '0' && c <= '9'; }
+    static inline bool isStringLiteralDelimiter(char c)
+	{ return c == '\'' || c == '"'; }
+    // Unescape an XPath string literal
+    static inline bool unEscapeLiteral(String& buf,
+	const char* b, unsigned int n, char esc, String* error) {
+	    if (!(esc && b && n)) {
+		buf.append(b,n);
+		return true;
+	    }
+	    const char* accum = b;
+	    unsigned int aLen = 0;
+	    for (unsigned int i = 0; i < n; ++i) {
+		aLen++;
+		if (*b++ != esc)
+		    continue;
+		if (*b != esc) {
+		    if (error)
+			error->printf("Invalid char '%c' following escape",*b);;
+		    return false;
+		}
+		// Append current buffer. Update accumulator. Skip second escape
+		buf.append(accum,aLen);
+		accum = ++b;
+		aLen = 0;
+		++i;
+	    }
+	    if (aLen)
+		buf.append(accum,aLen);
+	    return true;
+	}
+    // Escape an XPath string literal
+    static inline String& escapeStringLiteral(String& buf, const String& str, char esc)
+	{ return escapeStringLiteral(buf,str.c_str(),str.length(),esc); }
+    // Escape an XPath string literal
+    static inline String& escapeStringLiteral(String& buf,
+	const char* b, unsigned int n, char esc) {
+	    if (!(esc && b && n))
+		return buf.append(b,n);
+	    const char* accum = b;
+	    unsigned int aLen = 0;
+	    for (unsigned int i = 0; i < n; ++i) {
+		aLen++;
+		if (*b++ != esc)
+		    continue;
+		buf.append(accum,aLen);
+		buf << esc;
+		accum = b;
+		aLen = 0;
+	    }
+	    if (aLen)
+		return buf.append(accum,aLen);
+	    return buf;
+	}
+
+    bool strictParse;                    // String buffer parsing
+    bool checkEmptyRes;                  // Check if a path will always produce empty result
+    bool checkXmlName;                   // Validate XML names
+
+protected:
+    unsigned int m_step;                 // Current path step index
+    const char* m_buf;                   // Current buffer pointer
+    unsigned int m_idx;                  // Current index in original buffer
+    unsigned int m_length;               // Original buffer length
+};
+}; // namespace TelEngine
+
+// Utility. Use when parsing to accumulate and store parsed item info
+class XPathParseItem
+{
+public:
+    inline XPathParseItem(const char* b = 0, unsigned int n = 0)
+	: buf(b), len(n), delimiter(0), esc(false)
+	{}
+    inline const char* c_str() const
+	{ return buf; }
+    inline unsigned int length() const
+	{ return len; }
+    inline void advance()
+	{ len++; }
+    inline void set(const char* b = 0, unsigned int n = 0)
+	{ buf = b; len = n; }
+    inline String& appendTo(String& s) const
+	{ return length() ? s.append((const char*)c_str(),length()) : s; }
+    inline String& assignTo(String& s) const {
+	    if (length())
+		s.assign((const char*)c_str(),length());
+	    else
+		s.clear();
+	    return s;
+	}
+    inline char operator[](unsigned int idx) const
+	{ return c_str()[idx]; }
+    inline const String& value() const
+	{ return assignTo(m_value); }
+
+    const char* buf;
+    unsigned int len;
+    char delimiter;
+    bool esc;
+
+protected:
+    mutable String m_value;              // Temporary string
+};
+
+class XPathEscapedString
+{
+public:
+    inline XPathEscapedString(String* str, bool literal = false)
+	: m_delimiter(0), m_esc(false), m_literal(literal), m_str(str)
+	{}
+    inline void setLiteral(bool on)
+	{ m_literal = on; }
+    inline char delimiter() const
+	{ return m_delimiter; }
+    inline bool setString(const XPathParseItem& b, String* error)
+	{ return setString(b.c_str(),b.length(),b.delimiter,b.esc,error); }
+    inline bool setString(const char* b, unsigned int n, char delim, bool esc, String* error) {
+	    if (m_str)
+		return setString(*m_str,b,n,delim,esc,error);
+	    if (error)
+		*error = "Internal. No destination string";
+	    return false;
+	}
+    inline bool setString(String& s, const char* b, unsigned int n, char delim, bool esc,
+	String* error) {
+	    m_delimiter = delim;
+	    if (!m_delimiter)
+		return true;
+	    m_esc = esc;
+	    if (!(esc && b && n))
+		s.assign(b,n);
+	    else if (!(m_literal ? XPathParseData::unEscapeLiteral(s,b,n,m_delimiter,error) :
+		XmlSaxParser::unEscape(s,b,n,error,true,&m_esc))) {
+		s.clear();
+		return false;
+	    }
+	    return true;
+	}
+    inline String& dumpString(String& buf, bool escape = false) const
+	{ return m_str ? dumpString(buf,*m_str,escape) : buf; }
+    inline String& dumpString(String& buf, const String& str, bool escape = false) const {
+	    if (!m_delimiter)
+		return buf;
+	    buf << m_delimiter;
+	    if (!(escape && m_esc && str.length()))
+		return buf << str << m_delimiter;
+	    if (!m_literal)
+		return XmlSaxParser::escape(buf,str) << m_delimiter;
+	    return XPathParseData::escapeStringLiteral(buf,str,m_delimiter) << m_delimiter;
+	}
+
+protected:
+    char m_delimiter;                    // Delimiter. Non 0 indicates data is used
+    bool m_esc;                          // String contains escaped chars
+    bool m_literal;                      // String is an XPATH literal
+    String* m_str;                       // String to handle
+};
+
+// XPath string literal
+class XPathString : public String, public XPathEscapedString
+{
+public:
+    inline XPathString(bool literal = false)
+	: XPathEscapedString(this,literal)
+	{}
+    inline String& dump(String& buf, bool escape = false) const
+	{ return dumpString(buf,escape); }
+};
+
+// XPath regexp literal
+class XPathRegexp : public Regexp, public XPathEscapedString
+{
+public:
+    inline XPathRegexp()
+	: XPathEscapedString(this),
+	m_match(true)
+	{}
+    inline bool matches(const char* value) const
+	{ return m_match == Regexp::matches(value); }
+    inline const XPathString& flags() const
+	{ return m_flags; }
+    inline bool set(bool match, const XPathParseItem& rex, XPathParseItem& flags, String* error) {
+	    if (!setString(rex,error))
+		return false;
+	    if (!m_flags.setString(flags,error))
+		return false;
+	    m_match = match;
+	    bool insensitive = false;
+	    bool extended = true;
+	    for (unsigned int i = 0; i < m_flags.length(); i++) {
+		switch (m_flags[i]) {
+		    case 'i': insensitive = true; continue;
+		    case 'b': extended = false; continue;
+		}
+	    }
+	    setFlags(extended,insensitive);
+	    if (compile())
+		return true;
+	    if (error)
+		*error = Regexp::length() ? "Invalid regexp" : "Empty regexp";
+	    return false;
+	}
+    inline String& dump(String& buf, bool escape) const {
+	    char sep = ',';
+	    buf << sep;
+	    dumpString(buf,escape);
+	    if (m_flags) {
+		buf << sep;
+		m_flags.dumpString(buf,escape);
+	    }
+	    return buf;
+	}
+
+protected:
+    bool m_match;                        // (Reverse) match
+    XPathString m_flags;                 // Regexp flags
+};
+
+namespace TelEngine {
+class XPathPredicate
+{
+public:
+    // Predicate type
+    // Used to select input for operator
+    enum Type {
+	// Values
+	None = 0,
+	Index,                           // Node index in list
+	Text,                            // Xml element text
+	XmlName = 0x10,
+	Attribute,                       // XML element attribute match
+	Child,                           // XML child match (presence or text),
+    };
+    // Operators
+    enum Opc {
+	OpcEq = XPathParseData::OpcEq,       // Equality operator
+	OpcNotEq = XPathParseData::OpcNotEq, // Inequality operator
+	OpcFunc = 0x10,
+	OpcMatch,                        // Regexp match operator
+	OpcMatchNot,                     // Regexp match NOT operator
+    };
+    inline XPathPredicate()
+	: m_type(0), m_opc(0)
+	{}
+    inline int type() const
+	{ return m_type; }
+    inline unsigned int opc() const
+	{ return m_opc; }
+    inline const char* opcName() const
+	{ return opcName(opc()); }
+    inline const char* typeName() const
+	{ return lookup(m_type,s_typeName); }
+    inline bool valid() const
+	{ return 0 != type(); }
+    inline bool isPosition() const
+	{ return Index == type(); }
+    inline int check(unsigned int index, const XmlElement* xml = 0, const NamedString* attr = 0) const {
+	    if (Index == m_type) {
+		if (index == m_opc)
+		    return XPathProcHandleStop;
+		return index < m_opc ? XPathProcCont : XPathProcStop;
+	    }
+	    if (Text == m_type || Child == m_type) {
+		const String* txt = xml ?
+		    ((Child == m_type) ? xml->childText(m_name) : &(xml->getText())) : 0;
+		return ((!m_opc && txt) || (txt && runOpc(*txt))) ?
+		    XPathProcHandleCont : XPathProcCont;
+	    }
+	    if (Attribute == m_type) {
+		const ObjList* o = xml ? xml->attributes().paramList()->skipNull() : 0;
+		for (; o; o = o->skipNext()) {
+		    NamedString* ns = static_cast<NamedString*>(o->get());
+		    if (m_name && m_name != ns->name())
+			continue;
+		    if (!m_opc || runOpc(*ns))
+			return XPathProcHandleCont;
+		    if (m_name)
+			break;
+		}
+		return XPathProcCont;
+	    }
+	    if (m_type)
+		Debug("XPath",DebugStub,"Predicate type %u '%s' not handled in check",m_type,typeName());
+	    return XPathProcHandleCont;
+	}
+    inline bool runOpc(const String& value) const {
+	    switch (m_opc) {
+		case OpcEq:       return m_value == value;
+		case OpcNotEq:    return m_value != value;
+		case OpcMatch:    return m_regexp.matches(value);
+		case OpcMatchNot: return m_regexp.matches(value);
+	    }
+	    Debug("XPath",DebugStub,"Operator %u not handled in operator check",m_opc);
+	    return false;
+	}
+    inline String& dump(String& buf, bool escape = false) const {
+	    if (!valid())
+		return buf;
+	    buf << "[";
+	    if (Index == m_type)
+		buf << m_opc;
+	    else {
+		bool func = 0 != (m_opc & OpcFunc);
+		dumpType(buf,func);
+		dumpOpc(buf,escape,func);
+	    }
+	    return buf << "]";
+	}
+    inline void dumpType(String& buf, bool opcFunc) const {
+	    if (opcFunc)
+		buf << opcName() << '(';
+	    if (Attribute == m_type)
+		buf << '@' << m_name.safe("*");
+	    else if (Child == m_type)
+		buf << m_name.safe("*");
+	    else
+		buf << typeName() << "()";
+	}
+    inline void dumpOpc(String& buf, bool escape, bool func, bool fin = true) const {
+	    if (func) {
+		m_regexp.dump(buf,escape);
+		if (fin)
+		    buf << ')';
+	    }
+	    else if (m_opc) {
+		buf << opcName();
+		m_value.dump(buf,escape);
+	    }
+	}
+
+    static inline const char* opcName(int opc)
+	{ return lookup(opc,s_opcAll); }
+
+    static const TokenDict s_opcAll[];
+    static const TokenDict s_opcFunc[];
+    static const TokenDict s_opcBin[];
+    static const TokenDict s_typeName[];
+
+    unsigned int m_type;                 // Predicate type
+    unsigned int m_opc;                  // Node index value to check or operator
+    String m_name;                       // Name of the item to check
+    XPathString m_value;                 // Value to check
+    XPathRegexp m_regexp;                // Regexp value to use in functions
+};
+}; // namespace TelEngine
+
+#define XPATH_PREDICATE_DECLARE_OPC_FUNC \
+    {"matches",    OpcMatch}, \
+    {"notMatches", OpcMatchNot},
+
+#define XPATH_PREDICATE_DECLARE_OPC_BIN \
+    {"=",  OpcEq}, \
+    {"!=", OpcNotEq},
+
+const TokenDict XPathPredicate::s_opcAll[] = {
+    XPATH_PREDICATE_DECLARE_OPC_BIN
+    XPATH_PREDICATE_DECLARE_OPC_FUNC
+    {0,0},
+};
+
+const TokenDict XPathPredicate::s_opcFunc[] = {
+    XPATH_PREDICATE_DECLARE_OPC_FUNC
+    {0,0},
+};
+
+const TokenDict XPathPredicate::s_opcBin[] = {
+    XPATH_PREDICATE_DECLARE_OPC_BIN
+    {0,0},
+};
+
+#undef XPATH_PREDICATE_DECLARE_OPC_FUNC
+#undef XPATH_PREDICATE_DECLARE_OPC_BIN
+
+const TokenDict XPathPredicate::s_typeName[] = {
+    {"index",     Index},
+    {"attribute", Attribute},
+    {"child",     Child},
+    {"text",      Text},
+    {0,0},
+};
+
+
+class XPathPredicateList
+{
+public:
+    inline XPathPredicateList()
+	: m_indexPredicate(0), m_stopProc(false)
+	{}
+    inline bool valid() const
+	{ return m_predicates[0].valid(); }
+    inline XPathPredicate* first()
+	{ return m_predicates; }
+    inline const XPathPredicate* first() const
+	{ return m_predicates; }
+    inline int check(unsigned int& index, const XmlElement* xml = 0,
+	const NamedString* attr = 0) const {
+	    if (!valid())
+		return XPathProcHandleCont;
+	    index++;
+	    int rProc = XPathProcHandleCont;
+	    if (!m_stopProc) {
+		// Always evalute predicates with position first. May lead to fast return
+		if (m_indexPredicate)
+		    check(rProc,true,*m_indexPredicate,index,xml,attr);
+		const XPathPredicate* f = first();
+		for (unsigned int i = 0; rProc > 0 && i < XPATH_MAX_PREDICATES && f->valid(); ++i, ++f) {
+		    if (!f->isPosition())
+			check(rProc,!(m_indexPredicate || i),*f,index,xml,attr);
+		}
+	    }
+	    else
+		rProc = XPathProcStop;
+    	    #ifdef XPATH_DEBUG_FIND
+	    if (rProc <= 0)
+		Debug("XPath",DebugAll,
+		    "Checked %s '%s' idx=%u. Predicate(s) not matched proc=%s",
+		    (xml ? "xml" : (attr ? "attribute" : "???")),
+		    (xml ? xml->tag() : ((attr ? attr->name().c_str() : ""))),
+		    index,lookup(rProc,s_xpathProcAct));
+	    #endif
+	    return rProc;
+	}
+    inline bool check(int& rProc, bool first, const XPathPredicate& pred,
+	unsigned int index, const XmlElement* xml, const NamedString* attr) const {
+	    #ifdef XPATH_XDEBUG_FIND
+	    String tmp;
+	    pred.dump(tmp) << " index=" << index;
+	    #endif
+	    if (first) {
+		rProc = pred.check(index,xml,attr);
+		#ifdef XPATH_XDEBUG_FIND
+		Debug("XPath",DebugAll,"Predicate %s check returned %s",
+		    tmp.safe(),lookup(rProc,s_xpathProcAct));
+		#endif
+	    }
+	    else {
+		int proc = pred.check(index,xml,attr);
+		rProc = filterProc(rProc,proc);
+		#ifdef XPATH_XDEBUG_FIND
+		Debug("XPath",DebugAll,"Predicate %s check returned %s. Filtered: %s",
+		    tmp.safe(),lookup(proc,s_xpathProcAct),lookup(rProc,s_xpathProcAct));
+		#endif
+	    }
+	    return rProc > 0;
+	}
+    inline String& dump(String& buf, bool escape = false) const {
+	    const XPathPredicate* f = first();
+	    for (unsigned int i = 0; i < XPATH_MAX_PREDICATES && f->valid(); ++i, ++f)
+		f->dump(buf,escape);
+	    return buf;
+	}
+
+    // Filter curent predicate evaluation result agains accumulated result
+    // NOTE: Assume previous predicate(s) check is handle (stop or continue)
+    static inline int filterProc(int prev, int crt) {
+	    // Predicate matched. Handle current item. Do not handle susequent items
+	    if (XPathProcHandleStop == crt)
+		return crt;
+	    // Predicate matched. Handle current and subsequent item(s)
+	    // Previous check indicated handle stop/continue: honor it
+	    if (XPathProcHandleCont == crt)
+		return prev;
+	    // Predicate not matched indicating Stop: honor it
+	    if (XPathProcStop == crt)
+		return crt;
+	    // Predicate not matched indicating continue processing next items
+	    // Check previous
+	    if (XPathProcHandleStop == prev)
+		return XPathProcStop;
+	    return XPathProcCont;
+	}
+
+    XPathPredicate m_predicates[XPATH_MAX_PREDICATES]; // Predicate expression(s)
+    XPathPredicate* m_indexPredicate;
+    bool m_stopProc;
+};
+
+namespace TelEngine {
+class YATE_API XPathStep : public String
+{
+    YCLASS(XPathStep,String)
+public:
+    /**
+     * Path item type
+     */
+    enum Type {
+	// Mask(s)
+	ElementNode = 0x1000,            // Step is an XML element nod
+	XmlName = 0x2000,                // Step name is subject to XML name validity check
+	// Values
+	Unknown = 0,
+	Xml = ElementNode | XmlName | 1, // XML Element
+	Attribute = XmlName | 2,         // Node attribute(s)
+	Text = 2,                        // XML Text
+	ChildText = 3,                   // XML Element child text
+    };
+    inline XPathStep(int nodeType, const char* value = 0)
+	: String(value),
+	m_nodeType(nodeType)
+	{}
+    inline XPathStep(const XPathStep& other)
+	: String(other.c_str()),
+	m_nodeType(other.m_nodeType)
+	{}
+    inline int nodeType() const
+	{ return m_nodeType; }
+    inline const char* nodeTypeName() const
+	{ return lookup(nodeType(),s_xpathNodeType,"Unknown"); }
+    inline int isElementNode() const
+	{ return isElementNode(nodeType()); }
+    inline bool valueMatchAny() const
+	{ return 0 == String::length(); }
+    inline const String* valueMatch() const
+	{ return valueMatchAny() ? 0 : (const String*)this; }
+    inline const XPathPredicateList* predicates() const
+	{ return m_predicates.valid() ? &m_predicates : 0; }
+    inline String& dump(String& buf, bool escape = false) {
+	    switch (m_nodeType) {
+		case Xml:
+		    buf << String::safe("*");
+		    break;
+		case Attribute:
+		    buf << "@" << String::safe("*");
+		    break;
+		default:
+		    const char* f = lookup(m_nodeType,s_xpathNodeSelFunction);
+		    if (f)
+			buf << f << "()";
+		    else
+			buf << "unk_function(" << m_nodeType << ")";
+	    }
+	    return m_predicates.dump(buf,escape);
+	}
+    // Check if a given item should be added to result set
+    inline int checkHandle(const XPath* path, unsigned int& resultIdx,
+	const XmlElement* xml = 0, const NamedString* attr = 0,
+	const String& name = String::empty(), const String* nameCheck = 0) const {
+	    if (nameCheck && name != *nameCheck) {
+		XPathDebugFind("XPath",DebugAll,"Checked %s '%s': not matched [%p]",
+		    (xml ? "xml" : "attribute"),name.c_str(),path);
+		return XPathProcCont;
+	    }
+	    return m_predicates.check(resultIdx,xml,attr);
+	}
+
+    static inline bool matchAny(const char* buf, unsigned int len)
+	{ return 1 == len && '*' == *buf; }
+    static inline bool isElementNode(int type)
+	{ return 0 != (ElementNode & type); }
+
+    // Utility used when processing path items in find
+    // Filter action
+    static inline int filterProc(int upperProc, int proc) {
+	    if (upperProc < 0 || XPathProcHandleStop == upperProc)
+		return upperProc;
+	    return proc;
+	}
+
+    static const TokenDict s_xpathNodeType[];
+    static const TokenDict s_xpathNodeSelFunction[];
+
+    int m_nodeType;                      // Node selector type
+    XPathPredicateList m_predicates;     // Step predicates
+};
+}; // namespace TelEngine
+
+#define XPATH_DECLARE_NODE_SEL_FUNC \
+    {"text",               Text}, \
+    {"child::text",        ChildText}, \
+
+const TokenDict XPathStep::s_xpathNodeType[] = {
+    {"element" ,  Xml},
+    {"attribute", Attribute},
+    XPATH_DECLARE_NODE_SEL_FUNC
+    {0,0}
+};
+
+const TokenDict XPathStep::s_xpathNodeSelFunction[] = {
+    XPATH_DECLARE_NODE_SEL_FUNC
+    {0,0}
+};
+
+#undef XPATH_DECLARE_NODE_SEL_FUNC
+
+XPath::XPath(const char* value, unsigned int flags)
+    : String(value),
+    m_flags(flags & ~FInternal),
+    m_status(NotParsed),
+    m_errorItem(0)
+{
+    XDebug(DebugAll,"XPath(%s,0x%x) [%p]",c_str(),m_flags,this);
+    if (0 == (m_flags & LateParse))
+	changed();
+}
+
+XPath::XPath(const XPath& other)
+    : String(other.c_str()),
+    m_flags(other.m_flags),
+    m_status(other.m_status),
+    m_errorItem(other.m_errorItem),
+    m_error(other.m_error)
+{
+    XDebug(DebugAll,"XPath(%s,0x%x) [%p]",c_str(),m_flags,this);
+    ObjList* itAppend = &m_items;
+    for (ObjList* o = other.m_items.skipNull(); o; o = o->skipNext())
+	itAppend->append(new XPathStep(*static_cast<XPathStep*>(o->get())));
+}
+
+XPath::~XPath()
+{
+    reset();
+}
+
+static inline bool addFindResult(const GenObject* gen, ObjList*& list)
+{
+    if (!list)
+	return false;
+    list = list->append(gen);
+    list->setDelete(false);
+    return true;
+}
+
+static inline bool setFindResult(const XmlElement* xml, ObjList*& list,
+    const XmlElement** xmlReq, const GenObject** anyReq)
+{
+    if (xmlReq) {
+	if (!*xmlReq)
+	    *xmlReq = xml;
+    }
+    else if (anyReq) {
+	if (!*anyReq)
+	    *anyReq = xml;
+    }
+    return addFindResult(xml,list);
+}
+
+static inline bool setFindResult(const String* str, ObjList*& list,
+    const String** textReq, const GenObject** anyReq)
+{
+    if (textReq) {
+	if (!*textReq)
+	    *textReq = str;
+    }
+    else if (anyReq) {
+	if (!*anyReq)
+	    *anyReq = str;
+    }
+    return addFindResult(str,list);
+}
+
+static inline bool xpathAddResult(const XPath* ptr, const GenObject* item,
+    const GenObject*& res, ObjList*& list)
+{
+#ifdef XPATH_DEBUG_FIND
+    String tmp;
+    XmlElement* xml = YOBJECT(XmlElement,item);
+    NamedString* attr = YOBJECT(NamedString,item);
+    String* text = YOBJECT(String,item);
+    if (xml)
+	tmp.printf("XML (%p) '%s'",xml,xml->tag());
+    else if (attr)
+	tmp.printf("ATTR (%p) '%s'='%s'",attr,attr->name().c_str(),attr->safe());
+    else if (text)
+	tmp.printf("TEXT %s(%p) '%s'",(text == &String::empty() ? "EMPTY " : ""),text,text->safe());
+    else
+	tmp.printf("??? (%p) '%s'",item,item->toString().safe());
+    Debug("XPath",(xml || attr || text) ? DebugAll : DebugFail,"FIND adding result %s [%p]",tmp.c_str(),ptr);
+#endif
+    if (!res)
+	res = item;
+    if (!list)
+	return false;
+    list = list->append(item);
+    list->setDelete(false);
+    return true;
+}
+
+int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& res, ObjList* list,
+    unsigned int what, ObjList* crtItem, unsigned int step, bool absolute) const
+{
+#ifdef XPATH_DEBUG_FIND
+    String stepInfo, tmp;
+    if (!step) {
+	dump(tmp,false," ");
+	stepInfo << "items=" << m_items.count() << " ";
+    }
+    String req;
+    if (what != FindAny) {
+	if (what & FindXml)
+	    req.append("XML","_");
+	if (what & FindText)
+	    req.append("TEXT","_");
+	if (what & FindAttr)
+	    req.append("ATTR","_");
+    }
+    Debugger debug(step ? DebugInfo : DebugCall,"XPath FIND"," %sstep=%u req=%s%s [%p]%s",
+	stepInfo.safe(),step,req.safe("ANY"),(list ? "_LIST" : ""),
+	this,tmp.safe());
+#endif
+
+    if (!crtItem) {
+	crtItem = m_items.skipNull();
+	if (!crtItem) {
+	    XPathDebugFind("XPath",DebugInfo,"FIND step=%u res_count=0 returning proc %s [%p]",
+		step,lookup(XPathProcStop,s_xpathProcAct),this);
+	    return XPathProcStop;
+	}
+    }
+    XPathStep& it = *static_cast<XPathStep*>(crtItem->get());
+    ObjList* nextItem = crtItem->skipNext();
+
+    ObjList* lstAppend = list;
+    unsigned int n = 0;
+    bool stop = false;
+    unsigned int resultIdx = 0;
+    while (true) {
+	if (it.isElementNode()) {
+	    ObjList* o = 0;
+	    XmlElement* x = 0;
+	    if (absolute)
+		x = (XmlElement*)&src;
+	    else {
+		o = src.getChildren().skipNull();
+		x = XmlFragment::getElement(o);
+	    }
+	    bool xmlReq = 0 != (what & FindXml);
+	    // Last item but no XML/TEXT requested ?
+	    if (!nextItem && !xmlReq && 0 == (what & FindText)) {
+		stop = true;
+		break;
+	    }
+	    const String* tag = it.valueMatch();
+	    for ( ; x; x = XmlFragment::getElement(o)) {
+		int proc = it.checkHandle(this,resultIdx,x,0,x->getTag(),tag);
+		if (proc > 0) {
+		    if (nextItem)
+			proc = XPathStep::filterProc(proc,find(n,*x,res,list,what,nextItem,step + 1));
+		    else if (xmlReq) {
+			n++;
+			if (!xpathAddResult(this,x,res,lstAppend))
+			    proc = XPathProcStop;
+		    }
+		    else
+			// Last item pointing to an XML but XML was not requested
+			proc = XPathStep::filterProc(proc,getText(n,*x,0,resultIdx,res,list));
+		}
+		if (proc < 0 || XPathProcHandleStop == proc)
+		    break;
+	    }
+	    break;
+	}
+	
+	if (XPathStep::Text == it.m_nodeType || XPathStep::Text == it.m_nodeType) {
+	    // No need to check anything if the requested result set contains other data
+	    //  type (non XML Text) or we have a next item
+	    // If next item is present there is nothing there to match (XmlText has no attributes, children ...)
+	    // NOTE: This won't be true if we are going to implement other node type selector
+	    //       that may be possible (e.g. parent)
+	    if (nextItem || 0 == (FindText & what)) {
+		stop = true;
+		break;
+	    }
+	    if (XPathStep::Text == it.m_nodeType)
+		getText(n,src,&it,resultIdx,res,list);
+	    else {
+		ObjList* o = src.getChildren().skipNull();
+		for (XmlElement* x = XmlFragment::getElement(o); x; x = XmlFragment::getElement(o)) {
+		    int proc = getText(n,*x,&it,resultIdx,res,list);
+		    if (proc < 0 || XPathProcHandleStop == proc)
+			break;
+		}
+	    }
+	    break;
+	}
+
+	if (XPathStep::Attribute == it.m_nodeType) {
+	    // If next item is present there is nothing there to match
+	    // (an attribute has no relatinship with other data)
+	    if (nextItem || 0 == (FindAttr & what)) {
+		stop = true;
+		break;
+	    }
+	    const String* name = it.valueMatch();
+	    for (const ObjList* o = src.attributes().paramList()->skipNull(); o; o = o->skipNext()) {
+		NamedString* ns = static_cast<NamedString*>(o->get());
+		int proc = it.checkHandle(this,resultIdx,0,ns,ns->name(),name);
+		if (proc > 0) {
+		    n++;
+		    if (!xpathAddResult(this,ns,res,lstAppend))
+			proc = XPathProcStop;
+		}
+		if (proc < 0 || XPathProcHandleStop == proc)
+		    break;
+	    }
+	    break;
+	}
+
+	Debug("XPath",DebugStub,"Node type selector %d '%s' not handled [%p]",
+	    it.m_nodeType,it.nodeTypeName(),this);
+	stop = true;
+	break;
+    }
+
+    total += n;
+    int rProc = XPathProcCont;
+    if (stop || (n && !list))
+	rProc = XPathProcStop;
+    XPathDebugFind("XPath",DebugInfo,"FIND step=%u res_count=%u returning proc %s [%p]",
+	step,n,lookup(rProc,s_xpathProcAct),this);
+    return rProc;
+}
+
+int XPath::getText(unsigned int& total, const XmlElement& src, const XPathStep* step,
+    unsigned int& resultIdx, const GenObject*& res, ObjList* list) const
+{
+    XPathDebugFind("XPath",DebugAll,"Get text xml '%s' multi=%s step=(%p) [%p]",
+	src.getTag().c_str(),String::boolText(list),step,this);
+    unsigned int n = 0;
+    int proc = XPathProcHandleCont;
+    ObjList* o = src.getChildren().skipNull();
+    for (XmlText* t = XmlFragment::getText(o); t; t = XmlFragment::getText(o)) {
+	if (step)
+	    proc = step->checkHandle(this,resultIdx);
+	if (proc > 0) {
+	    n++;
+	    if (!xpathAddResult(this,&t->getText(),res,list))
+		proc = XPathProcStop;
+	}
+	if (proc < 0 || XPathProcHandleStop == proc)
+	    break;
+    }
+    total += n;
+    XPathDebugFind("XPath",DebugAll,"Get text found=%u returning proc %s [%p]",
+	n,lookup(proc,s_xpathProcAct),this);
+    return proc;
+}
+
+void XPath::changed()
+{
+    parsePath();
+}
+
+#define XPATH_SET_STATUS_BREAK(code,str) { setStatus(code,data.step(),str); break; }
+#define XPATH_SET_STATUS_RET(code,str) { return setStatus(code,data.step(),str); }
+#define XPATH_SET_SYNTAX_BREAK(str) XPATH_SET_STATUS_BREAK(ESyntax,str)
+#define XPATH_SET_SYNTAX_RET(str) XPATH_SET_STATUS_RET(ESyntax,str)
+
+#define XPATH_PARSE_EOB(str) ((String("Unexpected end of buffer ") + str).c_str())
+#define XPATH_CHECK_END_BREAK(str) if (data.ended()) XPATH_SET_SYNTAX_BREAK(XPATH_PARSE_EOB(str));
+#define XPATH_CHECK_END_RET(str) if (data.ended()) XPATH_SET_SYNTAX_RET(XPATH_PARSE_EOB(str));
+#define XPATH_PARSE_SKIP_BLANKS_BREAK(str) if (!data.skipBlanks()) XPATH_SET_SYNTAX_BREAK(XPATH_PARSE_EOB(str));
+#define XPATH_PARSE_SKIP_BLANKS_RET(str) if (!data.skipBlanks()) XPATH_SET_SYNTAX_RET(XPATH_PARSE_EOB(str));
+
+#define XPATH_PARSE_STRICT_BLANK_BREAK(str) { \
+    XPATH_CHECK_END_BREAK(str); \
+    if (data.isBlank()) { \
+	if (data.strictParse) \
+	    { XPATH_SET_SYNTAX_BREAK((String("Unexpected space ") + str).c_str()); } \
+	else \
+	    XPATH_PARSE_SKIP_BLANKS_BREAK(str); \
+    } \
+}
+#define XPATH_PARSE_STRICT_BLANK_RET(str) { \
+    XPATH_CHECK_END_RET(str); \
+    if (data.isBlank()) { \
+	if (data.strictParse) \
+	    { XPATH_SET_SYNTAX_RET((String("Unexpected space ") + str).c_str()); } \
+	else \
+	    XPATH_PARSE_SKIP_BLANKS_RET(str); \
+    } \
+}
+#define XPATH_PARSE_STRICT_BLANK_PREDICATE XPATH_PARSE_STRICT_BLANK_RET("while parsing predicate")
+
+void XPath::parsePath()
+{
+    reset();
+
+    m_flags = m_flags & ~(unsigned int)FAbsolute;
+    m_status = 0;
+    XPathParseData data(c_str(),String::length(),m_flags);
+    String tmp;
+#ifdef XPATH_DEBUG_PARSE
+    Debugger dbg(DebugCall,"XPath PARSE"," flags=0x%x len=%u '%s' [%p]",
+	m_flags,data.origLength(),data.c_str(),this);
+#endif
+    XPathStep* step = 0;
+    XPathStep* prevStep = 0;
+    XPathParseItem stepStart;
+    while (true) {
+	// Path step start
+	XPathDebugParse("XPath",DebugAll,"Parsing step %u idx=%u '%s' [%p]",
+	    data.step(),data.index(),data.c_str(),this);
+	stepStart.set(data.c_str(),data.index());
+	if (data.haveData() && data.isBlank()) {
+	    if (data.strictParse)
+		XPATH_SET_SYNTAX_BREAK("Unexpected space at step start");
+	    if (!data.skipBlanks())
+		XPATH_SET_STATUS_BREAK(EEmptyItem,"");
+	}
+
+	if (data.isStepEnd()) {
+	    if (data.step() || data.ended())
+		XPATH_SET_STATUS_BREAK(EEmptyItem,"");
+	    XPathDebugParse("XPath",DebugAll,"Processed empty step %u idx=%u '%s' [%p]",
+		data.step(),data.index(),data.c_str(),this);
+	    // Empty first step: set absolute path flag
+	    m_flags |= FAbsolute;
+	    data.advance();
+	    continue;
+	}
+
+#ifdef XPATH_DEBUG_PARSE
+	Debugger dbgStep(DebugCall,"XPath PARSE STEP"," %u idx=%u '%s' [%p]",
+	    data.step(),data.index(),data.c_str(),this);
+#endif
+	// Retrieve step expression
+	// https://www.w3.org/TR/xpath-30/#doc-xpath30-StepExpr
+	const char* name = data.c_str();
+	unsigned int n = data.index();
+	while (data.haveData()
+	    && !(data.isSep() || (data == '(') || (data == '[') || data.isBlank()))
+	    data.advance();
+	n = data.index() - n;
+	if (!n)
+	    XPATH_SET_SYNTAX_BREAK("Empty step expression");
+	if (data.haveData())
+	    XPATH_PARSE_STRICT_BLANK_BREAK("while parsing step expression");
+	if (data.isStepEnd() || data == '[') {
+	    // Handle element tag or attribute
+	    if ('@' == *name) {
+		// Attribute(s) ...
+		if (n < 2)
+		    XPATH_SET_SYNTAX_BREAK("Empty attribute match in step");
+		step = new XPathStep(XPathStep::Attribute);
+		name++;
+		n--;
+	    }
+	    else
+		step = new XPathStep(XPathStep::Xml);
+	    if (!XPathStep::matchAny(name,n)) {
+		char c = data.validXmlName(name,n);
+		if (c)
+		    XPATH_SET_SYNTAX_BREAK(tmp.printf("Invalid char '%c' in %s name",c,step->nodeTypeName()));
+		step->assign(name,n);
+	    }
+	}
+	else if (data == '(') {
+	    // Node selector. Function call: selector()
+	    String fn(name,n);
+	    int type = lookup(fn,XPathStep::s_xpathNodeSelFunction);
+	    if (!type)
+		XPATH_SET_SYNTAX_BREAK(tmp.printf("Unknown node selector '%s'",fn.c_str()));
+	    data.advance();
+	    XPATH_PARSE_STRICT_BLANK_BREAK("while parsing node selector");
+	    // Node selector can't have parameters. Expect end of function call
+	    if (data != ')')
+		XPATH_SET_SYNTAX_BREAK("Non empty node selector");
+	    data.advance();
+	    if (!data.strictParse)
+		data.skipBlanks();
+	    step = new XPathStep(type);
+	}
+	if (data.checkEmptyRes) {
+	    // Previous selector is not XML
+	    // We are only handling XML element or text nodes
+	    // If previous is a text node there is nothing else following it
+	    // Searching something using this path will alsways produce an empty result
+	    if (prevStep && !prevStep->isElementNode())
+		XPATH_SET_STATUS_BREAK(EEmptyResult,"Path step after a final selector step");
+	    prevStep = step;
+	}
+
+	XPathPredicate* p = step->m_predicates.first();
+	for (unsigned int i = 0; ; ++p, ++i) {
+	    if (!data.strictParse)
+		data.skipBlanks();
+	    if (data.isStepEnd())
+		break;
+	    if (data != '[') {
+		if (i)
+		    XPATH_SET_SYNTAX_BREAK("Unexpected char after step predicate");
+		XPATH_SET_SYNTAX_BREAK("Unexpected char after step selector");
+	    }
+	    if (i == XPATH_MAX_PREDICATES)
+		XPATH_SET_STATUS_BREAK(ERange,"Too many predicates");
+	    if (!parseStepPredicate(data,p))
+		break;
+	    if (!checkStepPredicate(data,step,p))
+		break;
+	}
+	if (m_status)
+	    break;
+
+#ifdef XPATH_DEBUG_PARSE
+	String tmpStep;
+	XPathDebugParse("XPath",DebugInfo,"Parsed step %u type=%d (%s) '%s' value='%s' [%p]",
+	    data.step(),step->nodeType(),step->nodeTypeName(),step->dump(tmpStep).c_str(),
+	    step->c_str(),this);
+#endif
+	m_items.append(step);
+	step = 0;
+	if (data.ended())
+	    break;
+	data.advanceStep();
+    }
+    TelEngine::destruct(step);
+
+#ifdef XPATH_DEBUG_PARSE
+    tmp = "";
+    String tmp2;
+    if (m_status)
+	Debug("XPath",DebugNote,"Parse failed step=%u offset=%u '%s': %s [%p]",
+	    data.step(),data.index() - stepStart.length(),stepStart.value().c_str(),
+	    describeError(tmp).c_str(),this);
+    else {
+	Debug("XPath",DebugCall,"Parsed%s [%p]\r\n-----\r\n%s\r\n%s\r\n-----",
+	    (absolute() ? " absolute" : ""),this,
+	    dump(tmp2,true,"/",absolute()).c_str(),dump(tmp).safe());
+    }
+#endif
+}
+
+// Parse predicate (filter expression) [...]
+bool XPath::parseStepPredicate(XPathParseData& data, XPathPredicate* pred)
+{
+#ifdef XPATH_DEBUG_PARSE
+    Debugger dbg(DebugAll,"XPath PARSE predicate"," len=%u '%s' [%p]",
+	data.length(),data.c_str(),this);
+#endif
+    // Skip over starting [ and spaces
+    data.advance();
+    // Allow spaces in predicate start
+    XPATH_PARSE_STRICT_BLANK_PREDICATE;
+    if (data.isPredicatedEnd()) {
+	if (data.isStepEnd())
+	    XPATH_SET_SYNTAX_RET("Expectind predicate contents");
+	XPATH_SET_SYNTAX_RET("Empty predicate");
+    }
+
+    String tmp;
+    XPathParseItem selector(data.c_str());
+
+    // Nothing can start with decimal digits except for Index 
+    if (data.isDigit()) {
+	for (; data.haveData() && data.isDigit(); data.advance())
+	    selector.advance();
+	XPATH_PARSE_STRICT_BLANK_PREDICATE;
+	if (data.isStepEnd())
+	    XPATH_SET_SYNTAX_RET("Unexpected end of step while parsing predicate");
+	if (data != ']')
+	    XPATH_SET_SYNTAX_RET(tmp.printf("Unexpected char '%c' while parsing index predicate",data.crt()));
+	data.advance();
+	uint64_t val = (selector.length() && '0' != selector[0]) ?
+	    selector.value().toUInt64() : 0;
+	if (!val || val > 0xffffffff)
+	    XPATH_SET_SYNTAX_RET("Predicate index value invalid or out of range");
+	pred->m_type = XPathPredicate::Index;
+	pred->m_opc = (unsigned int)val;
+
+	XPathDebugParse("XPath",DebugInfo,"Parsed predicate %u '%s' value=%u [%p]",
+	    pred->type(),pred->typeName(),pred->opc(),this);
+	return true;
+    }
+
+    pred->m_type = XPathPredicate::None;
+    unsigned int selMin = 1;
+    if (data == '@') {
+	data.advance();
+	if (data.isPredicatedEnd())
+	    XPATH_SET_SYNTAX_RET("Unexpected end of predicate attribute selector");
+	pred->m_type = XPathPredicate::Attribute;
+	selector.advance();
+	selMin = 2;
+    }
+    unsigned int opc = 0;
+    String fn;
+    int funcParam = 0;
+    int reqParams = 0;
+    int maxParams = -1;
+    XPathParseItem op1; // Second predicate operand or second function parameter
+    XPathParseItem op2; // Third function parameter
+
+    // Parse input from XML
+    // Predicate may be an XML selector: attribute, child, text() or function call
+    // Non function may be followed by a binary operator
+    // Function first parameter MUST be an XML selector
+    while (!data.isPredicatedEnd()) {
+	if (fn) {
+	    // We are in function call
+	    if (funcParam) {
+		XPATH_PARSE_STRICT_BLANK_PREDICATE;
+		if (funcParam <= maxParams) {
+		    XPathParseItem& op = (funcParam == 1) ? op1 : op2;
+		    const char* e = data.parseStringXml(op.buf,op.len,op.delimiter,op.esc);
+		    if (e)
+			XPATH_SET_SYNTAX_RET(String(e) + " in predicate function parameter");
+		    XPathXDebugParse("XPath",DebugAll,"Parsed function param %u '%s' [%p]",
+			funcParam,op.value().safe(),this);
+		    XPATH_PARSE_STRICT_BLANK_PREDICATE;
+		}
+		if (data == ')') {
+		    if (funcParam < reqParams)
+			XPATH_SET_SYNTAX_RET("Missing function parameter");
+		    data.advance();
+		    break;
+		}
+		if (data != ',')
+		    XPATH_SET_SYNTAX_RET("Expecting function parameters separator");
+		funcParam++;
+		if (funcParam > maxParams)
+		    XPATH_SET_SYNTAX_RET("Too many predicate function parameters");
+		data.advance();
+		continue;
+	    }
+	    if (data == ',' || data == '(' || data == ')') {
+		// Enf of selector
+		if (!selector.length()) {
+		    if (data == '(')
+			XPATH_SET_SYNTAX_RET("Unexpected '(' in function parameter");
+		    XPATH_SET_SYNTAX_RET("Missing function parameter");
+		}
+		XPathXDebugParse("XPath",DebugAll,"Parsed function selector '%s' [%p]",
+		    selector.value().c_str(),this);
+		// Check name
+		if (data == '(') {
+		    const String& f = selector.value();
+		    unsigned int func = lookup(f,XPathPredicate::s_typeName);
+		    switch (func) {
+			case XPathPredicate::Text:
+			    // Empty parameter list allowed
+			    if (!data.ended())
+				data.advance();
+			    if (data.ended() || data != ')')
+				XPATH_SET_SYNTAX_RET("Expecting ')' after predicate input selector");
+			    pred->m_type = XPathPredicate::Text;
+			    break;
+			default:
+			    if (func)
+				tmp.printf("Predicate function '%s' not implemented",f.c_str());
+			    else
+				tmp.printf("Unknown function '%s' in predicate",f.c_str());
+			    XPATH_SET_SYNTAX_RET(tmp);
+		    }
+		    data.advance();
+		}
+		else if ('@' == selector[0]) {
+		    if (selector.length() < 2)
+			XPATH_SET_SYNTAX_RET("Empty attribute name in function parameter");
+		    pred->m_type = XPathPredicate::Attribute;
+		}
+		if (data != ')')
+		    data.advance();
+		XPATH_PARSE_STRICT_BLANK_PREDICATE;
+		funcParam = 1;
+	    }
+	    else {
+		if (!selector.length()) {
+		    XPATH_PARSE_STRICT_BLANK_PREDICATE;
+		    selector.set(data.c_str());
+		}
+		selector.advance();
+		data.advance();
+	    }
+	    continue;
+	}
+
+	if (data.isBlank()) {
+	    if (selector.length() < selMin)
+		XPATH_SET_SYNTAX_RET("Unexpected space in predicate operand");
+	    data.advance();
+	    // Next blanks will be skipped if allowed
+	    XPATH_PARSE_SKIP_BLANKS_RET("while parsing predicate");
+	    if (!op1.c_str())
+		XPathXDebugParse("XPath",DebugAll,"Parsed selector '%s' [%p]",
+		    selector.value().c_str(),this);
+	    // Prepare second operand
+	    op1.set(data.c_str());
+	    continue;
+	}
+	if (!opc) {
+	    opc = data.parseOperator();
+	    if (opc) {
+		if (selector.length() < selMin)
+		    XPATH_SET_SYNTAX_RET("Unexpected operator while parsing predicate");
+		if (!data.ended() && data.isBlank()) {
+		    data.advance();
+		    // Next blanks will be skipped if allowed
+		    XPATH_PARSE_SKIP_BLANKS_RET("while parsing predicate");
+		}
+		if (!op1.c_str())
+		    XPathXDebugParse("XPath",DebugAll,"Parsed selector '%s' [%p]",
+			selector.value().c_str(),this);
+		// Prepare second operand
+		XPathXDebugParse("XPath",DebugAll,"Parsed operator %u '%s' [%p]",
+		    opc,XPathPredicate::opcName(opc),this);
+		op1.set(data.c_str());
+		continue;
+	    }
+	    if (data == '(') {
+		if (selector.length() < selMin)
+		    XPATH_SET_SYNTAX_RET("Unexpected operator while parsing predicate");
+		// Function call
+		if (pred->type()) {
+		    tmp.printf("Unexpected '(' after %s operand",pred->typeName());
+		    XPATH_SET_SYNTAX_RET(tmp);
+		}
+		selector.assignTo(fn);
+		data.advance();
+		selector.advance();
+		unsigned int func = lookup(fn,XPathPredicate::s_opcFunc);
+		switch (func) {
+		    case XPathPredicate::OpcMatch:
+		    case XPathPredicate::OpcMatchNot:
+			maxParams = 2;
+			reqParams = 1;
+			break;
+		    case 0:
+			// Function not found. Check for selector type function
+			func = lookup(fn,XPathPredicate::s_typeName);
+			switch (func) {
+			    case XPathPredicate::Text:
+				if (data.ended() || data != ')')
+				    XPATH_SET_SYNTAX_RET("Expecting ')' after predicate input selector");
+				pred->m_type = XPathPredicate::Text;
+				func = 0;
+				selector.advance();
+				data.advance();
+				break;
+			    default:
+				if (func)
+				    tmp.printf("Predicate function '%s' not implemented",fn.c_str());
+				else
+				    tmp.printf("Unknown function '%s' in predicate",fn.c_str());
+				XPATH_SET_SYNTAX_RET(tmp);
+			}
+			break;
+		    default:
+			tmp.printf("Predicate function '%s' not implemented",fn.c_str());
+			XPATH_SET_SYNTAX_RET(tmp);
+		}
+		if (func) {
+		    XPathXDebugParse("XPath",DebugAll,"Parsed function %u '%s' [%p]",
+			func,XPathPredicate::opcName(func),this);
+		    opc = func;
+		    // Reset selector: parse input from XML
+		    selector.set();
+		}
+		else {
+		    // Prepare second operand
+		    XPathXDebugParse("XPath",DebugAll,"Parsed selector '%s' [%p]",
+			selector.value().c_str(),this);
+		    op1.set(data.c_str());
+		    fn.clear();
+		}
+		continue;
+	    }
+	    // Operator not matched after first operand ?
+	    if (op1.c_str())
+		XPATH_SET_SYNTAX_RET("Expecting operator");
+	}
+	if (!op1.c_str()) {
+	    selector.advance();
+	    data.advance();
+	    continue;
+	}
+	const char* e = data.parseStringLiteral(op1.buf,op1.len,op1.delimiter,op1.esc);
+	if (e)
+	    XPATH_SET_SYNTAX_RET(String(e) + " in predicate operand");
+	XPathXDebugParse("XPath",DebugAll,"Parsed operand '%s' [%p]",op1.value().safe(),this);
+	XPATH_PARSE_STRICT_BLANK_PREDICATE;
+	break;
+    }
+    if (!data.isPredicatedEnd())
+	XPATH_PARSE_STRICT_BLANK_PREDICATE;
+    if (data.isStepEnd())
+	XPATH_SET_SYNTAX_RET("Unexpected end of step while parsing predicate");
+    if (data != ']')
+	XPATH_SET_SYNTAX_RET(tmp.printf("Unexpected char '%c' while parsing predicate",data.crt()));
+    data.advance();
+
+    if (!pred->type())
+	pred->m_type = XPathPredicate::Child;
+    pred->m_opc = opc;
+
+#if 0
+#ifdef XPATH_XDEBUG_PARSE
+    String xd;
+    xd << tmp.printf("\r\nselector: %u '%s'",selector.length(),selector.value().c_str());
+    xd << tmp.printf("\r\nop1: %u '%s'",op1.length(),op1.value().c_str());
+    xd << tmp.printf("\r\nop2: %u '%s'",op2.length(),op2.value().c_str());
+    Debug("XPath",DebugAll,"Processing predicate %u opc=%u [%p]\r\n-----%s\r\n-----",
+	pred->type(),pred->opc(),this,xd.c_str());
+#endif
+#endif
+
+    if (XPathPredicate::Attribute == pred->type()) {
+	if (selector.length() < 2)
+	    XPATH_SET_SYNTAX_RET("Empty attribute name in predicate operand");
+	if (XPathStep::matchAny(selector.c_str() + 1,selector.length() - 1))
+	    selector.set();
+	else
+	    selector.set(selector.c_str() + 1,selector.length() - 1);
+    }
+    if (selector.length()) {
+	if (0 != (pred->type() & XPathPredicate::XmlName)) {
+	    char c = data.validXmlName(selector.c_str(),selector.length());
+	    if (c)
+		XPATH_SET_SYNTAX_RET(
+		    tmp.printf("Invalid char '%c' in %s name predicate",c,pred->typeName()));
+	}
+	selector.assignTo(pred->m_name);
+    }
+    if (op1.c_str()) {
+	bool ok = true;
+	switch (pred->opc()) {
+	    case XPathPredicate::OpcMatch:    ok = pred->m_regexp.set(true,op1,op2,&tmp); break;
+	    case XPathPredicate::OpcMatchNot: ok = pred->m_regexp.set(false,op1,op2,&tmp); break;
+	    default:
+		pred->m_value.setLiteral(true);
+		ok = pred->m_value.setString(op1,&tmp);
+	}
+	if (!ok)
+	    XPATH_SET_SYNTAX_RET(tmp + " in predicate function parameter");
+    }
+
+#ifdef XPATH_DEBUG_PARSE
+    String pInfo;
+    if (XPathPredicate::Index == pred->type())
+	pInfo << "value " << pred->opc();
+    else {
+	pInfo << "name='" << pred->m_name << "'";
+	if (pred->opc()) {
+	    pInfo << " opc=" << pred->opc() << " (" << pred->opcName() << ")";
+	    if (pred->m_value.delimiter()) {
+		pInfo << " value=";
+		pred->m_value.dump(pInfo);
+	    }
+	    if (pred->m_regexp.delimiter()) {
+		pInfo << " regexp=";
+		pred->m_regexp.dumpString(pInfo);
+		if (pred->m_regexp.flags()) {
+		    pInfo << " flags=";
+		    pred->m_regexp.flags().dumpString(pInfo);
+		}
+	    }
+	}
+    }
+    Debug("XPath",DebugInfo,"Parsed predicate %u '%s' %s [%p]",
+	pred->type(),pred->typeName(),pInfo.c_str(),this);
+#endif
+
+    return true;
+}
+
+bool XPath::checkStepPredicate(XPathParseData& data, XPathStep* step, XPathPredicate* pred)
+{
+    if (pred->type() == XPathPredicate::Index) {
+	XPathPredicateList& lst = step->m_predicates;
+	if (!lst.m_indexPredicate)
+	    lst.m_indexPredicate = pred;
+	else {
+	    if (data.strictParse)
+		XPATH_SET_STATUS_RET(ESemantic,"Repeated index predicate in step");
+	    if (pred->opc() != lst.m_indexPredicate->opc())
+		if (data.checkEmptyRes)
+		    XPATH_SET_STATUS_RET(EEmptyResult,"Path step with different index value in predicate");
+		lst.m_stopProc = true;
+	}
+    }
+    else {
+	if (data.checkEmptyRes) {
+	    switch (pred->type()) {
+		case XPathPredicate::Attribute:
+		case XPathPredicate::Child:
+		case XPathPredicate::Text:
+		    // Only XML Element can have children or attributes
+		    // For all other types there will be no match
+		    if (!step->isElementNode()) {
+			String tmp;
+			tmp.printf("Found %s predicate for '%s' selector step",
+			    pred->typeName(),step->nodeTypeName());
+			XPATH_SET_STATUS_RET(EEmptyResult,tmp);
+		    }
+		    break;
+		case XPathPredicate::Index:
+		    break;
+		default:
+		    Debug("XPath",DebugStub,
+			"Predicate type %d (%s) not handled in step empty result check [%p]",
+			pred->type(),pred->typeName(),this);
+	    }
+	}
+    }
+    return true;
+}
+
+String& XPath::dump(String& buf, bool escape, const char* itemSep, bool sepFirst) const
+{
+    for (ObjList* o = m_items.skipNull(); o; o = o->skipNext()) {
+	String tmp;
+	(static_cast<XPathStep*>(o->get()))->dump(tmp,escape);
+	if (sepFirst)
+	    buf << itemSep << tmp;
+	else {
+	    buf << tmp;
+	    sepFirst = true;
+	}
+    }
+    return buf;
+}
+
+void XPath::dump(ObjList& lst, bool escape) const
+{
+    ObjList* a = &lst;
+    for (ObjList* o = m_items.skipNull(); o; o = o->skipNext()) {
+	String* tmp = new String;
+	(static_cast<XPathStep*>(o->get()))->dump(*tmp,escape);
+	a = a->append(tmp);
+    }
+}
+
+unsigned int XPath::maxStepPredicates()
+{
+    return XPATH_MAX_PREDICATES;
+}
+
+void XPath::reset()
+{
+    setStatus(NotParsed);
+    m_items.clear();
+}
+
+const TokenDict* XPath::dictErrors()
+{
+    return s_xpathErrors;
+}
+
+bool XPath::setStatus(unsigned int code, unsigned int itemIdx, const char* error,
+    XPathParseData* data)
+{
+    m_status = code;
+    m_errorItem = itemIdx;
+    m_error = error;
+#ifdef XPATH_DEBUG_PARSE
+    if (data && m_status) {
+	String s;
+	Debug("XPath",DebugNote,"Status %s data: index=%u '%s' [%p]",
+	    describeError(s).c_str(),data->index(),data->c_str(),this);
+    }
+#endif
+    return false;
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

@@ -45,7 +45,7 @@ class XmlComment;
 class XmlCData;
 class XmlText;
 class XmlDoctype;
-
+class XPath;
 
 struct YATE_API XmlEscape {
     /**
@@ -208,7 +208,7 @@ public:
      * @return True if c is blank
      */
     static inline bool blank(char c)
-	{ return (c == 0x20) || (c == 0x09) || (c == 0x0d) || (c == 0x0a); }
+	{ return (c <= 0x20) && ((c == 0x20) || (c == 0x09) || (c == 0x0d) || (c == 0x0a)); }
 
     /**
      * Verify if the given character is in the range allowed
@@ -216,7 +216,11 @@ public:
      * @param ch The character to check
      * @return True if the character is in range
      */
-    static bool checkFirstNameCharacter(unsigned char ch);
+    static inline bool checkFirstNameCharacter(unsigned char ch) {
+	    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+		|| (ch == ':') || (ch == '_')
+		|| (ch >= 0xc0 && ch <= 0xd6) || (ch >= 0xd8 && ch <= 0xf6) || (ch >= 0xf8);
+	}
 
     /**
      * Check if the given character is in the range allowed for an xml char
@@ -230,7 +234,10 @@ public:
      * @param ch The character to check
      * @return True if the character is in range
      */
-    static bool checkNameCharacter(unsigned char ch);
+    static inline bool checkNameCharacter(unsigned char ch) {
+	    return checkFirstNameCharacter(ch) || ch == '-' || ch == '.' || (ch >= '0' && ch <= '9')
+		|| ch == 0xB7;
+	}
 
     /**
      * Check if a given string is a valid xml tag name
@@ -243,8 +250,39 @@ public:
      * XmlEscape the given text
      * @param buf Destination buffer
      * @param text The text to escape
+     * @return Destination buffer reference
      */
-    static void escape(String& buf, const String& text);
+    static String& escape(String& buf, const String& text);
+
+    /**
+     * Unescape the given text.
+     * Handled: &amp;lt; &amp;gt; &amp;apos; &amp;quot; &amp;amp;
+     *  &amp;\#DecimalNumber; &amp;\#xHexNumber;
+     * @param text The requested text to unescape
+     * @param error Destination for error string
+     * @param found Optional flag to be set if unescape was found
+     * @return True on success, false otherwise
+     */
+    static inline bool unEscape(String& text, String* error, bool* found = 0)
+	{ return unEscape(text,text.c_str(),text.length(),error,false,found); }
+
+    /**
+     * Unescape the given text.
+     * Handled: &amp;lt; &amp;gt; &amp;apos; &amp;quot; &amp;amp;
+     *  &amp;\#DecimalNumber; &amp;\#xHexNumber;
+     * @param text The requested text to unescape
+     * @param str Input buffer
+     * @param len Input buffer length
+     * @param inText Use destination text during unescape.
+     *  If enabled the destination text may be incomplete on failure.
+     *  The method will use a temporary buffer if disabled
+     *  This parameter is ignored and handled as 'false' if 'str' points to destination string's buffer
+     * @param error Destination for error string
+     * @param found Optional flag to be set if unescape was found
+     * @return True on success, false otherwise
+     */
+    static bool unEscape(String& text, const char* str, unsigned int len, String* error,
+	bool inText = false, bool* found = 0);
 
     /**
      * Errors dictionary
@@ -965,10 +1003,38 @@ public:
      *  This parameter is ignored if name is 0 or ns is not 0
      * @return XmlElement pointer or 0 if not found
      */
-    static XmlElement* findElement(ObjList* list, const String* name, const String* ns,
+    static inline XmlElement* findElement(ObjList* list, const String* name, const String* ns,
+	bool noPrefix = true)
+	{ return getElement(list,name,ns,noPrefix); }
+
+    /**
+     * Retrieve first XML element from given list. Advance the list when found
+     * @param lst List of XmlChild
+     * @param name Optional element tag to match
+     * @param ns Optional element namespace to match
+     * @param noPrefix True to compare the tag without namespace prefix, false to
+     *  include namespace prefix when comparing the given tag.
+     *  This parameter is ignored if name is 0 or ns is not 0
+     * @return XmlElement pointer, NULL if not found
+     */
+    static XmlElement* getElement(ObjList*& lst, const String* name = 0, const String* ns = 0,
 	bool noPrefix = true);
 
+    /**
+     * Retrieve first XML text from given list. Advance the list when found
+     * @param lst List of XmlChild
+     * @return XmlText pointer, NULL if not found
+     */
+    static inline XmlText* getText(ObjList*& lst) {
+	    XmlText* x = 0;
+	    for (; lst && !x; lst = lst->skipNext())
+		x = (static_cast<XmlChild*>(lst->get()))->xmlText();
+	    return x;
+	}
+
 private:
+    static XmlElement* elementMatch(XmlElement* xml, const String* name, const String* ns,
+	bool noPrefix = true);
     ObjList m_list;                    // The children list
 };
 
@@ -1878,6 +1944,238 @@ public:
 
 private:
     String m_doctype;                          // The document type
+};
+
+
+// Internal
+class XPathParseData;
+class XPathPredicate;
+class XPathStep;
+
+/**
+ * This class holds an XML Path
+ * @short XML Path holder
+ */
+class YATE_API XPath : public String
+{
+    YCLASS(XPath,String)
+public:
+    /**
+     * Path flags
+     */
+    enum Flags {
+	LateParse = 0x0001,              // Don't try to parse in constructor
+	StrictParse = 0x0002,            // Strict parse
+	                                 // - Don't allow spaces at step start
+	                                 // - Don't ignore duplicate index predicate (not specified in spec but common sense)
+	IgnoreEmptyResult = 0x0004,      // Don't check always empty result path (avoid error: EEmptyResult)
+	NoXmlNameCheck = 0x0008,         // Don't validate XML names (tag and attribute)
+	// Internal
+	FInternal = 0xff00,              // Internal flags mask
+	FAbsolute = 0x0100,              // Absolute path
+    };
+
+    /**
+     * Find result type
+     */
+    enum Find {
+	FindXml =  0x01,
+	FindText = 0x02,
+	FindAttr = 0x04,
+	FindAny = FindXml | FindText | FindAttr
+    };
+
+    /**
+     * Error (status) codes
+     */
+    enum Status {
+	NoError = 0,
+	// Syntax errors
+	EEmptyItem,                      // Empty path item
+	ESyntax,                         // Generic syntax error
+	// Semantic errors
+	ERange,                          // Out of range value
+	ESemantic,                       // Generic semantic error
+	// Oher errors
+	EEmptyResult,                    // Path will always produce an empty result
+	NotParsed,                       // Path not parsed, never returned as error
+    };
+
+    /**
+     * Constructor
+     * @param value Initial value
+     * @param flags Path flags
+     */
+    XPath(const char* value = 0, unsigned int flags = 0);
+
+    /**
+     * Copy constructor
+     * @param other Object to copy
+     */
+    XPath(const XPath& other);
+
+    /**
+     * Destructor
+     */
+    virtual ~XPath();
+
+    /**
+     * Check if the parth is absolute
+     * @return True if the path is absolute, false otherwise
+     */
+    inline bool absolute() const
+	{ return 0 != (m_flags & FAbsolute); }
+
+    /**
+     * Retrieve the path parse error
+     * @return 0 on success, failed code otherwise
+     */
+    inline unsigned int status() const
+	{ return m_status; }
+
+    /**
+     * Retrieve the failed to parse item index (0 based)
+     * @return 0 based failed to parse item index
+     */
+    inline unsigned int errorItem() const
+	{ return m_errorItem; }
+
+    /**
+     * Retrieve the additional path parse error string
+     * @return Parse error string (may be empty)
+     */
+    inline const String& error() const
+	{ return m_error; }
+
+    /**
+     * Describe the error
+     * @param buf Destination buffer
+     * @return Destination buffer reference
+     */
+    inline String& describeError(String& buf) const {
+	    if (!status())
+		return buf;
+	    buf << "item=" << m_errorItem << " status=" << m_status;
+	    const char* tmp = error() ? error().c_str() : lookup(m_status,dictErrors());
+	    if (tmp)
+		buf << " (" << tmp << ")";
+	    return buf;
+	}
+
+    /**
+     * Parse the path if not already done
+     * @return 0 on success, failed code otherwise
+     */
+    inline unsigned int parse() {
+	    if (NotParsed == status())
+		parsePath();
+	    return status();
+	}
+
+    /**
+     * Find in xml using this path
+     * @param xml XML element to search in
+     * @param what Flags indicating data to match
+     * @param list Optional pointer to list to be filled with multiple elements matching the path
+     *  Set it to NULL if single element is requested
+     *  Filled objects may be XmlElement, String (XmlText contents) or NamedString (attribute)
+     *  Objects set in it have autodelete disabled
+     * @return First found item, NULL if not found
+     */
+    inline const GenObject* find(const XmlElement& xml, unsigned int what, ObjList* list = 0) const {
+	    if (status() || 0 == (FindAny & what))
+		return 0;
+	    const GenObject* res = 0;
+	    unsigned int total = 0;
+	    find(total,xml,res,list,what,0,0,absolute());
+	    return res;
+	}
+
+    /**
+     * Find XML element(s)
+     * @param xml XML element to search in
+     * @param list Optional pointer to list to be filled with multiple elements matching the path
+     *  Set it to NULL if single element is requested
+     *  Objects set in it have autodelete disabled
+     * @return First found item, NULL if not found.
+     */
+    inline XmlElement* findXml(const XmlElement& xml, ObjList* list = 0) const
+	{ return (XmlElement*)find(xml,FindXml,list); }
+
+    /**
+     * Find XML text(s)
+     * @param xml XML element to search in
+     * @param list Optional pointer to list to be filled with multiple texts matching the path
+     *  Set it to NULL if single text is requested
+     *  Objects set in it have autodelete disabled
+     * @return First found item, NULL if not found.
+     */
+    inline const String* findText(const XmlElement& xml, ObjList* list = 0) const
+	{ return (const String*)find(xml,FindText,list); }
+
+    /**
+     * Dump path items to string
+     * Build a canonical (spaces stripped ...) string: dump(buf,true,"/",absolute())
+     * @param buf Destination buffer
+     * @param escape Escape strings
+     * @param itemSep Item separator
+     * @param sepFirst Add item separator before first item
+     * @return Given buffer reference
+     */
+    String& dump(String& buf, bool escape = true, const char* itemSep = "\r\n",
+	bool sepFirst = true) const;
+
+    /**
+     * Dump path items string to ObjList
+     * @param lst Destination list
+     * @param escape Escape strings
+     */
+    void dump(ObjList& lst, bool escape = true) const;
+
+    /**
+     * Retrieve the number of maximum allowed predicates in a path step
+     * @return Maximum allowed predicates in a path step
+     */
+    static unsigned int maxStepPredicates();
+
+    /**
+     * Retrieve the dictionary containing the error strings
+     * @return Valid dictionary pointer
+     */
+    static const TokenDict* dictErrors();
+
+protected:
+    /**
+     * Called whenever the String value changed.
+     * Reset data, parse the path
+     */
+    virtual void changed();
+
+    /**
+     * Parse the path
+     */
+    void parsePath();
+
+    /**
+     * Reset data
+     */
+    void reset();
+
+private:
+    int find(unsigned int& total, const XmlElement& src, const GenObject*& res, ObjList* list,
+	unsigned int what, ObjList* crtItem = 0, unsigned int step = 0, bool absolute = false) const;
+    int getText(unsigned int& total, const XmlElement& xml, const XPathStep* step,
+	unsigned int& resultIdx, const GenObject*& res, ObjList* list) const;
+    bool parseStepPredicate(XPathParseData& data, XPathPredicate* pred);
+    bool checkStepPredicate(XPathParseData& data, XPathStep* step, XPathPredicate* pred);
+    bool setStatus(unsigned int code, unsigned int itemIdx = 0, const char* error = 0,
+	XPathParseData* data = 0);
+
+    unsigned int m_flags;
+    ObjList m_items;
+    unsigned int m_status;
+    unsigned int m_errorItem;
+    String m_error;
 };
 
 }; // namespace TelEngine
