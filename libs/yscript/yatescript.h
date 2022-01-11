@@ -2841,6 +2841,15 @@ public:
     void push(ExpOperation* item);
 
     /**
+     * Add string items at the end of the array
+     * @param lst List with items to push
+     */
+    inline void push(const ObjList& lst) {
+	    for (const ObjList* o = lst.skipNull(); o; o = o->skipNext())
+		push(new ExpOperation(o->get()->toString()));
+	}
+
+    /**
      * Deep copy method
      * @param mtx Pointer to the mutex that serializes the copied array
      * @param oper ExpOperation that required the copy operation
