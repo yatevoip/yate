@@ -41,6 +41,14 @@
 using namespace TelEngine;
 namespace { // anonymous
 
+static inline void pushStackResNull(ObjList& stack, ExpOperation* oper)
+{
+    if (oper)
+	ExpEvaluator::pushOne(stack,oper);
+    else
+	ExpEvaluator::pushOne(stack,JsParser::nullClone());
+}
+
 // Temporary class used to store an object from received parameter or build a new one to be used
 // Safely release created object
 template <class Obj> class ExpOpTmpObj
@@ -61,13 +69,14 @@ private:
     bool m_del;
 };
 
-class JPathTmpParam : public ExpOpTmpObj<JPath>
-{
-public:
-    inline JPathTmpParam(ExpOperation& op)
-	: ExpOpTmpObj(YOBJECT(JPath,&op),op)
-	{}
-};
+#define JS_EXP_OP_TMP_OBJ(T) \
+class T##TmpParam : public ExpOpTmpObj<T> \
+{ public: inline T##TmpParam(ExpOperation& op) : ExpOpTmpObj(YOBJECT(T,&op),op) {} }
+
+JS_EXP_OP_TMP_OBJ(JPath);
+JS_EXP_OP_TMP_OBJ(XPath);
+
+#undef JS_EXP_OP_TMP_OBJ
 
 static inline void dumpTraceToMsg(Message* msg, ObjList* lst)
 {
@@ -803,6 +812,62 @@ private:
     RefPointer<JsConfigFile> m_owner;
 };
 
+/**
+ * XML path class
+ * @short Javascript XML path
+ */
+class JsXPath : public JsObject
+{
+public:
+    inline JsXPath(ScriptMutex* mtx)
+	: JsObject("XPath",mtx,true),
+	m_path(0,XPath::LateParse)
+	{
+	    XDebug(DebugAll,"JsXPath::JsXPath() [%p]",this);
+	    params().addParam(new ExpFunction("valid"));
+	    params().addParam(new ExpFunction("absolute"));
+	    params().addParam(new ExpFunction("getPath"));
+	    params().addParam(new ExpFunction("getItems"));
+	    params().addParam(new ExpFunction("getError"));
+	    params().addParam(new ExpFunction("describeError"));
+	}
+    virtual void* getObject(const String& name) const;
+    virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    virtual void initConstructor(JsFunction* construct)
+	{
+	    // Find contents
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::FindXml,"FindXml"));
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::FindText,"FindText"));
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::FindAttr,"FindAttr"));
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::FindAny,"FindAny"));
+	    // XPath flags
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::StrictParse,"StrictParse"));
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::IgnoreEmptyResult,"IgnoreEmptyResult"));
+	    construct->params().addParam(new ExpOperation((int64_t)XPath::NoXmlNameCheck,"NoXmlNameCheck"));
+	}
+    virtual const XPath& path() const
+	{ return m_path; }
+    virtual const String& toString() const
+	{ return m_path; }
+    static void initialize(ScriptContext* context);
+
+protected:
+    inline JsXPath(ScriptMutex* mtx, unsigned int line, const char* path, unsigned int flags = 0)
+	: JsObject(mtx,path,line),
+	  m_path(path,flags)
+	{ }
+    inline JsXPath(ScriptMutex* mtx, const char* name, unsigned int line, const XPath& path)
+	: JsObject(mtx,name,line),
+	  m_path(path)
+	{ }
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsXPath(mutex(),name,oper.lineNumber(),m_path); }
+    bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+
+private:
+    XPath m_path;
+};
+
 class JsXML : public JsObject
 {
 public:
@@ -828,6 +893,10 @@ public:
 	    params().addParam(new ExpFunction("getText"));
 	    params().addParam(new ExpFunction("setText"));
 	    params().addParam(new ExpFunction("getChildText"));
+	    params().addParam(new ExpFunction("getChildByPath"));
+	    params().addParam(new ExpFunction("getChildrenByPath"));
+	    params().addParam(new ExpFunction("getTextByPath"));
+	    params().addParam(new ExpFunction("getAnyByPath"));
 	    params().addParam(new ExpFunction("xmlText"));
 	    params().addParam(new ExpFunction("replaceParams"));
 	    params().addParam(new ExpFunction("saveFile"));
@@ -869,6 +938,24 @@ public:
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 private:
+    inline ExpWrapper* xmlWrapper(const ExpOperation& oper, const XmlElement* xml)
+	{ return new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),(XmlElement*)xml,owner())); }
+    inline ExpOperation* buildAny(const GenObject* gen, const ExpOperation& oper, GenObject* context) {
+	    if (!gen)
+		return 0;
+	    GenObject* g = (GenObject*)gen;
+	    XmlElement* xml = YOBJECT(XmlElement,g);
+	    if (xml)
+		return xmlWrapper(oper,xml);
+	    // Attribute ?
+	    NamedString* ns = YOBJECT(NamedString,g);
+	    if (!ns)
+		return new ExpOperation(g->toString().safe(),"text");
+	    JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
+	    jso->setStringField("name",ns->name());
+	    jso->setStringField("value",*ns);
+	    return new ExpWrapper(jso,"attribute");
+	}
     static XmlElement* getXml(const String* obj, bool take);
     static XmlElement* buildXml(const String* name, const String* text = 0);
     XmlElement* m_xml;
@@ -1145,6 +1232,7 @@ static void contextInit(ScriptRun* runner, const char* name = 0, JsAssist* assis
     JsJSON::initialize(ctx);
     JsDNS::initialize(ctx);
     JsShared::initialize(ctx);
+    JsXPath::initialize(ctx);
     if (s_autoExt)
 	contextLoad(ctx,name);
 }
@@ -4207,6 +4295,109 @@ bool JsHasher::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
     return true;
 }
 
+void* JsXPath::getObject(const String& name) const
+{
+    void* obj = (name == YATOM("JsXPath")) ? const_cast<JsXPath*>(this)
+	: JsObject::getObject(name);
+    return obj ? obj : m_path.getObject(name);
+}
+
+JsObject* JsXPath::runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    XDebug(&__plugin,DebugAll,"JsXPath::runConstructor '%s'(" FMT64 ") [%p]",
+	oper.name().c_str(),oper.number(),this);
+    ObjList args;
+    ExpOperation* pathOp = 0;
+    ExpOperation* second = 0;
+    if (!extractStackArgs(1,this,stack,oper,context,args,&pathOp,&second))
+	return 0;
+    JsXPath* obj = 0;
+    if (second) {
+	// XPath(str,flags)
+	obj = new JsXPath(mutex(),oper.lineNumber(),*pathOp,second->valInteger());
+    }
+    else {
+	// XPath(str) or XPath(JsXPath)
+	JsXPath* other = YOBJECT(JsXPath,pathOp);
+	if (other)
+	    obj = new JsXPath(mutex(),oper.lineNumber(),other->path());
+	else
+	    obj = new JsXPath(mutex(),oper.lineNumber(),*pathOp);
+    }
+    if (!ref()) {
+	TelEngine::destruct(obj);
+	return 0;
+    }
+    obj->params().addParam(new ExpWrapper(this,protoName()));
+    return obj;
+}
+
+bool JsXPath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    XDebug(&__plugin,DebugAll,"JsXPath::runNative '%s'(" FMT64 ")",oper.name().c_str(),oper.number());
+    ObjList args;
+    if (oper.name() == YSTRING("valid"))
+	ExpEvaluator::pushOne(stack,new ExpOperation(0 == m_path.status()));
+    else if (oper.name() == YSTRING("absolute"))
+	ExpEvaluator::pushOne(stack,new ExpOperation(m_path.absolute()));
+    else if (oper.name() == YSTRING("getPath")) {
+	if (!m_path.status()) {
+	    String str;
+	    m_path.dump(str,true,"/",m_path.absolute());
+	    ExpEvaluator::pushOne(stack,new ExpOperation(str));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
+    }
+    else if (oper.name() == YSTRING("getItems")) {
+	// getItems([escape])
+	if (!m_path.status()) {
+	    ExpOperation* esc = 0;
+	    if (!extractStackArgs(0,this,stack,oper,context,args,&esc))
+		return false;
+	    ObjList lst;
+	    m_path.dump(lst,(esc && esc->isBoolean()) ? esc->toBoolean() : true);
+	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+	    jsa->push(lst);
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"items"));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
+    }
+    else if (oper.name() == YSTRING("getError")) {
+	if (m_path.status()) {
+	    JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
+	    jso->params().setParam(new ExpOperation((int64_t)m_path.status(),"status"));
+	    jso->params().setParam(new ExpOperation((int64_t)m_path.errorItem(),"errorItem"));
+	    if (m_path.error())
+		jso->params().setParam(new ExpOperation(m_path.error(),"error"));
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(jso,"error"));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(0));
+    }
+    else if (oper.name() == YSTRING("describeError")) {
+	String tmp;
+	if (m_path.describeError(tmp))
+	    ExpEvaluator::pushOne(stack,new ExpOperation(tmp,"error"));
+	else
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(0));
+    }
+    else
+	return JsObject::runNative(stack,oper,context);
+    return true;
+}
+
+void JsXPath::initialize(ScriptContext* context)
+{
+    if (!context)
+	return;
+    ScriptMutex* mtx = context->mutex();
+    Lock mylock(mtx);
+    NamedList& params = context->params();
+    if (!params.getParam(YSTRING("XPath")))
+	addConstructor(params,"XPath",new JsXPath(mtx));
+}
 
 void* JsXML::getObject(const String& name) const
 {
@@ -4254,7 +4445,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    return false;
 	XmlElement* xml = m_xml ? m_xml->parent() : 0;
 	if (xml)
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
+	    ExpEvaluator::pushOne(stack,xmlWrapper(oper,xml));
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
@@ -4396,7 +4587,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    xml = m_xml->findFirstChild(name,ns);
 	}
 	if (xml)
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
+	    ExpEvaluator::pushOne(stack,xmlWrapper(oper,xml));
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
@@ -4415,7 +4606,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	if (xml) {
 	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
 	    while (xml) {
-		jsa->push(new ExpWrapper(new JsXML(mutex(),oper.lineNumber(),xml,owner())));
+		jsa->push(xmlWrapper(oper,xml));
 		xml = m_xml->findNextChild(xml,name,ns);
 	    }
 	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"children"));
@@ -4473,6 +4664,74 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    ExpEvaluator::pushOne(stack,new ExpOperation(xml->getText(),xml->unprefixedTag()));
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
+    }
+    else if (oper.name() == YSTRING("getChildByPath") || oper.name() == YSTRING("getChildrenByPath")) {
+	// getChildByPath(op). op: JsXPath or string
+	// Return: XML or null
+	// getChildrenByPath(op). op: JsXPath or string
+	// Return: non empty array or null
+	ExpOperation* pathOp = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&pathOp))
+	    return false;
+	ExpOperation* ret = 0;
+	if (m_xml) {
+	    ObjList lst;
+	    bool single = oper.name() == YSTRING("getChildByPath");
+	    XPathTmpParam path(*pathOp);
+	    XmlElement* xml = path->findXml(*m_xml,single ? 0 : &lst);
+	    if (xml) {
+		if (single)
+		    ret = xmlWrapper(oper,xml);
+		else {
+		    ObjList* o = lst.skipNull();
+		    if (o) {
+			JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+			for (; o; o = o->skipNext())
+			    jsa->push(xmlWrapper(oper,static_cast<XmlElement*>(o->get())));
+			ret = new ExpWrapper(jsa,"children");
+		    }
+		}
+	    }
+	}
+	pushStackResNull(stack,ret);
+    }
+    else if (oper.name() == YSTRING("getTextByPath")) {
+	// getTextByPath(op). op: JsXPath or string
+	// Return: string or null
+	ExpOperation* pathOp = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&pathOp))
+	    return false;
+	ExpOperation* ret = 0;
+	if (m_xml) {
+	    XPathTmpParam path(*pathOp);
+	    const String* txt = path->findText(*m_xml);
+	    if (txt)
+		ret = new ExpOperation(*txt,"text");
+	}
+	pushStackResNull(stack,ret);
+    }
+    else if (oper.name() == YSTRING("getAnyByPath")) {
+	// getAnyByPath(op[,array[,what]]). op: JsXPath or string
+	// Return null or first found element (XML, string or object)
+	ExpOperation* pathOp = 0;
+	ExpOperation* destOp = 0;
+	ExpOperation* whatOp = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&pathOp,&destOp,&whatOp))
+	    return false;
+	ExpOperation* ret = 0;
+	if (m_xml) {
+	    XPathTmpParam path(*pathOp);
+	    JsArray* jsa = YOBJECT(JsArray,destOp);
+	    ObjList lst;
+	    unsigned int what = (whatOp && whatOp->isInteger()) ?
+		(unsigned int)whatOp->toNumber() : XPath::FindAny;
+	    ret = buildAny(path->find(*m_xml,what,jsa ? &lst : 0),oper,context);
+	    if (ret && jsa) {
+		for (ObjList* o = lst.skipNull(); o; o = o->skipNext())
+		    jsa->push(buildAny(o->get(),oper,context));
+	    }
+	}
+	pushStackResNull(stack,ret);
     }
     else if (oper.name() == YSTRING("xmlText")) {
 	if (extractArgs(stack,oper,context,args) > 1)
