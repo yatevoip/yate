@@ -2037,8 +2037,19 @@ static void copyPrivacy(SIPMessage& sip, const NamedList& msg)
 static bool sdpAccept(const SIPMessage* sip, bool def)
 {
     static const Regexp r("\\(^\\|,\\) *application/sdp *\\($\\|[,;]\\)",false,true);
-    const MimeHeaderLine* hl = sip ? sip->getHeader("Accept") : 0;
-    return hl ? r.matches(*hl) : def;
+
+    if (sip) {
+	for (ObjList* o = sip->header.skipNull(); o; o = o->skipNext()) {
+	    const MimeHeaderLine* hl = static_cast<const MimeHeaderLine*>(o->get());
+	    if (hl->name() |= "Accept")
+		continue;
+	    if (r.matches(*hl))
+		return true;
+	    // Header found but not matching: reset def val
+	    def = false;
+	}
+    }
+    return def;
 }
 
 // Copy message body to yate message
