@@ -3914,6 +3914,18 @@ void XPath::dump(ObjList& lst, bool escape) const
     }
 }
 
+String& XPath::escape(String& buf, const String& str, char quot, bool literal)
+{
+    if (quot != '"' && quot != '\'')
+	quot = '"';
+    if (!str)
+	return buf << quot << quot;
+    buf << quot;
+    if (literal)
+	return XPathParseData::escapeStringLiteral(buf,str,quot) << quot;
+    return XmlSaxParser::escape(buf,str) << quot;
+}
+
 unsigned int XPath::maxStepPredicates()
 {
     return XPATH_MAX_PREDICATES;

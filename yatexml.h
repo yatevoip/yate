@@ -2133,6 +2133,17 @@ public:
     void dump(ObjList& lst, bool escape = true) const;
 
     /**
+     * Escape a string and add quoted value to buffer
+     * @param buf Destination buffer
+     * @param str String to escape
+     * @param quot Character to use for quoting. Use " if not " or '
+     * @param literal Escape as literal (used in comparison operators) or
+     *  XML string (used in function parameters)
+     * @return Destination buffer reference
+     */
+    static String& escape(String& buf, const String& str, char quot = '"', bool literal = true);
+
+    /**
      * Retrieve the number of maximum allowed predicates in a path step
      * @return Maximum allowed predicates in a path step
      */
