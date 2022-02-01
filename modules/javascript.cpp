@@ -844,6 +844,8 @@ public:
 	    construct->params().addParam(new ExpOperation((int64_t)XPath::StrictParse,"StrictParse"));
 	    construct->params().addParam(new ExpOperation((int64_t)XPath::IgnoreEmptyResult,"IgnoreEmptyResult"));
 	    construct->params().addParam(new ExpOperation((int64_t)XPath::NoXmlNameCheck,"NoXmlNameCheck"));
+	    // Static functions
+	    construct->params().addParam(new ExpFunction("escapeString"));
 	}
     virtual const XPath& path() const
 	{ return m_path; }
@@ -4382,6 +4384,18 @@ bool JsXPath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* con
 	    ExpEvaluator::pushOne(stack,new ExpOperation(tmp,"error"));
 	else
 	    ExpEvaluator::pushOne(stack,new ExpWrapper(0));
+    }
+    else if (oper.name() == YSTRING("escapeString")) {
+	// XPath.escapeString(str[quot[,literal=true]])
+	ExpOperation* str = 0;
+	ExpOperation* quot = 0;
+	ExpOperation* literal = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&str,&quot,&literal))
+	    return false;
+	char q = quot ? (*(String*)quot)[0] : '"';
+	String tmp;
+	XPath::escape(tmp,*str,q,literal ? literal->valBoolean() : true);
+	ExpEvaluator::pushOne(stack,new ExpOperation(tmp,"error"));
     }
     else
 	return JsObject::runNative(stack,oper,context);
