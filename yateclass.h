@@ -3657,6 +3657,12 @@ public:
     int dec();
 
     /**
+     * Add a specific value to the counter
+     * @param val Value to add
+     */
+    int add(int val);
+
+    /**
      * Get the current value of the counter
      * @return Value of the counter
      */

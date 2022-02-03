@@ -1436,6 +1436,21 @@ int NamedCounter::dec()
 #endif
 }
 
+int NamedCounter::add(int val)
+{
+#ifdef ATOMIC_OPS
+#ifdef _WINDOWS
+    return InterlockedExchangeAdd((LONG*)&m_count,(LONG)val);
+#else
+    return __sync_add_and_fetch(&m_count,val);
+#endif
+#else
+    Lock lock(m_mutex);
+    m_count += val;
+    return m_count;
+#endif
+}
+
 
 void SysUsage::init()
 {
