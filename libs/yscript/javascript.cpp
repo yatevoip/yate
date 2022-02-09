@@ -35,7 +35,7 @@ class JsContext : public JsObject, public ScriptMutex
 {
     YCLASS(JsContext,JsObject)
 public:
-    inline JsContext()
+    inline JsContext(unsigned int instIdx = 0, unsigned int maxInst = 1)
 	: JsObject("Context",0), ScriptMutex(true,"JsContext"),
 	  m_trackObjs(0), m_trackObjsMtx(false,"JsObjTrack")
 	{
@@ -44,6 +44,7 @@ public:
 	    params().addParam(new ExpFunction("parseInt"));
 	    params().addParam(new ExpOperation(ExpOperation::nonInteger(),"NaN"));
 	    m_objTrack = !!m_trackObjs;
+	    setInstance(instIdx,maxInst);
 	    DDebug(DebugAll,"JsContext::JsContext() [%p]",this);
 	}
     virtual void destroyed();
@@ -3217,7 +3218,11 @@ void JsRunner::traceCheck(const char* title)
 	traceStart(title);
 	return;
     }
-    traceStart(title,ns->c_str());
+
+    String filename = ns->c_str();
+    if (context()->instanceIndex())
+	filename << "_" << context()->instanceIndex();
+    traceStart(title,filename);
     if (m_stats) {
 	m_stats->ref();
 	context()->params().setParam(new ExpWrapper(m_stats,s_tracingObj));
@@ -3844,18 +3849,19 @@ void JsParser::adjustPath(String& script, bool extraInc) const
 }
 
 // Create Javascript context
-ScriptContext* JsParser::createContext() const
+ScriptContext* JsParser::createContext(unsigned int instIdx, unsigned int maxInst) const
 {
-    return new JsContext;
+    return new JsContext(instIdx,maxInst);
 }
 
-ScriptRun* JsParser::createRunner(ScriptCode* code, ScriptContext* context, const char* title) const
+ScriptRun* JsParser::createRunner(ScriptCode* code, ScriptContext* context, const char* title, 
+                            unsigned int instIdx, unsigned int maxInst) const
 {
     if (!code)
 	return 0;
     ScriptContext* ctxt = 0;
     if (!context)
-	context = ctxt = createContext();
+	context = ctxt = createContext(instIdx,maxInst);
     ScriptRun* runner = new JsRunner(code,context,title);
     TelEngine::destruct(ctxt);
     return runner;

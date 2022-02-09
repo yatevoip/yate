@@ -77,18 +77,19 @@ void ScriptParser::setCode(ScriptCode* code)
     TelEngine::destruct(tmp);
 }
 
-ScriptContext* ScriptParser::createContext() const
+ScriptContext* ScriptParser::createContext(unsigned int instIdx, unsigned int maxInst) const
 {
     return new BasicContext;
 }
 
-ScriptRun* ScriptParser::createRunner(ScriptCode* code, ScriptContext* context, const char* title) const
+ScriptRun* ScriptParser::createRunner(ScriptCode* code, ScriptContext* context, const char* title,
+                            unsigned int instIdx, unsigned int maxInst) const
 {
     if (!code)
 	return 0;
     ScriptContext* ctxt = 0;
     if (!context)
-	context = ctxt = createContext();
+	context = ctxt = createContext(instIdx,maxInst);
     ScriptRun* runner = new ScriptRun(code,context);
     TelEngine::destruct(ctxt);
     return runner;

@@ -182,26 +182,65 @@ private:
     RefPointer<JsMessage> m_message;
 };
 
+class JsGlobal;
+
+class JsGlobalInstance : public RefObject
+{
+public:
+    JsGlobalInstance(JsGlobal* owner, unsigned int index);
+    ~JsGlobalInstance();
+    unsigned int runMain();
+    inline ScriptContext* context()
+	{ return m_context; }
+    const String& toString() const
+	{ return m_name; }
+private:
+    JsGlobal* m_owner;
+    RefPointer<ScriptContext> m_context;
+    String m_name;
+    unsigned int m_instance;
+};
+
 class JsGlobal : public NamedString
 {
 public:
-    JsGlobal(const char* scriptName, const char* fileName, bool relPath = true, bool fromCfg = true);
+    JsGlobal(const char* scriptName, const char* fileName, bool relPath = true,
+	     bool fromCfg = true, unsigned int instances = 1);
     virtual ~JsGlobal();
     bool load();
     bool fileChanged(const char* fileName) const;
+    bool updateInstances(unsigned int instances);
     inline JsParser& parser()
 	{ return m_jsCode; }
-    inline ScriptContext* context()
-	{ return m_context; }
     inline const String& fileName()
 	{ return m_file; }
+    inline unsigned int instances() const
+	{ return m_instanceCount; }
+    inline JsGlobalInstance* getInstance(unsigned int idx) const
+    {
+	String str = name();
+	if (idx)
+	    str << "/" << idx;
+	JsGlobalInstance* inst = static_cast<JsGlobalInstance*>(m_instances[str]);
+	if (inst && inst->ref())
+	    return inst;
+	return 0;
+    }
+    inline JsGlobalInstance* getInstance(const String& name) const
+    {
+	JsGlobalInstance* inst = static_cast<JsGlobalInstance*>(m_instances[name]);
+	if (inst && inst->ref())
+	    return inst;
+	return 0;
+    }
     bool runMain();
     static void markUnused();
     static void freeUnused();
     static void reloadDynamic();
-    static bool initScript(const String& scriptName, const String& fileName, bool relPath = true, bool fromCfg = true);
+    static bool initScript(const String& scriptName, const String& fileName, 
+	bool relPath = true, bool fromCfg = true, unsigned int instances = 0);
     static bool reloadScript(const String& scriptName);
-    static void loadScripts(const NamedList* sect);
+    static void loadScripts(const NamedList* sect, const NamedList* instSect);
     inline static ObjList& globals()
 	{ return s_globals; }
     inline static void unloadAll()
@@ -212,13 +251,14 @@ public:
 
 private:
     static bool buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
-	const String& fileName, bool relPath, bool fromCfg, bool fromInit = false);
+	const String& fileName, bool relPath, bool fromCfg, bool fromInit = false, unsigned int instances = 0);
 
     JsParser m_jsCode;
-    RefPointer<ScriptContext> m_context;
     bool m_inUse;
     bool m_confLoaded;
     String m_file;
+    unsigned int m_instanceCount;
+    ObjList m_instances;
     static ObjList s_globals;
 };
 
@@ -529,6 +569,8 @@ public:
 	    params().addParam(new ExpFunction("htoa"));
 	    params().addParam(new ExpFunction("btoh"));
 	    params().addParam(new ExpFunction("htob"));
+	    params().addParam(new ExpFunction("instanceIndex"));
+	    params().addParam(new ExpFunction("instanceCount"));
 	    addConstructor(params(),"Semaphore",new JsSemaphore(mtx));
 	    addConstructor(params(),"HashList",new JsHashList(mtx));
 	    addConstructor(params(),"URI",new JsURI(mtx));
@@ -1249,6 +1291,24 @@ static int counterSort(GenObject* obj1, GenObject* obj2, void* context)
     return c1 < c2 ? 1 : (c1 > c2 ? -1 : 0);
 }
 
+// Sort and dump a list of object counters
+static void dumpAllocations(String& out, ObjList* counters, unsigned int count, ScriptCode* code)
+{
+    if (!(counters && code))
+	return;
+    counters->sort(counterSort);
+
+    unsigned int i = 0;
+    for (ObjList* o = counters->skipNull(); o && i < count; o = o->skipNext(), i++) {
+	NamedCounter* c = static_cast<NamedCounter*>(o->get());
+	uint64_t line = c->toString().toUInt64();
+	String fn;
+	unsigned int fl = 0;
+	code->getFileLine(line,fn,fl,false);
+	out << "\r\n" << fn << ":" << fl << " " << c->count();
+    }
+}
+
 // Obtain a string with top object allocations from context ctx
 static bool evalCtxtAllocations(String& retVal, unsigned int count, ScriptContext* ctx,
 		ScriptCode* code, const String& scrName)
@@ -1262,22 +1322,46 @@ static bool evalCtxtAllocations(String& retVal, unsigned int count, ScriptContex
 	retVal << "Script '" << scrName << "' has no active object tracking\r\n";
 	return true;
     }
-    objCounters->sort(counterSort);
     String tmp;
-    unsigned int i = 0;
-    for (ObjList* o = objCounters->skipNull(); o && i < count; o = o->skipNext(), i++) {
-	NamedCounter* c = static_cast<NamedCounter*>(o->get());
-	uint64_t line = c->toString().toUInt64();
-	String fn;
-	unsigned int fl = 0;
-	code->getFileLine(line,fn,fl,false);
-	tmp << "\r\n" << fn << ":" << fl << " " << c->count();
-    }
+    dumpAllocations(tmp,objCounters,count,code);
     if (!tmp)
 	retVal << "Script '" << scrName << "' has no active object tracking counters\r\n";
     else
 	retVal << "Top " << count << " object allocations for '" << scrName <<"':" << tmp << "\r\n";
     TelEngine::destruct(objCounters);
+    return true;
+}
+
+// Obtain a string with top object allocations from all script instances contexts 
+static bool evalInstanceAllocations(String& retVal, unsigned int count, ObjList& list,
+		ScriptCode* code, const String& scrName)
+{
+    if (!code) {
+	retVal << "Script '" << scrName << "' has no associated code\r\n";
+	return true;
+    }
+    ObjList objCounters;
+
+    for (ObjList* o = list.skipNull(); o; o = o->skipNext()) {
+	ObjList* l = static_cast<ObjList*>(o->get());
+	for (ObjList* j = l->skipNull(); j; j = j->skipNext()) {
+	    NamedCounter* nInt = static_cast<NamedCounter*>(j->get());
+	    NamedCounter* total = static_cast<NamedCounter*>(objCounters[nInt->toString()]);
+	    if (total)
+		total->add(nInt->count());
+	    else {
+		j->set(0,false);
+		objCounters.insert(nInt);
+	    }
+	}
+	o->set(0);
+    }
+    String tmp;
+    dumpAllocations(tmp,&objCounters,count,code);
+    if (!tmp)
+	retVal << "Script '" << scrName << "' has no active object tracking counters\r\n";
+    else
+	retVal << "Top " << count << " object allocations for '" << scrName <<"':" << tmp << "\r\n";
     return true;
 }
 
@@ -2349,6 +2433,18 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	}
 	else
 	    ExpEvaluator::pushOne(stack,new ExpOperation(false));
+    }
+    else if (oper.name() == YSTRING("instanceIndex")) {
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (!(runner && runner->context()))
+	    return false;
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)runner->context()->instanceIndex()));
+    }
+    else if (oper.name() == YSTRING("instanceCount")) {
+		ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (!(runner && runner->context()))
+	    return false;
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)runner->context()->instanceCount()));
     }
     else
 	return JsObject::runNative(stack,oper,context);
@@ -6121,14 +6217,56 @@ void JsAssist::msgPostExecute(const Message& msg, bool handled)
     runFunction("onPostExecute",const_cast<Message&>(msg),&handled);
 }
 
+JsGlobalInstance::JsGlobalInstance(JsGlobal* owner, unsigned int index)
+    : m_owner(owner), m_instance(index)
+{
+    m_name << owner->toString();
+    if (index)
+	m_name << "/" << index;
+    Debug(&__plugin,DebugInfo,"JsGlobalInstance::JsGlobalInstance(%p,%u) Created script instance '%s' [%p]",
+		m_owner,index,m_name.c_str(),this);
+}
+
+JsGlobalInstance::~JsGlobalInstance()
+{
+    Debug(&__plugin,DebugInfo,"JsGlobalInstance::~JsGlobalInstance() '%s' destroyed [%p]",m_name.c_str(),this);
+    if (m_owner->parser().callable("onUnload")) {
+	ScriptRun* runner = m_owner->parser().createRunner(m_context,NATIVE_TITLE);
+	if (runner) {
+	    ObjList args;
+	    runner->call("onUnload",args);
+	    TelEngine::destruct(runner);
+	}
+    }
+    if (m_context) {
+	Lock mylock(m_context->mutex());
+	m_context->params().clearParams();
+    }
+}
+  
+unsigned int JsGlobalInstance::runMain()
+{
+    DDebug(&__plugin,DebugInfo,"JsGlobalInstance::runMain() Start instance %s",toString().c_str());
+    ScriptRun* runner = m_owner->parser().createRunner(m_context,0,m_instance,m_owner->instances());
+    if (!runner)
+	return ScriptRun::Failed;
+    if (!m_context)
+	m_context = runner->context();
+    m_context->trackObjs(s_trackCreation);
+    contextInit(runner,toString());
+    ScriptRun::Status st = runner->run();
+    TelEngine::destruct(runner);
+    return st;
+}
 
 ObjList JsGlobal::s_globals;
 Mutex JsGlobal::s_mutex(false,"JsGlobal");
 bool JsGlobal::s_keepOldOnFail = false;
 
-JsGlobal::JsGlobal(const char* scriptName, const char* fileName, bool relPath, bool fromCfg)
+JsGlobal::JsGlobal(const char* scriptName, const char* fileName, bool relPath,
+		   bool fromCfg, unsigned int instances)
     : NamedString(scriptName,fileName),
-      m_inUse(true), m_confLoaded(fromCfg), m_file(fileName)
+      m_inUse(true), m_confLoaded(fromCfg), m_file(fileName), m_instanceCount(instances)
 {
     m_jsCode.basePath(s_basePath,s_libsPath);
     if (relPath)
@@ -6141,18 +6279,7 @@ JsGlobal::JsGlobal(const char* scriptName, const char* fileName, bool relPath, b
 JsGlobal::~JsGlobal()
 {
     DDebug(&__plugin,DebugAll,"Unloading global Javascript '%s'",name().c_str());
-    if (m_jsCode.callable("onUnload")) {
-	ScriptRun* runner = m_jsCode.createRunner(m_context,NATIVE_TITLE);
-	if (runner) {
-	    ObjList args;
-	    runner->call("onUnload",args);
-	    TelEngine::destruct(runner);
-	}
-    }
-    if (m_context) {
-	Lock mylock(m_context->mutex());
-	m_context->params().clearParams();
-    }
+    m_instances.clear();
 }
 
 bool JsGlobal::load()
@@ -6170,6 +6297,21 @@ bool JsGlobal::load()
 bool JsGlobal::fileChanged(const char* fileName) const
 {
     return m_jsCode.scriptChanged(fileName,s_basePath,s_libsPath);
+}
+
+bool JsGlobal::updateInstances(unsigned int instances)
+{
+    // 0 means that it was called from some place where config was not read, so no change
+    // or no change in number of instances
+    if (!instances || instances == m_instanceCount)
+	return true;
+    // we already now that current instance is different from what is requested
+    // so if instances is 1 => m_instance count > 1, m_instanceCount == 1 => instance = 1
+    // so we need to completely reload the script
+    if (instances == 1 || m_instanceCount == 1)
+	return false;
+    m_instanceCount = instances;
+    return runMain();
 }
 
 void JsGlobal::markUnused()
@@ -6207,12 +6349,13 @@ void JsGlobal::reloadDynamic()
 	}
 }
 
-bool JsGlobal::initScript(const String& scriptName, const String& fileName, bool relPath, bool fromCfg)
+bool JsGlobal::initScript(const String& scriptName, const String& fileName, bool relPath,
+			  bool fromCfg, unsigned int instances)
 {
     if (fileName.null())
 	return false;
-    DDebug(&__plugin,DebugInfo,"Initialize %s script '%s' from %s file '%s'",(fromCfg ? "configured" : "dynamically loaded"),
-               scriptName.c_str(),(relPath ? "relative" : "absolute"),fileName.c_str());
+    DDebug(&__plugin,DebugInfo,"Initialize %s script '%s' from %s file '%s' instances=%u",(fromCfg ? "configured" : "dynamically loaded"),
+               scriptName.c_str(),(relPath ? "relative" : "absolute"),fileName.c_str(),instances);
     Lock mylock(JsGlobal::s_mutex);
     ObjList* o = s_globals.find(scriptName);
     if (o) {
@@ -6224,12 +6367,16 @@ bool JsGlobal::initScript(const String& scriptName, const String& fileName, bool
 	    return false;
 	}
 	if (!script->fileChanged(fileName)) {
+	    unsigned int ret = script->updateInstances(instances);
 	    script->m_inUse = true;
 	    script->m_confLoaded = fromCfg;
-	    return true;
+	    // if positive, we can return. otherwise, it's a transition 
+	    // from multiple instances to one or viceversa and we reload the whole script
+	    if (ret)
+		return true;
 	}
     }
-    return buildNewScript(mylock,o,scriptName,fileName,relPath,fromCfg,true);
+    return buildNewScript(mylock,o,scriptName,fileName,relPath,fromCfg,true,instances);
 }
 
 bool JsGlobal::reloadScript(const String& scriptName)
@@ -6245,7 +6392,7 @@ bool JsGlobal::reloadScript(const String& scriptName)
     return fileName && buildNewScript(mylock,o,scriptName,fileName,false,script->m_confLoaded);
 }
 
-void JsGlobal::loadScripts(const NamedList* sect)
+void JsGlobal::loadScripts(const NamedList* sect, const NamedList* instSect)
 {
     if (!sect)
 	return;
@@ -6256,33 +6403,60 @@ void JsGlobal::loadScripts(const NamedList* sect)
 	    continue;
 	String tmp = *n;
 	Engine::runParams().replaceParams(tmp);
-	JsGlobal::initScript(n->name(),tmp);
+	JsGlobal::initScript(n->name(),tmp,true,true,instSect ? instSect->getIntValue(n->name(),0,0) : 0);
     }
 }
 
 bool JsGlobal::runMain()
 {
-    ScriptRun* runner = m_jsCode.createRunner(m_context);
-    if (!runner)
-	return false;
-    if (!m_context)
-	m_context = runner->context();
-    m_context->trackObjs(s_trackCreation);
-    contextInit(runner,name());
-    ScriptRun::Status st = runner->run();
-    TelEngine::destruct(runner);
-    return (ScriptRun::Succeeded == st);
+    DDebug(&__plugin,DebugInfo,"JsGlobal::runMain() Load and run %u instances, current number of instances:%u",
+		m_instanceCount,m_instances.count());
+    if (m_instanceCount <= 1) {
+	JsGlobalInstance* inst = new JsGlobalInstance(this,0);
+	if(ScriptRun::Succeeded != inst->runMain())
+	    return false;
+	m_instances.append(inst);
+    }
+    else {
+	unsigned int lCount = m_instances.count();
+	// add instances if m_instancesCount is increased
+	for (unsigned int i = 0; i < m_instanceCount; i++) {
+	    JsGlobalInstance* inst = getInstance(i + 1);
+	    if (inst) {
+		TelEngine::destruct(inst);
+		continue;
+	    }
+	    inst = new JsGlobalInstance(this,i + 1);
+	    if(ScriptRun::Succeeded != inst->runMain())
+		return false;
+	    m_instances.append(inst);
+
+	}
+	// remove instances if m_instances was decreased
+	for (unsigned int i = m_instanceCount; i < lCount; i++) {
+	    JsGlobalInstance* inst = getInstance(i + 1);
+	    if (!inst)
+		continue;
+	    m_instances.remove(inst);
+	    TelEngine::destruct(inst);
+	}
+	
+    }
+    return true;
 }
 
 bool JsGlobal::buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
-    const String& fileName, bool relPath, bool fromCfg, bool fromInit)
+    const String& fileName, bool relPath, bool fromCfg, bool fromInit, unsigned int instances)
 {
     bool objCount = s_trackObj && getObjCounting();
     NamedCounter* saved = 0;
     if (objCount)
 	saved = Thread::setCurrentObjCounter(getObjCounter("js:" + scriptName,true));
     JsGlobal* oldScript = old ? static_cast<JsGlobal*>(old->get()) : 0;
-    JsGlobal* script = new JsGlobal(scriptName,fileName,relPath,fromCfg);
+    if (0 == instances) // keep number of instances if none is given
+	instances = oldScript ? oldScript->instances() : 1;
+    
+    JsGlobal* script = new JsGlobal(scriptName,fileName,relPath,fromCfg,instances);
     bool ok = false;
     if (script->load() || !s_keepOldOnFail || !old) {
 	if (old)
@@ -6374,7 +6548,10 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 	Lock lck(JsGlobal::s_mutex);
 	for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
 	    JsGlobal* script = static_cast<JsGlobal*>(o->get());
-	    retVal << script->name() << " = " << *script << "\r\n";
+	    retVal << script->name() << " = " << *script;
+	    if (script->instances() > 1)
+		retVal << ":" << script->instances();
+	    retVal << "\r\n";
 	}
 	lck.acquire(this);
 	for (unsigned int i = 0; i < calls().length(); i++) {
@@ -6395,12 +6572,18 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 	cmd.extractTo(" ",scr).trimSpaces();
 	if (scr.null() || cmd.null())
 	    return false;
+	int pos = scr.find("/");
+	String baseScr = scr.substr(0,pos);
 	Lock mylock(JsGlobal::s_mutex);;
-	JsGlobal* script = static_cast<JsGlobal*>(JsGlobal::globals()[scr]);
+	JsGlobal* script = static_cast<JsGlobal*>(JsGlobal::globals()[baseScr]);
 	if (script) {
-	    RefPointer<ScriptContext> ctxt = script->context();
-	    mylock.drop();
-	    return evalContext(retVal,cmd,ctxt);
+	    JsGlobalInstance* inst = script->getInstance(scr);
+	    if (inst) {
+		RefPointer<ScriptContext> ctxt = inst->context();
+		mylock.drop();
+		TelEngine::destruct(inst);
+		return evalContext(retVal,cmd,ctxt);
+	    }
 	}
 	mylock.acquire(this);
 	JsAssist* assist = static_cast<JsAssist*>(calls()[scr]);
@@ -6416,7 +6599,34 @@ bool JsModule::commandExecute(String& retVal, const String& line)
     if (cmd.startSkip("eval") && cmd.trimSpaces())
 	return evalContext(retVal,cmd);
 
-    if (cmd.startSkip("allocations") && cmd.trimSpaces()) {
+    if (cmd.startSkip("allocations instance") && cmd.trimSpaces()) {
+	String scr;
+	cmd.extractTo(" ",scr).trimSpaces();
+	String baseScr = scr.substr(0,scr.find("/"));
+	unsigned int top = cmd.toInteger(25,0,1,100);
+	if (scr.null())
+	    return false;
+	Lock mylock(JsGlobal::s_mutex);;
+	JsGlobal* script = static_cast<JsGlobal*>(JsGlobal::globals()[baseScr]);
+	if (script) {
+	    JsGlobalInstance* inst = script->getInstance(scr);
+	    if (inst) {
+		bool ret = evalCtxtAllocations(retVal,top,inst->context(),script->parser().code(),scr);
+		TelEngine::destruct(inst);
+		return ret;
+	    }
+	}
+	mylock.acquire(this);
+	RefPointer<JsAssist> assist = static_cast<JsAssist*>(calls()[scr]);
+	if (assist) {
+	    mylock.drop();
+	    return assist->evalAllocations(retVal,top);
+	}
+	retVal << "Cannot find script context: " << scr << "\n\r";
+	return true;
+    }
+
+    if (cmd.startSkip("allocations total") && cmd.trimSpaces()) {
 	String scr;
 	cmd.extractTo(" ",scr).trimSpaces();
 	unsigned int top = cmd.toInteger(25,0,1,100);
@@ -6424,8 +6634,20 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 	    return false;
 	Lock mylock(JsGlobal::s_mutex);;
 	JsGlobal* script = static_cast<JsGlobal*>(JsGlobal::globals()[scr]);
-	if (script)
-	    return evalCtxtAllocations(retVal,top,script->context(),script->parser().code(),scr);
+	if (script) {
+	    ObjList list;
+	    for (unsigned int i = 0; i <= script->instances(); i++) {
+		JsGlobalInstance* inst = script->getInstance(i);
+		if (inst) {
+		    ObjList* c = inst->context() ? inst->context()->countAllocations() : 0;
+		    if (c)
+			list.insert(c);
+		    TelEngine::destruct(inst);
+		}
+	    }
+	    mylock.drop();
+	    return evalInstanceAllocations(retVal,top,list,script->parser().code(),scr);
+	}
 	mylock.acquire(this);
 	RefPointer<JsAssist> assist = static_cast<JsAssist*>(calls()[scr]);
 	if (assist) {
@@ -6519,8 +6741,15 @@ bool JsModule::commandComplete(Message& msg, const String& partLine, const Strin
 	    Lock lck(JsGlobal::s_mutex);
 	    for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
 		JsGlobal* script = static_cast<JsGlobal*>(o->get());
-		if (script->name())
-		    itemComplete(msg.retValue(),s_eval + script->name(),partWord);
+		if (script->name()) {
+		    for (unsigned int i = 0; i <= script->instances(); i++) {
+			JsGlobalInstance* inst = script->getInstance(i);
+			if (inst) {
+			    itemComplete(msg.retValue(),s_eval + inst->toString(),partWord);
+			    TelEngine::destruct(inst);
+			}
+		    }
+		}
 	    }
 	    lck.acquire(this);
 	    for (unsigned int i = 0; i < calls().length(); i++) {
@@ -6536,7 +6765,7 @@ bool JsModule::commandComplete(Message& msg, const String& partLine, const Strin
 	    itemComplete(msg.retValue(),*list,partWord);
 	return true;
     }
-    else if (partLine == YSTRING("javascript reload") || partLine == YSTRING("javascript allocations")) {
+    else if (partLine == YSTRING("javascript reload") || partLine == YSTRING("javascript allocations total")) {
 	Lock lck(JsGlobal::s_mutex);
 	for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
 	    JsGlobal* script = static_cast<JsGlobal*>(o->get());
@@ -6544,6 +6773,27 @@ bool JsModule::commandComplete(Message& msg, const String& partLine, const Strin
 		itemComplete(msg.retValue(),script->name(),partWord);
 	}
 	return true;
+    }
+    else if (partLine == YSTRING("javascript allocations instance")) {
+	Lock lck(JsGlobal::s_mutex);
+	for (ObjList* o = JsGlobal::globals().skipNull(); o ; o = o->skipNext()) {
+	    JsGlobal* script = static_cast<JsGlobal*>(o->get());
+	    if (script && script->instances() > 1) {
+		for (unsigned int i = 0; i <= script->instances(); i++) {
+		    JsGlobalInstance* inst = script->getInstance(i);
+		    if (inst) {
+			itemComplete(msg.retValue(),inst->toString(),partWord);
+			TelEngine::destruct(inst);
+		    }
+		}
+	    }
+	}
+	return true;
+    }
+    else if (partLine == YSTRING("javascript allocations")) {
+	itemComplete(msg.retValue(),"total",partWord);
+	itemComplete(msg.retValue(),"instance",partWord);
+	return 0;
     }
     return Module::commandComplete(msg,partLine,partWord);
 }
@@ -6629,7 +6879,7 @@ bool JsModule::received(Message& msg, int id)
 	    if (!m_started) {
 		m_started = true;
 		Configuration cfg(Engine::configFile("javascript"));
-		JsGlobal::loadScripts(cfg.getSection("late_scripts"));
+		JsGlobal::loadScripts(cfg.getSection("late_scripts"),cfg.getSection("instances"));
 	    }
 	    return false;
     } // switch (id)
@@ -6718,9 +6968,9 @@ void JsModule::initialize()
     }
     JsGlobal::markUnused();
     lck.drop();
-    JsGlobal::loadScripts(cfg.getSection("scripts"));
+    JsGlobal::loadScripts(cfg.getSection("scripts"),cfg.getSection("instances"));
     if (m_started)
-	JsGlobal::loadScripts(cfg.getSection("late_scripts"));
+	JsGlobal::loadScripts(cfg.getSection("late_scripts"),cfg.getSection("instances"));
     JsGlobal::reloadDynamic();
     JsGlobal::freeUnused();
 }

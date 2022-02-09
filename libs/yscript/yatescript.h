@@ -1603,7 +1603,7 @@ public:
      * @param name Name of the context
      */
     inline explicit ScriptContext(const char* name = 0)
-	: m_params(name)
+	: m_params(name), m_instIdx(0), m_instCount(1)
 	{ }
 
     /**
@@ -1776,8 +1776,22 @@ public:
     virtual ObjList* countAllocations()
 	{ return 0; }
 
+    virtual void setInstance(unsigned int idx, unsigned int count)
+    {
+        m_instIdx = idx;
+        m_instCount = count;
+    }
+
+    virtual unsigned int instanceIndex() const
+        { return m_instIdx; }
+
+    virtual unsigned int instanceCount() const
+        { return m_instCount; }
+
 private:
     NamedList m_params;
+    unsigned int m_instIdx; // instance index
+    unsigned int m_instCount; // total number of instances
 };
 
 /**
@@ -2155,7 +2169,7 @@ public:
      * Create a context adequate for the parsed code
      * @return A new script context
      */
-    virtual ScriptContext* createContext() const;
+    virtual ScriptContext* createContext(unsigned int instIdx = 0, unsigned int maxInst = 1) const;
 
     /**
      * Create a runner adequate for a block of parsed code
@@ -2164,7 +2178,8 @@ public:
      * @param title An optional name for the runner
      * @return A new script runner, NULL if code is NULL
      */
-    virtual ScriptRun* createRunner(ScriptCode* code, ScriptContext* context = 0, const char* title = 0) const;
+    virtual ScriptRun* createRunner(ScriptCode* code, ScriptContext* context = 0, const char* title = 0,
+                            unsigned int instIdx = 0, unsigned int maxInst = 1) const;
 
     /**
      * Create a runner adequate for the parsed code
@@ -2172,8 +2187,9 @@ public:
      * @param title An optional name for the runner
      * @return A new script runner, NULL if code is not yet parsed
      */
-    inline ScriptRun* createRunner(ScriptContext* context = 0, const char* title = 0) const
-	{ return createRunner(code(),context,title); }
+    inline ScriptRun* createRunner(ScriptContext* context = 0, const char* title = 0, 
+                            unsigned int instIdx = 0, unsigned int maxInst = 1) const
+	{ return createRunner(code(),context,title,instIdx,maxInst); }
 
     /**
      * Check if a script has a certain function or method
@@ -3148,7 +3164,7 @@ public:
      * Create a context adequate for Javascript code
      * @return A new Javascript context
      */
-    virtual ScriptContext* createContext() const;
+    virtual ScriptContext* createContext(unsigned int instIdx = 0, unsigned int maxInst = 1) const;
 
     /**
      * Create a runner adequate for a block of parsed Javascript code
@@ -3157,16 +3173,20 @@ public:
      * @param title An optional name for the runner
      * @return A new Javascript runner, NULL if code is NULL
      */
-    virtual ScriptRun* createRunner(ScriptCode* code, ScriptContext* context = 0, const char* title = 0) const;
+    virtual ScriptRun* createRunner(ScriptCode* code, ScriptContext* context = 0, const char* title = 0, 
+                            unsigned int instIdx = 0, unsigned int maxInst = 1) const;
 
     /**
      * Create a runner adequate for the parsed Javascript code
      * @param context Javascript context, an empty one will be allocated if NULL
      * @param title An optional name for the runner
+     * @param instIdx Javascript context instance
+     * @param maxInst Number of context instances
      * @return A new Javascript runner, NULL if code is not yet parsed
      */
-    inline ScriptRun* createRunner(ScriptContext* context = 0, const char* title = 0) const
-	{ return createRunner(code(),context,title); }
+    inline ScriptRun* createRunner(ScriptContext* context = 0, const char* title = 0, 
+                            unsigned int instIdx = 0, unsigned int maxInst = 1) const
+	{ return createRunner(code(),context,title,instIdx,maxInst); }
 
     /**
      * Check if a script has a certain function or method
