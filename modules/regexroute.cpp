@@ -37,7 +37,7 @@ class RouteHandler;
 class PrerouteHandler;
 
 
-static RegexConfig* s_cfg;
+static RegexConfig* s_cfg = 0;
 static bool s_prerouteall;
 static Mutex s_mutex(true,"RegexRoute");
 static ObjList s_extra;
@@ -127,6 +127,8 @@ class RegexRoutePlugin : public Module
 {
 public:
     RegexRoutePlugin();
+    virtual ~RegexRoutePlugin()
+	{ TelEngine::destruct(s_cfg); }
     virtual void initialize();
     void initVars(NamedList* sect);
     virtual void statusParams(String& str);
