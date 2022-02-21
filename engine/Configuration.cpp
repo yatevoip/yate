@@ -188,6 +188,58 @@ bool Configuration::load(bool warn)
     return loadFile(c_str(),"",0,warn);
 }
 
+static inline char* cfgReadLine(FILE* f, char* buf, int rd,
+    char& rest, bool& warn, const char* file, const String& sect, bool* start = 0)
+{
+    if (rest) {
+	buf[0] = rest;
+	rest = 0;
+	buf[1] = 0;
+	fgets(buf + 1,rd - 1,f);
+    }
+    else if (!::fgets(buf,rd,f))
+	return 0;
+
+    int check = warn ? 1 : 0;
+    char* pc = ::strchr(buf,'\r');
+    if (pc) {
+	*pc = 0;
+	check = 0;
+    }
+    pc = ::strchr(buf,'\n');
+    if (pc) {
+	*pc = 0;
+	check = 0;
+    }
+    pc = buf;
+    if (check)
+	check = ::strlen(pc);
+    // skip over an initial UTF-8 BOM
+    if (start && *start) {
+	String::stripBOM(pc);
+	*start = false;
+    }
+    if (check == rd - 1) {
+	char extra[2] = {0,0};
+	::fgets(extra,2,f);
+	rest = extra[0];
+	if (rest) {
+	    warn = false;
+	    String tmp(pc);
+	    if (sect)
+		tmp.printf("section='%s' line %s...",sect.c_str(),tmp.substr(0,30).c_str());
+	    else
+		tmp.printf("line %s...",tmp.substr(0,30).c_str());
+	    Debug(DebugWarn,
+		"Configuration '%s' %s too long: subsequent read may lead to wrong parameter set",
+		file,tmp.safe());
+	}
+    }
+    while (*pc == ' ' || *pc == '\t')
+	pc++;
+    return pc;
+}
+
 bool Configuration::loadFile(const char* file, String sect, unsigned int depth, bool warn)
 {
     DDebug(DebugInfo,"Configuration::loadFile(\"%s\",[%s],%u,%s)",
@@ -201,25 +253,13 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 	bool ok = true;
 	bool start = true;
 	bool enabled = true;
+	char rest = 0;
+	bool warnLine = true;
 	for (;;) {
 	    char buf[1024];
-	    if (!::fgets(buf,sizeof(buf),f))
+	    char* pc = cfgReadLine(f,buf,sizeof(buf),rest,warnLine,file,sect,&start);
+	    if (!pc)
 		break;
-
-	    char *pc = ::strchr(buf,'\r');
-	    if (pc)
-		*pc = 0;
-	    pc = ::strchr(buf,'\n');
-	    if (pc)
-		*pc = 0;
-	    pc = buf;
-	    // skip over an initial UTF-8 BOM
-	    if (start) {
-		String::stripBOM(pc);
-		start = false;
-	    }
-	    while (*pc == ' ' || *pc == '\t')
-		pc++;
 	    switch (*pc) {
 		case 0:
 		case ';':
@@ -326,17 +366,9 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 	    while (s.endsWith("\\",false)) {
 		// line continues onto next
 		s.assign(s,s.length()-1);
-		if (!::fgets(buf,sizeof(buf),f))
+		char* pc = cfgReadLine(f,buf,sizeof(buf),rest,warnLine,file,sect);
+		if (!pc)
 		    break;
-		pc = ::strchr(buf,'\r');
-		if (pc)
-		    *pc = 0;
-		pc = ::strchr(buf,'\n');
-		if (pc)
-		    *pc = 0;
-		pc = buf;
-		while (*pc == ' ' || *pc == '\t')
-		    pc++;
 		s += pc;
 	    }
 	    addValue(sect,key,s.trimBlanks());
