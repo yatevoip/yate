@@ -1741,7 +1741,7 @@ bool ISDNQ931Call::sendSetupAck()
     ISDNQ931Message* msg = new ISDNQ931Message(ISDNQ931Message::SetupAck,this);
     if (!m_channelIDSent) {
 	m_data.m_channelType = "B";
-	if (m_circuit)
+	if (m_data.m_bri && m_circuit)
 	    m_data.m_channelSelect = lookup(m_circuit->code(),Q931Parser::s_dict_channelIDSelect_BRI);
 	if (!m_data.m_channelSelect) {
 	    Debug(q931(),DebugNote,"Call(%u,%u). No voice channel available [%p]",
