@@ -6413,8 +6413,10 @@ bool JsGlobal::runMain()
 		m_instanceCount,m_instances.count());
     if (m_instanceCount <= 1) {
 	JsGlobalInstance* inst = new JsGlobalInstance(this,0);
-	if(ScriptRun::Succeeded != inst->runMain())
+	if(ScriptRun::Succeeded != inst->runMain()) {
+	    TelEngine::destruct(inst);
 	    return false;
+	}
 	m_instances.append(inst);
     }
     else {
@@ -6422,13 +6424,16 @@ bool JsGlobal::runMain()
 	// add instances if m_instancesCount is increased
 	for (unsigned int i = 0; i < m_instanceCount; i++) {
 	    JsGlobalInstance* inst = getInstance(i + 1);
+	    // get instance returns a refcounted instance
 	    if (inst) {
 		TelEngine::destruct(inst);
 		continue;
 	    }
 	    inst = new JsGlobalInstance(this,i + 1);
-	    if(ScriptRun::Succeeded != inst->runMain())
+	    if(ScriptRun::Succeeded != inst->runMain()) {
+		TelEngine::destruct(inst);
 		return false;
+	    }
 	    m_instances.append(inst);
 
 	}
