@@ -9976,7 +9976,7 @@ bool SIPDriver::sendMethod(Message& msg, const char* method, bool msgExec,
     }
     sip->addHeader("Max-Forwards",String(maxf));
     copySipHeaders(*sip,msg,"sip_");
-    copySipBody(*sip,msg);
+    sip->setBody(doBuildSIPBody((void*)conn ? (DebugEnabler*)conn : this,msg,0,"message-prefix"));
     const char* user = msg.getValue(YSTRING("user"));
     sip->complete(ep()->engine(),user,domain,0,
 	msg.getIntValue(YSTRING("xsip_flags"),-1));
