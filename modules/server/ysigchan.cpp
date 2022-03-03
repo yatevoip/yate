@@ -4776,11 +4776,15 @@ bool IsupDecodeHandler::received(Message& msg)
 {
     NamedString* ns = msg.getParam("rawdata");
     DataBlock* data = 0;
+    DataBlock hexData;
     if (ns) {
 	NamedPointer* p = static_cast<NamedPointer*>(ns->getObject("NamedPointer"));
 	if (p && p->userObject("DataBlock"))
 	    data = static_cast<DataBlock*>(p->userData());
     }
+    else if (hexData.unHexify(msg[YSTRING("hexdata")]))
+	data = &hexData;
+
     if (!data || data->length() < 2) {
 	DDebug(&plugin,DebugNote,"%s. Invalid data len %u",c_str(),data->length());
 	return false;
@@ -4854,6 +4858,11 @@ bool IsupEncodeHandler::received(Message& msg)
     DataBlock* data = new DataBlock;
     if (m_isup->encodeMessage(*data,msgType,pcType,msg)) {
 	msg.addParam(new NamedPointer("rawdata",data,"isup"));
+	if (msg.getBoolValue(YSTRING("hexdata"),false)) {
+	    String str;
+	    str.hexify(data->data(),data->length());
+	    msg.setParam(YSTRING("hexdata"),str);
+	}
 	return true;
     }
     TelEngine::destruct(data);
