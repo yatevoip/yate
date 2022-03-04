@@ -1297,6 +1297,7 @@ SignallingEvent* ISDNQ931Call::processMsgSetup(ISDNQ931Message* msg)
     msg->params().setParam("callednumtype",m_data.m_calledType);
     msg->params().setParam("callednumplan",m_data.m_calledPlan);
     msg->params().setParam("overlapped",String::boolText(m_overlap));
+    msg->params().setParam("transfer-cap",m_data.m_transferCapability);
     return new SignallingEvent(SignallingEvent::NewCall,msg,this);
 }
 
@@ -1655,7 +1656,7 @@ bool ISDNQ931Call::sendSetup(SignallingMessage* sigMsg)
 	if (q931()->parserData().flag(ISDNQ931::ForceSendComplete))
 	    msg->appendSafe(new ISDNQ931IE(ISDNQ931IE::SendComplete));
 	// BearerCaps
-	m_data.m_transferCapability = "speech";
+	m_data.m_transferCapability = sigMsg->params().getValue(YSTRING("transfer-cap"), "speech");
 	m_data.m_transferMode = "circuit";
 	m_data.m_transferRate = "64kbit";
 	m_data.m_format = sigMsg->params().getValue(YSTRING("format"),q931()->format());
