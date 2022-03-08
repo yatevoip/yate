@@ -779,6 +779,7 @@ public:
 	    params().addParam(new ExpFunction("setFileTime"));
 	    params().addParam(new ExpFunction("getContent"));
 	    params().addParam(new ExpFunction("setContent"));
+	    params().addParam(new ExpFunction("listDirectory"));
 	}
     static void initialize(ScriptContext* context);
 protected:
@@ -3567,6 +3568,7 @@ bool JsMessageQueue::matchesFilters(const NamedList& filters)
 bool JsFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
     XDebug(&__plugin,DebugAll,"JsFile::runNative '%s'(" FMT64 ")",oper.name().c_str(),oper.number());
+    ObjList args;
     if (oper.name() == YSTRING("exists")) {
 	if (oper.number() != 1)
 	    return false;
@@ -3751,6 +3753,33 @@ bool JsFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* cont
 	TelEngine::destruct(op);
 	TelEngine::destruct(cont);
 	ExpEvaluator::pushOne(stack,new ExpOperation(wr));
+    }
+    else if (oper.name() == YSTRING("listDirectory")) {
+	// res = File.listDirectory(path[,params])
+	ExpOperation* path = 0;
+	ExpOperation* opParams = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&path,&opParams))
+	    return false;
+	bool file = true;
+	bool dir = false;
+	JsObject* jso = YOBJECT(JsObject,opParams);
+	if (jso) {
+	    jso->getBoolField(YSTRING("list_file"),file);
+	    if (!file)
+		jso->getBoolField(YSTRING("list_dir"),dir);
+	}
+	ObjList res;
+	JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
+	if (dir || file) {
+	    if (File::listDirectory(*path,dir ? &res : 0,file ? &res : 0))
+		jsa->push(res);
+	    else
+		TelEngine::destruct(jsa);
+	}
+	if (jsa)
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"list"));
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else
 	return JsObject::runNative(stack,oper,context);
@@ -4844,16 +4873,25 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	pushStackResNull(stack,ret);
     }
     else if (oper.name() == YSTRING("xmlText")) {
-	if (extractArgs(stack,oper,context,args) > 1)
+	if (extractArgs(stack,oper,context,args) > 2)
 	    return false;
 	if (m_xml) {
 	    int spaces = args[0] ? static_cast<ExpOperation*>(args[0])->number() : 0;
 	    const String* line = &String::empty();
 	    String indent;
+	    String allIndent;
 	    if (spaces > 0) {
 		static const String crlf = "\r\n";
 		line = &crlf;
 		indent.assign(' ',spaces);
+		if (args[1]) {
+		    spaces = static_cast<ExpOperation*>(args[1])->number();
+		    if (spaces > 0) {
+			allIndent.assign(' ',spaces);
+			allIndent = line + allIndent;
+			line = &allIndent;
+		    }
+		}
 	    }
 	    ExpOperation* op = new ExpOperation("",m_xml->unprefixedTag());
 	    m_xml->toString(*op,true,*line,indent);
