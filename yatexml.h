@@ -1021,6 +1021,14 @@ public:
 	bool noPrefix = true);
 
     /**
+     * Retrieve first XML text from given list
+     * @param lst List of XmlChild
+     * @return XmlText pointer, NULL if not found
+     */
+    static inline XmlText* findText(ObjList* lst)
+	{ return getText(lst); }
+
+    /**
      * Retrieve first XML text from given list. Advance the list when found
      * @param lst List of XmlChild
      * @return XmlText pointer, NULL if not found
@@ -1951,6 +1959,7 @@ private:
 class XPathParseData;
 class XPathPredicate;
 class XPathStep;
+class XPathNodeCheck;
 
 /**
  * This class holds an XML Path
@@ -1973,6 +1982,7 @@ public:
 	// Internal
 	FInternal = 0xff00,              // Internal flags mask
 	FAbsolute = 0x0100,              // Absolute path
+	FCopying = 0x0200,
     };
 
     /**
@@ -2133,6 +2143,28 @@ public:
     void dump(ObjList& lst, bool escape = true) const;
 
     /**
+     * Assignment operator
+     * @param other Object to copy
+     */
+    inline XPath& operator=(const XPath& other)
+	{ return copy(other); }
+
+    /**
+     * Resolve a result returned when searching for 'any' value
+     * @param gen Result to handle
+     * @return String pointer (XML text, attribute value or string), NULL if given parameter is NULL
+     */
+    static inline const String* anyValue(const GenObject* gen) {
+	    if (!gen)
+		return 0;
+	    const XmlElement* xml = YOBJECT(XmlElement,gen);
+	    if (xml)
+		return &xml->getText();
+	    const NamedString* ns = YOBJECT(NamedString,gen);
+	    return ns ? (const String*)ns : &gen->toString();
+	}
+
+    /**
      * Escape a string and add quoted value to buffer
      * @param buf Destination buffer
      * @param str String to escape
@@ -2175,12 +2207,13 @@ protected:
 private:
     int find(unsigned int& total, const XmlElement& src, const GenObject*& res, ObjList* list,
 	unsigned int what, ObjList* crtItem = 0, unsigned int step = 0, bool absolute = false) const;
-    int getText(unsigned int& total, const XmlElement& xml, const XPathStep* step,
-	unsigned int& resultIdx, const GenObject*& res, ObjList* list) const;
+    int getText(unsigned int& total, const XmlElement& xml, const GenObject*& res,
+	XPathNodeCheck& data) const;
     bool parseStepPredicate(XPathParseData& data, XPathPredicate* pred);
     bool checkStepPredicate(XPathParseData& data, XPathStep* step, XPathPredicate* pred);
     bool setStatus(unsigned int code, unsigned int itemIdx = 0, const char* error = 0,
 	XPathParseData* data = 0);
+    XPath& copy(const XPath& other, bool constr = false);
 
     unsigned int m_flags;
     ObjList m_items;

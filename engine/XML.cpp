@@ -2286,7 +2286,7 @@ void XmlDoctype::toString(String& dump, const String& indent) const
  */
 // Maximul number of predicates in step
 #ifndef XPATH_MAX_PREDICATES
-#define XPATH_MAX_PREDICATES 5
+#define XPATH_MAX_PREDICATES 10
 #endif
 
 #ifdef XDEBUG
@@ -2599,9 +2599,14 @@ protected:
 
 class XPathEscapedString
 {
+    YNOCOPY(XPathEscapedString);
 public:
     inline XPathEscapedString(String* str, bool literal = false)
 	: m_delimiter(0), m_esc(false), m_literal(literal), m_str(str)
+	{}
+    inline XPathEscapedString(const XPathEscapedString& other, String* str)
+	: m_delimiter(other.m_delimiter), m_esc(other.m_esc), m_literal(other.m_literal),
+	m_str(str)
 	{}
     inline void setLiteral(bool on)
 	{ m_literal = on; }
@@ -2645,6 +2650,12 @@ public:
 	}
 
 protected:
+    inline void copy(const XPathEscapedString& other) {
+	    m_delimiter = other.m_delimiter;
+	    m_esc = other.m_esc;
+	    m_literal = other.m_literal;
+	}
+
     char m_delimiter;                    // Delimiter. Non 0 indicates data is used
     bool m_esc;                          // String contains escaped chars
     bool m_literal;                      // String is an XPATH literal
@@ -2658,8 +2669,17 @@ public:
     inline XPathString(bool literal = false)
 	: XPathEscapedString(this,literal)
 	{}
+    inline XPathString(const XPathString& other)
+	: String(*static_cast<const String*>(&other)),
+	XPathEscapedString(*static_cast<const XPathEscapedString*>(&other),this)
+	{}
     inline String& dump(String& buf, bool escape = false) const
 	{ return dumpString(buf,escape); }
+    inline XPathString& operator=(const XPathString& other) {
+	    String::assign(other.c_str());
+	    XPathEscapedString::copy(other);
+	    return *this;
+	}
 };
 
 // XPath regexp literal
@@ -2669,6 +2689,12 @@ public:
     inline XPathRegexp()
 	: XPathEscapedString(this),
 	m_match(true)
+	{}
+    inline XPathRegexp(const XPathRegexp& other)
+	: Regexp(*static_cast<const Regexp*>(&other)),
+	XPathEscapedString(*static_cast<const XPathEscapedString*>(&other),this),
+	m_match(other.m_match),
+	m_flags(other.m_flags)
 	{}
     inline bool matches(const char* value) const
 	{ return m_match == Regexp::matches(value); }
@@ -2705,6 +2731,15 @@ public:
 	    }
 	    return buf;
 	}
+    inline XPathRegexp& operator=(const XPathRegexp& other) {
+	    String::assign(other.c_str());
+	    Regexp::setFlags(other.isExtended(),other.isCaseInsensitive());
+	    Regexp::assign(other.c_str());
+	    m_match = other.m_match;
+	    m_flags = other.m_flags;
+	    XPathEscapedString::copy(other);
+	    return *this;
+	}
 
 protected:
     bool m_match;                        // (Reverse) match
@@ -2712,6 +2747,103 @@ protected:
 };
 
 namespace TelEngine {
+
+class XPathStep;
+
+class XPathNodeCheck
+{
+public:
+    enum Process {
+	Xml,
+	Attribute,
+	Text,
+	ChildText,
+    };
+    inline XPathNodeCheck(XPathStep* step, ObjList* resList)
+	: m_step(step), m_nameCheck(0), m_resList(resList),
+	m_type(Xml), m_index(0), m_count(0), m_next(0), m_nextChild(0)
+	{}
+    inline unsigned int index() const
+	{ return m_index; }
+    inline void setType(int t)
+	{ m_type = t; }
+    inline XmlElement* startXml(const XmlElement& xml, bool root = false) {
+	    if (!root) {
+		m_next = xml.getChildren().skipNull();
+		return advanceXml();
+	    }
+	    m_count = 1;
+	    return (!m_nameCheck || *m_nameCheck == xml.getTag()) ? (XmlElement*)&xml : 0;
+	}
+    inline XmlText* startText(const XmlElement& xml) {
+	    m_nextChild = xml.getChildren().skipNull();
+	    return advanceText();
+	}
+    inline NamedString* startAttr(const XmlElement& xml) {
+	    m_next = xml.attributes().paramList()->skipNull();
+	    return advanceAttr();
+	}
+    inline XmlElement* advanceXml()
+	{ return XmlFragment::getElement(m_next,m_nameCheck); }
+    inline XmlText* advanceText()
+	{ return XmlFragment::getText(m_nextChild); }
+    inline NamedString* advanceAttr() {
+	    m_next = findAttr(m_next,m_nameCheck);
+	    if (!m_next)
+		return 0;
+	    ObjList* tmp = m_next;
+	    m_next = m_next->skipNext();
+	    return static_cast<NamedString*>(tmp->get());
+	}
+    inline void advanceIndex()
+	{ m_index++; }
+    inline int checkIndex(unsigned int idx) {
+	    if (m_index == idx)
+		return XPathProcHandleStop;
+	    return m_index < idx ? XPathProcCont : XPathProcStop;
+	}
+    inline int checkPosLast() {
+	    if (Xml == m_type) {
+		if (m_count)
+		    return checkIndex(m_count);
+		return procNotLastPos(XmlFragment::findElement(m_next,m_nameCheck,0));
+	    }
+	    if (Attribute == m_type)
+		return procNotLastPos(findAttr(m_next,m_nameCheck));
+	    // Text process
+	    if (ChildText == m_type && m_next) {
+		XmlElement* next = XmlFragment::findElement(m_next,0,0);
+		if (next && XmlFragment::findText(next->getChildren().skipNull()))
+		    return XPathProcCont;
+		// No next element or next element has no text child. Check current element
+	    }
+	    return procNotLastPos(XmlFragment::findText(m_nextChild));
+	}
+
+    static inline int procNotLastPos(bool notLast)
+	{ return notLast ? XPathProcCont : XPathProcHandleStop; }
+    static inline ObjList* findAttr(ObjList* lst, const String* name) {
+	    if (!(lst && name))
+		return lst;
+	    for (; lst; lst = lst->skipNext()) {
+		if (*name == static_cast<NamedString*>(lst->get())->name())
+		    return lst;
+	    }
+	    return 0;
+	}
+
+    XPathStep* m_step;
+    const String* m_nameCheck;
+    ObjList* m_resList;
+
+protected:
+    int m_type;
+    unsigned int m_index;
+    unsigned int m_count;
+    ObjList* m_next;                     // Next item (Xml or Attribute)
+    ObjList* m_nextChild;                // Next child (XML text)
+};
+    
 class XPathPredicate
 {
 public:
@@ -2725,6 +2857,8 @@ public:
 	XmlName = 0x10,
 	Attribute,                       // XML element attribute match
 	Child,                           // XML child match (presence or text),
+	Position = 0x20,
+	PosLast,                         // Node position in list: last item
     };
     // Operators
     enum Opc {
@@ -2737,6 +2871,10 @@ public:
     inline XPathPredicate()
 	: m_type(0), m_opc(0)
 	{}
+    inline XPathPredicate(const XPathPredicate& other)
+	: m_type(other.m_type), m_opc(other.m_opc),
+	m_name(other.m_name), m_value(other.m_value), m_regexp(other.m_regexp)
+	{}
     inline int type() const
 	{ return m_type; }
     inline unsigned int opc() const
@@ -2748,13 +2886,15 @@ public:
     inline bool valid() const
 	{ return 0 != type(); }
     inline bool isPosition() const
-	{ return Index == type(); }
-    inline int check(unsigned int index, const XmlElement* xml = 0, const NamedString* attr = 0) const {
-	    if (Index == m_type) {
-		if (index == m_opc)
-		    return XPathProcHandleStop;
-		return index < m_opc ? XPathProcCont : XPathProcStop;
-	    }
+	{ return 0 != (Position & type()); }
+    inline bool sameIndex(const XPathPredicate& other) const
+	{ return opc() == other.opc(); }
+    inline int check(XPathNodeCheck& data, const XmlElement* xml = 0,
+	const NamedString* attr = 0) const {
+	    if (Index == m_type)
+		return data.checkIndex(m_opc);
+	    if (PosLast == m_type)
+		return data.checkPosLast();
 	    if (Text == m_type || Child == m_type) {
 		const String* txt = xml ?
 		    ((Child == m_type) ? xml->childText(m_name) : &(xml->getText())) : 0;
@@ -2822,6 +2962,14 @@ public:
 		m_value.dump(buf,escape);
 	    }
 	}
+    inline XPathPredicate& operator=(const XPathPredicate& other) {
+	    m_type = other.m_type;
+	    m_opc = other.m_opc;
+	    m_name = other.m_name;
+	    m_value = other.m_value;
+	    m_regexp = other.m_regexp;
+	    return *this;
+	}
 
     static inline const char* opcName(int opc)
 	{ return lookup(opc,s_opcAll); }
@@ -2871,36 +3019,44 @@ const TokenDict XPathPredicate::s_typeName[] = {
     {"attribute", Attribute},
     {"child",     Child},
     {"text",      Text},
+    {"last",      PosLast},
     {0,0},
 };
 
+typedef GenericVector<XPathPredicate> XPathPredicateVector; 
 
 class XPathPredicateList
 {
 public:
     inline XPathPredicateList()
-	: m_indexPredicate(0), m_stopProc(false)
+	: m_predicates(2), m_indexPredicate(0), m_stopProc(false)
 	{}
-    inline bool valid() const
-	{ return m_predicates[0].valid(); }
-    inline XPathPredicate* first()
-	{ return m_predicates; }
-    inline const XPathPredicate* first() const
-	{ return m_predicates; }
-    inline int check(unsigned int& index, const XmlElement* xml = 0,
+    inline XPathPredicateList(const XPathPredicateList& other)
+	: m_predicates(other.m_predicates), m_indexPredicate(0), m_stopProc(other.m_stopProc)
+	{
+	    if (other.m_indexPredicate) {
+		const XPathPredicate* p = other.m_predicates.data();
+		for (unsigned int i = 0; i < other.m_predicates.length(); ++i, ++p)
+		    if (p == other.m_indexPredicate) {
+			m_indexPredicate = m_predicates.data(i,1);
+			break;
+		    }
+	    }
+	}
+    inline int check(XPathNodeCheck& data, const XmlElement* xml = 0,
 	const NamedString* attr = 0) const {
-	    if (!valid())
+	    const XPathPredicate* f = m_predicates.first();
+	    if (!f)
 		return XPathProcHandleCont;
-	    index++;
+	    data.advanceIndex();
 	    int rProc = XPathProcHandleCont;
 	    if (!m_stopProc) {
 		// Always evalute predicates with position first. May lead to fast return
 		if (m_indexPredicate)
-		    check(rProc,true,*m_indexPredicate,index,xml,attr);
-		const XPathPredicate* f = first();
-		for (unsigned int i = 0; rProc > 0 && i < XPATH_MAX_PREDICATES && f->valid(); ++i, ++f) {
-		    if (!f->isPosition())
-			check(rProc,!(m_indexPredicate || i),*f,index,xml,attr);
+		    check(rProc,true,*m_indexPredicate,data,xml,attr);
+		for (unsigned int i = 0; rProc > 0 && i < m_predicates.length(); ++i, ++f) {
+		    if (f != m_indexPredicate)
+			check(rProc,!(m_indexPredicate || i),*f,data,xml,attr);
 		}
 	    }
 	    else
@@ -2911,36 +3067,13 @@ public:
 		    "Checked %s '%s' idx=%u. Predicate(s) not matched proc=%s",
 		    (xml ? "xml" : (attr ? "attribute" : "???")),
 		    (xml ? xml->tag() : ((attr ? attr->name().c_str() : ""))),
-		    index,lookup(rProc,s_xpathProcAct));
+		    data.index(),lookup(rProc,s_xpathProcAct));
 	    #endif
 	    return rProc;
 	}
-    inline bool check(int& rProc, bool first, const XPathPredicate& pred,
-	unsigned int index, const XmlElement* xml, const NamedString* attr) const {
-	    #ifdef XPATH_XDEBUG_FIND
-	    String tmp;
-	    pred.dump(tmp) << " index=" << index;
-	    #endif
-	    if (first) {
-		rProc = pred.check(index,xml,attr);
-		#ifdef XPATH_XDEBUG_FIND
-		Debug("XPath",DebugAll,"Predicate %s check returned %s",
-		    tmp.safe(),lookup(rProc,s_xpathProcAct));
-		#endif
-	    }
-	    else {
-		int proc = pred.check(index,xml,attr);
-		rProc = filterProc(rProc,proc);
-		#ifdef XPATH_XDEBUG_FIND
-		Debug("XPath",DebugAll,"Predicate %s check returned %s. Filtered: %s",
-		    tmp.safe(),lookup(proc,s_xpathProcAct),lookup(rProc,s_xpathProcAct));
-		#endif
-	    }
-	    return rProc > 0;
-	}
     inline String& dump(String& buf, bool escape = false) const {
-	    const XPathPredicate* f = first();
-	    for (unsigned int i = 0; i < XPATH_MAX_PREDICATES && f->valid(); ++i, ++f)
+	    const XPathPredicate* f = m_predicates.first();
+	    for (unsigned int i = 0; i < m_predicates.length(); ++i, ++f)
 		f->dump(buf,escape);
 	    return buf;
 	}
@@ -2965,9 +3098,34 @@ public:
 	    return XPathProcCont;
 	}
 
-    XPathPredicate m_predicates[XPATH_MAX_PREDICATES]; // Predicate expression(s)
+    XPathPredicateVector m_predicates;   // Predicate expression(s)
     XPathPredicate* m_indexPredicate;
     bool m_stopProc;
+
+protected:
+    inline bool check(int& rProc, bool first, const XPathPredicate& pred,
+	XPathNodeCheck& data, const XmlElement* xml, const NamedString* attr) const {
+	    #ifdef XPATH_XDEBUG_FIND
+	    String tmp;
+	    pred.dump(tmp) << " index=" << data.index();
+	    #endif
+	    if (first) {
+		rProc = pred.check(data,xml,attr);
+		#ifdef XPATH_XDEBUG_FIND
+		Debug("XPath",DebugAll,"Predicate %s check returned %s",
+		    tmp.safe(),lookup(rProc,s_xpathProcAct));
+		#endif
+	    }
+	    else {
+		int proc = pred.check(data,xml,attr);
+		rProc = filterProc(rProc,proc);
+		#ifdef XPATH_XDEBUG_FIND
+		Debug("XPath",DebugAll,"Predicate %s check returned %s. Filtered: %s",
+		    tmp.safe(),lookup(proc,s_xpathProcAct),lookup(rProc,s_xpathProcAct));
+		#endif
+	    }
+	    return rProc > 0;
+	}
 };
 
 namespace TelEngine {
@@ -2995,7 +3153,7 @@ public:
 	{}
     inline XPathStep(const XPathStep& other)
 	: String(other.c_str()),
-	m_nodeType(other.m_nodeType)
+	m_nodeType(other.m_nodeType), m_predicates(other.m_predicates)
 	{}
     inline int nodeType() const
 	{ return m_nodeType; }
@@ -3008,7 +3166,7 @@ public:
     inline const String* valueMatch() const
 	{ return valueMatchAny() ? 0 : (const String*)this; }
     inline const XPathPredicateList* predicates() const
-	{ return m_predicates.valid() ? &m_predicates : 0; }
+	{ return m_predicates.m_predicates.length() ? &m_predicates : 0; }
     inline String& dump(String& buf, bool escape = false) {
 	    switch (m_nodeType) {
 		case Xml:
@@ -3025,17 +3183,6 @@ public:
 			buf << "unk_function(" << m_nodeType << ")";
 	    }
 	    return m_predicates.dump(buf,escape);
-	}
-    // Check if a given item should be added to result set
-    inline int checkHandle(const XPath* path, unsigned int& resultIdx,
-	const XmlElement* xml = 0, const NamedString* attr = 0,
-	const String& name = String::empty(), const String* nameCheck = 0) const {
-	    if (nameCheck && name != *nameCheck) {
-		XPathDebugFind("XPath",DebugAll,"Checked %s '%s': not matched [%p]",
-		    (xml ? "xml" : "attribute"),name.c_str(),path);
-		return XPathProcCont;
-	    }
-	    return m_predicates.check(resultIdx,xml,attr);
 	}
 
     static inline bool matchAny(const char* buf, unsigned int len)
@@ -3089,20 +3236,17 @@ XPath::XPath(const char* value, unsigned int flags)
 }
 
 XPath::XPath(const XPath& other)
-    : String(other.c_str()),
-    m_flags(other.m_flags),
-    m_status(other.m_status),
-    m_errorItem(other.m_errorItem),
-    m_error(other.m_error)
+    : m_flags(0),
+    m_status(NotParsed),
+    m_errorItem(0)
 {
-    XDebug(DebugAll,"XPath(%s,0x%x) [%p]",c_str(),m_flags,this);
-    ObjList* itAppend = &m_items;
-    for (ObjList* o = other.m_items.skipNull(); o; o = o->skipNext())
-	itAppend->append(new XPathStep(*static_cast<XPathStep*>(o->get())));
+    XDebug(DebugAll,"XPath(%p) [%p]",&other,this);
+    copy(other,true);
 }
 
 XPath::~XPath()
 {
+    XDebug(DebugAll,"~XPath [%p]",this);
     reset();
 }
 
@@ -3207,26 +3351,21 @@ int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& re
     ObjList* lstAppend = list;
     unsigned int n = 0;
     bool stop = false;
-    unsigned int resultIdx = 0;
+    XPathNodeCheck info(&it,list);
     while (true) {
 	if (it.isElementNode()) {
-	    ObjList* o = 0;
-	    XmlElement* x = 0;
-	    if (absolute)
-		x = (XmlElement*)&src;
-	    else {
-		o = src.getChildren().skipNull();
-		x = XmlFragment::getElement(o);
-	    }
 	    bool xmlReq = 0 != (what & FindXml);
 	    // Last item but no XML/TEXT requested ?
 	    if (!nextItem && !xmlReq && 0 == (what & FindText)) {
 		stop = true;
 		break;
 	    }
-	    const String* tag = it.valueMatch();
-	    for ( ; x; x = XmlFragment::getElement(o)) {
-		int proc = it.checkHandle(this,resultIdx,x,0,x->getTag(),tag);
+	    info.setType(XPathNodeCheck::Xml);
+	    info.m_nameCheck = it.valueMatch();
+	    XPathNodeCheck infoText(0,list);
+	    infoText.setType(XPathNodeCheck::Text);
+	    for (XmlElement* x = info.startXml(src,absolute); x; x = info.advanceXml()) {
+		int proc = it.m_predicates.check(info,x);
 		if (proc > 0) {
 		    if (nextItem)
 			proc = XPathStep::filterProc(proc,find(n,*x,res,list,what,nextItem,step + 1));
@@ -3237,7 +3376,7 @@ int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& re
 		    }
 		    else
 			// Last item pointing to an XML but XML was not requested
-			proc = XPathStep::filterProc(proc,getText(n,*x,0,resultIdx,res,list));
+			proc = XPathStep::filterProc(proc,getText(n,*x,res,infoText));
 		}
 		if (proc < 0 || XPathProcHandleStop == proc)
 		    break;
@@ -3245,7 +3384,7 @@ int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& re
 	    break;
 	}
 	
-	if (XPathStep::Text == it.m_nodeType || XPathStep::Text == it.m_nodeType) {
+	if (XPathStep::Text == it.m_nodeType || XPathStep::ChildText == it.m_nodeType) {
 	    // No need to check anything if the requested result set contains other data
 	    //  type (non XML Text) or we have a next item
 	    // If next item is present there is nothing there to match (XmlText has no attributes, children ...)
@@ -3255,12 +3394,14 @@ int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& re
 		stop = true;
 		break;
 	    }
-	    if (XPathStep::Text == it.m_nodeType)
-		getText(n,src,&it,resultIdx,res,list);
+	    if (XPathStep::Text == it.m_nodeType) {
+		info.setType(XPathNodeCheck::Text);
+		getText(n,src,res,info);
+	    }
 	    else {
-		ObjList* o = src.getChildren().skipNull();
-		for (XmlElement* x = XmlFragment::getElement(o); x; x = XmlFragment::getElement(o)) {
-		    int proc = getText(n,*x,&it,resultIdx,res,list);
+		info.setType(XPathNodeCheck::ChildText);
+		for (XmlElement* x = info.startXml(src); x; x = info.advanceXml()) {
+		    int proc = getText(n,*x,res,info);
 		    if (proc < 0 || XPathProcHandleStop == proc)
 			break;
 		}
@@ -3275,10 +3416,10 @@ int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& re
 		stop = true;
 		break;
 	    }
-	    const String* name = it.valueMatch();
-	    for (const ObjList* o = src.attributes().paramList()->skipNull(); o; o = o->skipNext()) {
-		NamedString* ns = static_cast<NamedString*>(o->get());
-		int proc = it.checkHandle(this,resultIdx,0,ns,ns->name(),name);
+	    info.setType(XPathNodeCheck::Attribute);
+	    info.m_nameCheck = it.valueMatch();
+	    for (NamedString* ns = info.startAttr(src); ns; ns = info.advanceAttr()) {
+		int proc = it.m_predicates.check(info,0,ns);
 		if (proc > 0) {
 		    n++;
 		    if (!xpathAddResult(this,ns,res,lstAppend))
@@ -3305,20 +3446,19 @@ int XPath::find(unsigned int& total, const XmlElement& src, const GenObject*& re
     return rProc;
 }
 
-int XPath::getText(unsigned int& total, const XmlElement& src, const XPathStep* step,
-    unsigned int& resultIdx, const GenObject*& res, ObjList* list) const
+int XPath::getText(unsigned int& total, const XmlElement& src, const GenObject*& res,
+    XPathNodeCheck& data) const
 {
     XPathDebugFind("XPath",DebugAll,"Get text xml '%s' multi=%s step=(%p) [%p]",
-	src.getTag().c_str(),String::boolText(list),step,this);
+	src.getTag().c_str(),String::boolText(data.m_resList),data.m_step,this);
     unsigned int n = 0;
     int proc = XPathProcHandleCont;
-    ObjList* o = src.getChildren().skipNull();
-    for (XmlText* t = XmlFragment::getText(o); t; t = XmlFragment::getText(o)) {
-	if (step)
-	    proc = step->checkHandle(this,resultIdx);
+    for (XmlText* t = data.startText(src); t; t = data.advanceText()) {
+	if (data.m_step)
+	    proc = data.m_step->m_predicates.check(data);
 	if (proc > 0) {
 	    n++;
-	    if (!xpathAddResult(this,&t->getText(),res,list))
+	    if (!xpathAddResult(this,&t->getText(),res,data.m_resList))
 		proc = XPathProcStop;
 	}
 	if (proc < 0 || XPathProcHandleStop == proc)
@@ -3332,7 +3472,8 @@ int XPath::getText(unsigned int& total, const XmlElement& src, const XPathStep* 
 
 void XPath::changed()
 {
-    parsePath();
+    if (FCopying != m_flags)
+	parsePath();
 }
 
 #define XPATH_SET_STATUS_BREAK(code,str) { setStatus(code,data.step(),str); break; }
@@ -3465,8 +3606,7 @@ void XPath::parsePath()
 	    prevStep = step;
 	}
 
-	XPathPredicate* p = step->m_predicates.first();
-	for (unsigned int i = 0; ; ++p, ++i) {
+	for (unsigned int i = 0; ; ++i) {
 	    if (!data.strictParse)
 		data.skipBlanks();
 	    if (data.isStepEnd())
@@ -3478,10 +3618,14 @@ void XPath::parsePath()
 	    }
 	    if (i == XPATH_MAX_PREDICATES)
 		XPATH_SET_STATUS_BREAK(ERange,"Too many predicates");
-	    if (!parseStepPredicate(data,p))
+	    XPathPredicateVector& predicates = step->m_predicates.m_predicates;
+	    if (!predicates.resize(1 + predicates.length()))
+		XPATH_SET_STATUS_BREAK(ERange,"Memory allocation failure");
+	    XPathPredicate* p = predicates.last();
+	    if (!(parseStepPredicate(data,p) && checkStepPredicate(data,step,p))) {
+		predicates.removeLast(n);
 		break;
-	    if (!checkStepPredicate(data,step,p))
-		break;
+	    }
 	}
 	if (m_status)
 	    break;
@@ -3551,7 +3695,6 @@ bool XPath::parseStepPredicate(XPathParseData& data, XPathPredicate* pred)
 	    XPATH_SET_SYNTAX_RET("Predicate index value invalid or out of range");
 	pred->m_type = XPathPredicate::Index;
 	pred->m_opc = (unsigned int)val;
-
 	XPathDebugParse("XPath",DebugInfo,"Parsed predicate %u '%s' value=%u [%p]",
 	    pred->type(),pred->typeName(),pred->opc(),this);
 	return true;
@@ -3712,22 +3855,33 @@ bool XPath::parseStepPredicate(XPathParseData& data, XPathPredicate* pred)
 		    case 0:
 			// Function not found. Check for selector type function
 			func = lookup(fn,XPathPredicate::s_typeName);
+			#define XPATH_PARSE_END_FUNC_DONE \
+			    if (data.ended() || data != ')') \
+				XPATH_SET_SYNTAX_RET(tmp.printf("Expecting ')' after '%s' start",fn.c_str())); \
+			    func = 0; \
+			    selector.advance(); \
+			    data.advance();
 			switch (func) {
 			    case XPathPredicate::Text:
-				if (data.ended() || data != ')')
-				    XPATH_SET_SYNTAX_RET("Expecting ')' after predicate input selector");
+				XPATH_PARSE_END_FUNC_DONE;
 				pred->m_type = XPathPredicate::Text;
-				func = 0;
-				selector.advance();
-				data.advance();
+				break;
+			    case XPathPredicate::PosLast:
+				XPATH_PARSE_END_FUNC_DONE;
+				// Skip now until predicate end: we don't expect anything else
+				XPATH_PARSE_STRICT_BLANK_PREDICATE;
+				if (!data.isPredicatedEnd())
+				    tmp.printf("Expecting predicate end after position selector");
+				pred->m_type = XPathPredicate::PosLast;
 				break;
 			    default:
-				if (func)
-				    tmp.printf("Predicate function '%s' not implemented",fn.c_str());
-				else
+				if (!func)
 				    tmp.printf("Unknown function '%s' in predicate",fn.c_str());
+				else
+				    tmp.printf("Predicate function '%s' not implemented",fn.c_str());
 				XPATH_SET_SYNTAX_RET(tmp);
 			}
+			#undef XPATH_PARSE_END_FUNC_DONE
 			break;
 		    default:
 			tmp.printf("Predicate function '%s' not implemented",fn.c_str());
@@ -3856,10 +4010,11 @@ bool XPath::checkStepPredicate(XPathParseData& data, XPathStep* step, XPathPredi
 	else {
 	    if (data.strictParse)
 		XPATH_SET_STATUS_RET(ESemantic,"Repeated index predicate in step");
-	    if (pred->opc() != lst.m_indexPredicate->opc())
+	    if (!pred->sameIndex(*(lst.m_indexPredicate))) {
 		if (data.checkEmptyRes)
 		    XPATH_SET_STATUS_RET(EEmptyResult,"Path step with different index value in predicate");
 		lst.m_stopProc = true;
+	    }
 	}
     }
     else {
@@ -3878,6 +4033,8 @@ bool XPath::checkStepPredicate(XPathParseData& data, XPathStep* step, XPathPredi
 		    }
 		    break;
 		case XPathPredicate::Index:
+		case XPathPredicate::Position:
+		case XPathPredicate::PosLast:
 		    break;
 		default:
 		    Debug("XPath",DebugStub,
@@ -3956,6 +4113,24 @@ bool XPath::setStatus(unsigned int code, unsigned int itemIdx, const char* error
     }
 #endif
     return false;
+}
+
+XPath& XPath::copy(const XPath& other, bool constr)
+{
+    if (&other == this)
+	return *this;
+    if (!constr)
+	reset();
+    m_flags = FCopying;
+    String::assign(other.c_str()),
+    m_flags = other.m_flags;
+    m_status = other.m_status;
+    m_errorItem = other.m_errorItem;
+    m_error = other.m_error;
+    ObjList* itAppend = &m_items;
+    for (ObjList* o = other.m_items.skipNull(); o; o = o->skipNext())
+	itAppend->append(new XPathStep(*static_cast<XPathStep*>(o->get())));
+    return *this;
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */
