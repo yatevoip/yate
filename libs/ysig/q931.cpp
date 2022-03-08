@@ -1749,6 +1749,8 @@ bool ISDNQ931Call::sendSetupAck()
 		Q931_CALL_ID,this);
 	    return sendReleaseComplete("congestion");
 	}
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true,&q931()->parserData());
 	m_channelIDSent = true;
     }
