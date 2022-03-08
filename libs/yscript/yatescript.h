@@ -2176,6 +2176,8 @@ public:
      * @param code Parsed code block
      * @param context Script context, an empty one will be allocated if NULL
      * @param title An optional name for the runner
+     * @param instIdx Javascript context instance
+     * @param maxInst Number of context instances
      * @return A new script runner, NULL if code is NULL
      */
     virtual ScriptRun* createRunner(ScriptCode* code, ScriptContext* context = 0, const char* title = 0,
@@ -2185,6 +2187,8 @@ public:
      * Create a runner adequate for the parsed code
      * @param context Script context, an empty one will be allocated if NULL
      * @param title An optional name for the runner
+     * @param instIdx Javascript context instance
+     * @param maxInst Number of context instances
      * @return A new script runner, NULL if code is not yet parsed
      */
     inline ScriptRun* createRunner(ScriptContext* context = 0, const char* title = 0, 
@@ -3171,6 +3175,8 @@ public:
      * @param code Parsed code block
      * @param context Javascript context, an empty one will be allocated if NULL
      * @param title An optional name for the runner
+     * @param instIdx Javascript context instance
+     * @param maxInst Number of context instances
      * @return A new Javascript runner, NULL if code is NULL
      */
     virtual ScriptRun* createRunner(ScriptCode* code, ScriptContext* context = 0, const char* title = 0, 
