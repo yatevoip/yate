@@ -3170,6 +3170,445 @@ private:
 };
 
 /**
+ * Template for generic object vector
+ * The vector can be resized (up/down)
+ * Objects MUST implement a default contructor and an assignment operator
+ * When name based find or set are used objects should implement toString()
+ * This template should be used for simple objects
+ * @short Template for generic object vector
+ */
+template <class Obj> class GenericVector : public GenObject
+{
+public:
+    /**
+     * Constructor
+     * @param overAlloc How many items to overallocate
+     * @param name Optional vector name
+     */
+    inline GenericVector(unsigned int overAlloc = 0, const char* name = 0)
+	: m_data(0), m_length(0), m_size(0), m_overAlloc(overAlloc), m_name(name)
+	{}
+
+    /**
+     * Constructor
+     * @param items Pointer to initial values
+     * @param count Initial length
+     * @param overAlloc How many items to overallocate
+     * @param name Optional vector name
+     */
+    inline GenericVector(const Obj* items, unsigned int count, unsigned int overAlloc = 0,
+	const char* name = 0)
+	: m_data(0), m_length(0), m_size(0), m_overAlloc(overAlloc), m_name(name)
+	{ assign(count,items); }
+
+    /**
+     * Constructor
+     * @param items List to copy
+     * @param overAlloc How items to overallocate
+     * @param name Optional vector name
+     */
+    inline GenericVector(const ObjList& items, unsigned int overAlloc = 0,
+	const char* name = 0)
+	: m_data(0), m_length(0), m_size(0), m_overAlloc(overAlloc), m_name(name)
+	{ assign(items); }
+
+    /**
+     * Copy constructor
+     * @param other Vector to copy
+     */
+    inline GenericVector(const GenericVector& other)
+	: m_data(0), m_length(0), m_size(0), m_overAlloc(other.overAlloc()),
+	m_name(other.name())
+	{ assign(other.length(),other.data()); }
+
+    /**
+     * Destructor
+     */
+    virtual ~GenericVector()
+	{ clear(); }
+
+    /**
+     * Retrieve vector length
+     * @return Vector length
+     */
+    inline unsigned int length() const
+	{ return m_length; }
+
+    /**
+     * Retrieve vector size (total allocated items, including over alloc)
+     * @return Vector size
+     */
+    inline unsigned int size() const
+	{ return m_size; }
+
+    /**
+     * Retrieve the over alloc value
+     * @return Over alloc value
+     */
+    inline unsigned int overAlloc() const
+	{ return m_overAlloc; }
+
+    /**
+     * Set over alloc length
+     * @param count Value of over alloc length
+     */
+    inline void overAlloc(unsigned int count)
+	{ m_overAlloc = count; }
+
+    /**
+     * Retrieve vector name
+     * @return Vector name
+     */
+    inline const String& name() const
+	{ return m_name; }
+
+    /**
+     * Retrieve a pointer to data
+     * @param offs Index to start
+     * @param count Optional number of elements to retrieve
+     * @return Obj pointer, NULL if data not set or given index and count are past vector length
+     */
+    inline Obj* data(unsigned int offs = 0, unsigned int count = 0)
+	{ return dataAvail(offs,count); }
+
+    /**
+     * Retrieve a pointer to data
+     * @param offs Index to start
+     * @param count Optional number of elements to retrieve
+     * @return Obj pointer, NULL if data not set or given index and count are past vector length
+     */
+    inline const Obj* data(unsigned int offs = 0, unsigned int count = 0) const
+	{ return dataAvail(offs,count); }
+
+    /**
+     * Retrieve a pointer to first item in vector
+     * @return Obj pointer, NULL if not found
+     */
+    inline Obj* first()
+	{ return m_data; }
+
+    /**
+     * Retrieve a pointer to first item in vector
+     * @return Obj pointer, NULL if not found
+     */
+    inline const Obj* first() const
+	{ return m_data; }
+
+    /**
+     * Retrieve a pointer to last item in vector
+     * @return Obj pointer, NULL if not found
+     */
+    inline Obj* last()
+	{ return length() ? m_data + length() - 1 : 0; }
+
+    /**
+     * Retrieve a pointer to last item in vector
+     * @return Obj pointer, NULL if not found
+     */
+    inline const Obj* last() const
+	{ return length() ? m_data + length() - 1 : 0; }
+
+    /**
+     * Retrieve index of object by name
+     * Obj MUST implement toString()
+     * @param name Object name
+     * @param offs Optional index to start
+     * @param found Optional pointer to be filled with found object pointer
+     * @return Index of object, -1 if not found
+     */
+    inline int indexOf(const String& name, unsigned int offs = 0, Obj** found = 0) const {
+	    const Obj* d = data(offs);
+	    for (; offs < length(); ++offs, ++d)
+		if (name == d->toString()) {
+		    if (found)
+			*found = (Obj*)d;
+		    return offs;
+		}
+	    return -1;
+	}
+
+    /**
+     * Find an object by name
+     * Obj MUST implement toString()
+     * @param name Object name
+     * @param offs Optional index to start
+     * @return Obj pointer, NULL if not found
+     */
+    inline Obj* find(const String& name, unsigned int offs = 0) const {
+	    Obj* d = 0;
+	    indexOf(name,offs,&d);
+	    return d;
+	}
+
+    /**
+     * Clear data
+     */
+    inline void clear() {
+	    if (!m_data)
+		return;
+	    delete[] m_data;
+	    m_data = 0;
+	    m_length = m_size = 0;
+	}
+
+    /**
+     * Assign new data or just allocate new space
+     * @param len New vector length. No changes will be applied if 0
+     * @param items Pointer to items to set. Pointer may be inside held buffer
+     * @param count Number of items to copy, 0 to use 'len', At most 'len' items will be copied
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool assign(unsigned int len, const Obj* items = 0, unsigned int count = 0) {
+	    if (!len)
+		return true;
+	    unsigned int sz = len + m_overAlloc;
+	    Obj* tmp = new Obj[sz];
+	    if (!tmp) {
+		Debug("YateVector",DebugFail,"Failed to allocate %u item(s) bytes=%u",
+		    sz,(unsigned int)(sz * sizeof(Obj)));
+		return false;
+	    }
+	    if (items)
+		copy(tmp,items,!count ? len : (count <= len ? count : len));
+	    if (m_data)
+		delete[] m_data;
+	    m_data = tmp;
+	    m_length = len;
+	    m_size = sz;
+	    return true;
+	}
+
+    /**
+     * Resize the vector
+     * 'len' between length() and size(): just increase length
+     * 'len' between (size() - overAlloc()) and size(): just decrease length,
+     *   assign empty Obj to remaining items
+     * @param len New vector length. No changes will be applied if len is 0 
+     *  or equal to current vector length
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool resize(unsigned int len) {
+	    if (!len || len == length())
+		return true;
+	    if (len > size())
+		return assign(len,m_data,length());
+	    if (length() > len) {
+		if ((size() - len) > m_overAlloc)
+		    return assign(len,m_data,length());
+		fill(len,length() - len);
+	    }
+	    m_length = len;
+	    return true;
+	}
+
+    /**
+     * Remove last item(s)
+     * @param count Number of items to remove
+     * @return True on success, false on memory allocation failure
+     */
+    inline bool removeLast(unsigned int count = 1) {
+	    if (!count)
+		return true;
+	    if (count < length())
+		return resize(length() - count);
+	    clear();
+	    return true;
+	}
+
+    /**
+     * Fill vector with data
+     * @param offs Start offset
+     * @param count Number of items to fill, negative to fill until vector end
+     * @param value Optional value to fill. Fill with default Obj if not given
+     * @return Number of filled items. 0 on empty count or failure
+     */
+    inline unsigned int fill(unsigned int offs = 0, int count = -1, const Obj* value = 0) {
+	    if (!count)
+		return 0;
+	    unsigned int n = numItems(offs,count < 0 ? length() : (unsigned int)count);
+	    if (!n)
+		return 0;
+	    if (value)
+		fillArray(*value,m_data + offs,n);
+	    else {
+		Obj item;
+		fillArray(item,m_data + offs,n);
+	    }
+	    return n;
+	}
+
+    /**
+     * Fill vector with data
+     * @param value Value to fill
+     * @param offs Start offset
+     * @param count Number of items to fill, negative to fill until vector end
+     * @return Number of filled items. 0 on empty count or failure
+     */
+    inline unsigned int fill(const Obj& value, unsigned int offs = 0, int count = -1)
+	{ return fill(offs,count,&value); }
+
+    /**
+     * Fill vector with data
+     * @param items Items to fill
+     * @param count Number of items to fill
+     * @param offs Optional start offset
+     * @return Number of filled items, 0 on empty items or failure
+     */
+    inline unsigned int fill(const Obj* items, unsigned int count, unsigned int offs = 0) {
+	    if (!(items && count))
+		return 0;
+	    unsigned int n = numItems(offs,count);
+	    if (n)
+		copy(m_data + offs,items,n);
+	    return n;
+	}
+
+    /**
+     * Append an item to vector
+     * @param item Item to append
+     * @return Given item pointer, NULL on failure
+     */
+    inline Obj* append(const Obj& item) {
+	    if (!resize(length() + 1))
+		return 0;
+	    m_data[length() - 1] = item;
+	    return (Obj*)&item;
+	}
+
+    /**
+     * Append an array of items to vector
+     * @param items Pointer to items to append
+     * @param count The number of items to append
+     * @return Number of added items
+     */
+    inline unsigned int append(const Obj* items, unsigned int count) {
+	    if (!(items && count && resize(length() + count)))
+		return 0;
+	    copy(m_data + length() - count,items,count);
+	    return count;
+	}
+
+    /**
+     * Append a list of items
+     * @param list Items to append
+     * @return Number of added items
+     */
+    inline unsigned int append(const ObjList& list) {
+	    unsigned int n = list.count();
+	    if (!(n && resize(length() + n)))
+		return 0;
+	    copy(m_data + length() - n,list);
+	    return n;
+	}
+
+    /**
+     * Append a list of items
+     * @param list Items to append
+     * @return Number of added items, 0 on empty list or failure
+     */
+    inline unsigned int assign(const ObjList& list) {
+	    unsigned int n = list.count();
+	    if (!(n && resize(n)))
+		return 0;
+	    copy(m_data,list);
+	    return n;
+	}
+
+    /**
+     * Append or set an item to vector
+     * @param item Item to append or set
+     * @return Given item pointer, NULL on failure
+     */
+    inline Obj* set(const Obj& item) {
+	    int idx = indexOf(item);
+	    if (idx < 0)
+		return append(item);
+	    m_data[idx] = item;
+	    return (Obj*)&item;
+	}
+
+    /**
+     * Assignment (from other vector) operator
+     * @param other Vector to assign
+     */
+    inline GenericVector& operator=(const GenericVector& other) {
+	    assign(other.length(),other.data());
+	    return *this;
+	}
+
+    /**
+     * Assignment (from Obj vector) operator
+     * @param item Item to assign
+     */
+    inline GenericVector& operator=(const Obj& item) {
+	    assign(1,&item);
+	    return *this;
+	}
+
+    /**
+     * Addition (append) operator
+     * @param item Item to append
+     */
+    inline GenericVector& operator+=(const Obj& item) {
+	    append(item);
+	    return *this;
+	}
+
+    /**
+     * Addition (append) operator
+     * @param other Vector to append
+     */
+    inline GenericVector& operator+=(const GenericVector& other) {
+	    if (&other != this)
+		append(other.data(),other.length());
+	    else {
+		unsigned int n = length();
+		resize(2 * n);
+		fill(data(),n,n);
+	    }
+	    return *this;
+	}
+
+    /**
+     * Retrieve vector name
+     * @return Vector name
+     */
+    virtual const String& toString() const
+	{ return name(); }
+
+protected:
+    // Retrive data available from offset
+    inline Obj* dataAvail(unsigned int offs, unsigned int count) const {
+	    if (offs >= length() || !m_data)
+		return 0;
+	    return (count <= (length() - offs)) ? (m_data + offs) : 0;
+	}
+    // Calculate the number of items available from offset
+    inline unsigned int numItems(unsigned int offs, unsigned int count) const {
+	    if (offs >= length())
+		return 0;
+	    offs = length() - offs;
+	    return (count <= offs) ? count : offs;
+	}
+    static inline void fillArray(const Obj& value, Obj* dest, unsigned int n)
+	{ while (n) { *dest++ = value; --n; } }
+    static inline void copy(Obj* dest, const ObjList& src) {
+	    for (const ObjList* o = src.skipNull(); o; o = o->skipNext())
+		*dest++ = *static_cast<Obj*>(o->get());
+	}
+    static inline void copy(Obj* dest, const Obj* src, unsigned int n)
+	{ while (n) { *dest++ = *src++; --n; } }
+
+    Obj* m_data;
+    unsigned int m_length;
+    unsigned int m_size;
+    unsigned int m_overAlloc;
+
+private:
+    String m_name;
+};
+
+/**
  * Utility function to retrieve a C string from a possibly NULL String pointer
  * @param str Pointer to a String that may be NULL
  * @return String data pointer or NULL
