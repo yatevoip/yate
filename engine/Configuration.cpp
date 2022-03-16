@@ -248,6 +248,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 	Debug(DebugWarn,"Refusing to open config file '%s' at include depth %u",file,depth);
 	return false;
     }
+    int warnSilent = warn ? -1 : 0;
     FILE *f = ::fopen(file,"r");
     if (f) {
 	bool ok = true;
@@ -301,7 +302,9 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 		    if (!enabled)
 			continue;
 		    bool noerr = false;
-		    if (s.startSkip("$require") || (noerr = s.startSkip("$include"))) {
+		    bool silent = false;
+		    if (s.startSkip("$require") || (noerr = s.startSkip("$include"))
+			|| (silent = s.startSkip("$includesilent"))) {
 			Engine::runParams().replaceParams(s);
 			String path;
 			if (!s.startsWith(Engine::pathSeparator())) {
@@ -326,6 +329,12 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			}
 			path << s;
 			ObjList files;
+			if (silent && warnSilent < 0) {
+			    bool off = Engine::config().getBoolValue(YSTRING("general"),
+				YSTRING("configuration_disable_include_silent"));
+			    warnSilent = off ? (warn ? 1 : 0) : 0;
+			}
+			bool doWarn = silent ? (warnSilent > 0) : warn;
 			if (File::listDirectory(path,0,&files)) {
 			    path << Engine::pathSeparator();
 			    DDebug(DebugAll,"Configuration loading up to %u files from '%s'",
@@ -334,7 +343,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			    while (String* it = static_cast<String*>(files.remove(false))) {
 				if (!(it->startsWith(".") || it->endsWith("~")
 					|| it->endsWith(".bak") || it->endsWith(".tmp")))
-				    ok = (loadFile(path + *it,sect,depth+1,warn) || noerr) && ok;
+				    ok = (loadFile(path + *it,sect,depth+1,doWarn) || noerr) && ok;
 #ifdef DEBUG
 				else
 				    Debug(DebugAll,"Configuration skipping over file '%s'",it->c_str());
@@ -343,7 +352,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			    }
 			}
 			else
-			    ok = (loadFile(path,sect,depth+1,warn) || noerr) && ok;
+			    ok = (loadFile(path,sect,depth+1,doWarn) || noerr) && ok;
 			continue;
 		    }
 		    Engine::runParams().replaceParams(s);
