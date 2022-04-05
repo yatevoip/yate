@@ -148,10 +148,14 @@
 [extra]
 ; This section allows installing handlers for any message name.
 ; Each line must be of the form:
-;  message.name=priority[,[paramname][,context]]
+;  message.name=priority[,[paramname][,context][,filter_param][,filter_match]]]
 ; For each handler create a corresponding [context] or [message.name] section
 ;  in which implement handling for that specific message. If paramname is not
 ;  set you will need to match parameters explicitely or set a new match string.
+;  For filters, filter_param is the name of the parameter you want to match.
+;  filter_match is the value that filter_param parameter has to match. It can be
+;  an exact value to match or a regular expression. For regular expressions,
+;  filter_match must start with the character '^'.
 ; Examples:
 ;  engine.command=90
 ;  call.execute=120,callto
