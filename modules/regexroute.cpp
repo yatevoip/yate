@@ -57,7 +57,7 @@ class GenericHandler : public MessageHandler
 {
 public:
     GenericHandler(const char* name, int prio, const char* context, const char* match,
-	const char* trackName, bool addToExtra = true);
+	const char* trackName, const char* filterKey, const char* filterVal, bool addToExtra = true);
     ~GenericHandler();
     virtual bool received(Message &msg);
     inline bool sameHash(unsigned int hash) const
@@ -67,8 +67,9 @@ public:
     inline void updateSerial()
 	{ m_serial = s_serial.count(); }
     static inline unsigned int getHash(const char* name, int prio, const char* context,
-	const char* match, const char* trackName)
-	{  return String::hash(String(name) << prio << context << match << trackName); }
+	const char* match, const char* trackName,const char* filterKey, const char* filterVal)
+	{  return String::hash(String(name) << prio << context << match
+		<< trackName << filterKey << filterVal); }
 
 private:
     String m_context;
@@ -82,7 +83,7 @@ class RouteHandler : public GenericHandler
 {
 public:
     RouteHandler(int prio, const char* trackName)
-	: GenericHandler("call.route",prio,0,0,trackName,false)
+	: GenericHandler("call.route",prio,0,0,trackName,0,0,false)
 	{ }
     virtual bool received(Message &msg);
 };
@@ -91,7 +92,7 @@ class PrerouteHandler : public GenericHandler
 {
 public:
     PrerouteHandler(int prio, const char* trackName)
-	: GenericHandler("call.preroute",prio,0,0,trackName,false)
+	: GenericHandler("call.preroute",prio,0,0,trackName,0,0,false)
 	{ }
     virtual bool received(Message &msg);
 };
@@ -584,7 +585,7 @@ do { \
     if (!handler) \
 	Engine::install(handler = new classType(priority,trackName)); \
     else { \
-	unsigned int hash = GenericHandler::getHash(name,priority,0,0,trackName); \
+	unsigned int hash = GenericHandler::getHash(name,priority,0,0,trackName,0,0); \
 	if (!handler->sameHash(hash)) { \
 	    classType* tmp = handler; \
 	    Engine::install(handler = new classType(priority,trackName)); \
@@ -651,7 +652,7 @@ void RegexConfig::initialize(bool first)
 	for (unsigned int i=0; i<len; i++) {
 	    NamedString* n = l->getParam(i);
 	    if (n) {
-		// message=priority[,[parameter][,context]]
+		// message=priority[,[parameter][,context],filter_param,filter_match]
 		ObjList* o = n->split(',');
 		const String* s = static_cast<const String*>(o->at(0));
 		int prio = s ? s->toInteger(100) : 100;
@@ -659,11 +660,13 @@ void RegexConfig::initialize(bool first)
 		const char* context = TelEngine::c_str(static_cast<const String*>(o->at(2)));
 		if (TelEngine::null(context))
 		    context = n->name().c_str();
+		const char* key = TelEngine::c_str(static_cast<const String*>(o->at(3)));
+		const char* val = TelEngine::c_str(static_cast<const String*>(o->at(4)));
 		// check if we have the same handler already installed
-		GenericHandler* old = findHandler(GenericHandler::getHash(n->name(),prio,context,match,trackName));
+		GenericHandler* old = findHandler(GenericHandler::getHash(n->name(),prio,context,match,trackName,key,val));
 		if (m_cfg.getSection(context)) {
 		    if (!old)
-			Engine::install(new GenericHandler(n->name(),prio,context,match,trackName));
+			Engine::install(new GenericHandler(n->name(),prio,context,match,trackName,key,val));
 		    else
 			old->updateSerial();
 		}
@@ -1144,16 +1147,22 @@ bool PrerouteHandler::received(Message &msg)
 
 
 GenericHandler::GenericHandler(const char* name, int prio, const char* context, const char* match,
-    const char* trackName, bool addToExtra)
+    const char* trackName, const char* filterKey, const char* filterVal, bool addToExtra)
     : MessageHandler(name,prio,trackName),
     m_context(context), m_match(match), m_serial(0), m_inExtra(addToExtra)
 {
     DDebug(&__plugin,DebugAll,
-	"Creating generic handler for '%s' prio %d to [%s] match '%s%s%s', track name '%s' [%p]",
+	"Creating generic handler for '%s' prio %d to [%s] match '%s%s%s', track name '%s', filter '%s=%s' [%p]",
 	toString().c_str(),prio,TelEngine::c_safe(context),
 	(match ? "${" : ""),(match ? match : toString().c_str()),(match ? "}" : ""),
-	TelEngine::c_safe(trackName),this);
-    m_hash = getHash(name,prio,context,match,trackName);
+	TelEngine::c_safe(trackName),TelEngine::c_safe(filterKey),TelEngine::c_safe(filterVal),this);
+    if (filterKey && filterVal) {
+	if (filterVal[0] == '^')
+	    setFilter(new NamedPointer(filterKey,new Regexp(filterVal)));
+	else
+	    setFilter(filterKey,filterVal);
+    }
+    m_hash = getHash(name,prio,context,match,trackName,filterKey,filterVal);
     if (m_inExtra) {
 	Lock l(s_mutex);
 	s_extra.append(this);
