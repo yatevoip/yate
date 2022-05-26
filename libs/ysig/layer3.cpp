@@ -206,7 +206,9 @@ bool SS7Layer3::buildRoutes(const NamedList& params)
 		if (obj)
 		    shift = obj->get()->toString().toInteger(0);
 	    }
-	    if (!(obj = obj->skipNext()) || local)
+	    if (obj)
+		obj = obj->skipNext();
+	    if (!obj || local)
 		break;
 	    maxLength = obj->get()->toString().toInteger(maxLength);
 	    if (maxLength < MAX_TDM_MSU_SIZE) {
