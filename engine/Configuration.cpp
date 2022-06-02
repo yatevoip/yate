@@ -304,7 +304,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 		    bool noerr = false;
 		    bool silent = false;
 		    if (s.startSkip("$require") || (noerr = s.startSkip("$include"))
-			|| (silent = s.startSkip("$includesilent"))) {
+			|| (silent = noerr = s.startSkip("$includesilent"))) {
 			Engine::runParams().replaceParams(s);
 			String path;
 			if (!s.startsWith(Engine::pathSeparator())) {
