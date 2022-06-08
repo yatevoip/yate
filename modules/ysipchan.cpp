@@ -1035,10 +1035,15 @@ public:
     inline void referTerminated()
 	{ m_referring = false; }
     inline bool isDialog(const String& callid, const String& fromTag,
-	const String& toTag) const
-	{ return callid == m_dialog &&
-	    m_dialog.fromTag(isOutgoing()) == fromTag &&
-	    m_dialog.toTag(isOutgoing()) == toTag; }
+	const String& toTag, bool replaces = false) const {
+	    if (callid != m_dialog)
+		return false;
+	    if (!replaces)
+		return m_dialog.fromTag(isOutgoing()) == fromTag &&
+		    m_dialog.toTag(isOutgoing()) == toTag;
+	    // RFC 3891 (Replaces header) sect. 3: fromTag is remote tag
+	    return m_dialog.remoteTag == fromTag && m_dialog.localTag == toTag;
+	}
     inline bool stopOCall() const
 	{ return m_stopOCall; }
     // Build and add a callid parameter to a list
@@ -1194,7 +1199,8 @@ public:
     YateSIPConnection* findCall(const String& callid, bool incRef = false);
     YateSIPConnection* findDialog(const SIPDialog& dialog, bool incRef = false);
     YateSIPConnection* findDialog(const String& dialog, const String& fromTag,
-	const String& toTag, bool incRef = false, RefPointer<YateSIPConnection>* conn = 0);
+	const String& toTag, bool incRef = false, RefPointer<YateSIPConnection>* conn = 0,
+	bool replaces = false);
     YateSIPLine* findLine(const String& line) const;
     YateSIPLine* findLine(const String& addr, int port, const String& user = String::empty(),
 	SIPParty* party = 0);
@@ -6102,7 +6108,7 @@ void YateSIPRefer::run()
 	    from = m_msg->getParam(YSTRING("transfer_fromtag"));
 	    to = m_msg->getParam(YSTRING("transfer_totag"));
 	    if (!(null(from) && null(to)))
-		plugin.findDialog(*attended,*from,*to,false,&attendedConn);
+		plugin.findDialog(*attended,*from,*to,false,&attendedConn,true);
 	}
 	if (m_validate) {
 	    if (attended) {
@@ -7913,7 +7919,7 @@ void YateSIPConnection::doRefer(SIPTransaction* t)
 	    return;
 	}
 	// Avoid replacing the same connection
-	if (isDialog(*replaces,*fromTag,*toTag)) {
+	if (isDialog(*replaces,*fromTag,*toTag,true)) {
 	    DDebug(this,DebugAll,
 		"doRefer(%p). Attended transfer request for the same dialog [%p]",
 		t,this);
@@ -9358,14 +9364,14 @@ YateSIPConnection* SIPDriver::findDialog(const SIPDialog& dialog, bool incRef)
 }
 
 YateSIPConnection* SIPDriver::findDialog(const String& dialog, const String& fromTag,
-    const String& toTag, bool incRef, RefPointer<YateSIPConnection>* conn)
+    const String& toTag, bool incRef, RefPointer<YateSIPConnection>* conn, bool replaces)
 {
-    XDebug(this,DebugAll,"SIPDriver finding dialog '%s' fromTag='%s' toTag='%s'",
-	dialog.c_str(),fromTag.c_str(),toTag.c_str());
+    XDebug(this,DebugAll,"SIPDriver finding dialog '%s' fromTag='%s' toTag='%s' replaces=%u",
+	dialog.c_str(),fromTag.c_str(),toTag.c_str(),replaces);
     Lock mylock(this);
     for (ObjList* o = channels().skipNull(); o; o = o->skipNext()) {
 	YateSIPConnection* c = static_cast<YateSIPConnection*>(o->get());
-	if (!c->isDialog(dialog,fromTag,toTag))
+	if (!c->isDialog(dialog,fromTag,toTag,replaces))
 	    continue;
 	if (!conn)
 	    return (incRef ? c->ref() : c->alive()) ? c : 0;
