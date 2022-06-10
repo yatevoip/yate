@@ -703,7 +703,7 @@ bool YRTPWrapper::startRTP(const char* raddr, unsigned int rport, Message& msg)
 	return false;
     }
 
-    if ((payload < 0) || (payload >= 127)) {
+    if ((payload < 0) || (payload > 127)) {
 	TraceDebug(m_traceId,&splugin,DebugWarn,"Wrapper received invalid payload %d [%p]",payload,this);
 	return false;
     }
