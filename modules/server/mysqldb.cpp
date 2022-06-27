@@ -227,6 +227,8 @@ private:
     bool m_init;
 };
 
+static MyModule module;
+
 /**
   * Class DbQuery
   * A MySQL query
@@ -238,28 +240,33 @@ public:
     inline DbQuery(const String& query, Message* msg)
 	: String(query),
 	  Semaphore(1,"MySQL::query"),
-	  m_msg(msg), m_finished(false)
-	{ DDebug( DebugAll, "DbQuery object [%p] created for query '%s'", this, c_str()); }
+	  m_msg(msg), m_finished(false), m_cancelled(false)
+	{ XDebug(&module,DebugAll,"DbQuery '%s' msg=(%p) [%p]",safe(),m_msg,this); }
 
     inline ~DbQuery()
-	{ m_msg = 0;
-	  DDebug( DebugAll, "DbQuery object [%p] with query '%s' was destroyed", this, c_str()); }
+	{ XDebug(&module,DebugAll,"~DbQuery [%p]",this); }
 
-    inline bool finished()
+    inline bool finished() const
 	{ return m_finished; }
 
-    inline void setFinished()
-	{ m_finished = true;
-	  if (!m_msg)
-	      destruct();
+    inline void setFinished() {
+	    m_finished = true;
+	    if (!m_msg)
+		destruct();
 	}
+
+    inline bool cancelled() const
+	{ return m_cancelled; }
+
+    inline void setCancelled()
+	{ m_cancelled = true; }
 
 private:
     Message* m_msg;
     bool m_finished;
+    bool m_cancelled;
 };
 
-static MyModule module;
 static Mutex s_libMutex(false,"MySQL::lib");
 static int s_libCounter = 0;
 static unsigned int s_queryRetry = 1;
@@ -320,7 +327,7 @@ void MyConn::runQueries()
 	    c_str(),query->c_str());
 
 	int res = queryDbInternal(query);
-	if ((res < 0) && query->m_msg)
+	if ((res < 0) && query->m_msg && !query->cancelled())
 	    query->m_msg->setParam("error","failure");
 
 	query->unlock();
@@ -350,16 +357,18 @@ int MyConn::queryDbInternal(DbQuery* query)
     do {
 	if (!mysql_real_query(m_conn,query->safe(),query->length()))
 	    break;
-	int err = mysql_errno(m_conn);
+	if (!query->cancelled()) {
+	    int err = mysql_errno(m_conn);
 #ifdef ER_LOCK_DEADLOCK
-	if (err == ER_LOCK_DEADLOCK && retry-- > 0) {
-	    Debug(&module,DebugInfo,"Query '%s' for '%s' failed code=%d. Retrying (remaining=%u)",
-		query->c_str(),c_str(),err,retry);
-	    continue;
-	}
+	    if (err == ER_LOCK_DEADLOCK && retry-- > 0) {
+		Debug(&module,DebugInfo,"Query '%s' for '%s' failed code=%d. Retrying (remaining=%u)",
+		    query->c_str(),c_str(),err,retry);
+		continue;
+	    }
 #endif
-	Debug(&module,DebugWarn,"Query '%s' for '%s' failed: code=%d %s",
-	    query->c_str(),c_str(),err,mysql_error(m_conn));
+	    Debug(&module,DebugWarn,"Query '%s' for '%s' failed: code=%d %s",
+		query->c_str(),c_str(),err,mysql_error(m_conn));
+	}
 	u_int64_t duration = Time::now() - start;
 	m_owner->incQueryTime(duration);
 	m_owner->incErrorred();
@@ -377,10 +386,12 @@ int MyConn::queryDbInternal(DbQuery* query)
 	MYSQL_RES* res = mysql_store_result(m_conn);
 	warns += mysql_warning_count(m_conn);
 	affected += (unsigned int)mysql_affected_rows(m_conn);
-	if (res) {
+	if (res && !query->cancelled()) {
 	    unsigned int cols = mysql_num_fields(res);
 	    unsigned int rows = (unsigned int)mysql_num_rows(res);
-	    Debug(&module,DebugAll,"Got result set %p rows=%u cols=%u",res,rows,cols);
+	    XDebug(&module,DebugAll,
+		"Connection '%s' query (%p) got result set %p rows=%u cols=%u [%p]",
+		safe(),query,res,rows,cols,this);
 	    total += rows;
 	    if (query->m_msg) {
 		MYSQL_FIELD* fields = mysql_fetch_fields(res);
@@ -395,7 +406,9 @@ int MyConn::queryDbInternal(DbQuery* query)
 		    if (columns[c])
 			columns[c]->set(new String(fields[c].name));
 		    else
-			Debug(&module,DebugCrit,"No array for column %u",c);
+			Debug(&module,DebugCrit,
+			    "Connection '%s' query '%s': no array for column %u [%p]",
+			    safe(),query->safe(),c,this);
 		}
 		// and now data row by row
 		for (unsigned int r = 1; r <= rows; r++) {
@@ -432,8 +445,9 @@ int MyConn::queryDbInternal(DbQuery* query)
 		query->m_msg->userData(a);
 		a->deref();
 	    }
-	    mysql_free_result(res);
 	}
+	if (res)
+	    mysql_free_result(res);
     } while (!mysql_next_result(m_conn));
 
     u_int64_t finish = Time::now();
@@ -735,9 +749,12 @@ bool MyHandler::received(Message& msg)
 	    db->appendQuery(q);
 
 	    while (!q->finished()) {
-		Thread::check();
+		if (!q->cancelled() && Thread::check(false))
+		    q->setCancelled();
 		q->lock(Thread::idleUsec());
 	    }
+	    if (q->cancelled())
+		msg.setParam(YSTRING("error"),"cancelled");
 	    TelEngine::destruct(q);
 	}
 	else
