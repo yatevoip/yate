@@ -3908,7 +3908,7 @@ void* JsConfigFile::getObject(const String& name) const
     return obj;
 }
 
-static void handleCfgSetValues(bool set, Configuration& cfg, const String& sName,
+static inline void handleCfgSetValues(bool set, Configuration& cfg, const String& sName,
     GenObject* params, const String* prefix)
 {
     const NamedList* pList = sName ? getReplaceParams(params) : 0;
@@ -3933,6 +3933,20 @@ static void handleCfgSetValues(bool set, Configuration& cfg, const String& sName
 	else
 	    sect->addParam(ns->name(),*ns);
     }
+}
+
+static inline void handleCfgClearKey(Configuration& cfg, const String& sName, const String& kName,
+    const String* kVal = 0)
+{
+    NamedList* sect = cfg.getSection(sName);
+    if (!sect)
+	return;
+    if (kVal) {
+	JsRegExp* r = YOBJECT(JsRegExp,kVal);
+	if (r)
+	    kVal = static_cast<const String*>(&r->regexp());
+    }
+    sect->clearParam(kName,0,kVal);
 }
 
 bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
@@ -4101,9 +4115,13 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
 	m_config.clearSection(op ? (const char*)*op : 0);
     }
     else if (oper.name() == YSTRING("clearKey")) {
-	if (extractArgs(stack,oper,context,args) != 2)
+	// clearKey(sect,key[,matchValue])
+	ExpOperation* sect = 0;
+	ExpOperation* key = 0;
+	ExpOperation* matchValue = 0;
+	if (!extractStackArgs(2,this,stack,oper,context,args,&sect,&key,&matchValue))
 	    return false;
-	m_config.clearKey(*static_cast<ExpOperation*>(args[0]),*static_cast<ExpOperation*>(args[1]));
+	handleCfgClearKey(m_config,*sect,*key,matchValue);
     }
     else if (oper.name() == YSTRING("keys")) {
 	if (extractArgs(stack,oper,context,args) != 1)
@@ -4271,11 +4289,12 @@ bool JsConfigSection::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 	handleCfgSetValues(oper.name() == YSTRING("setValues"),m_owner->config(),toString(),params,prefix);
     }
     else if (oper.name() == YSTRING("clearKey")) {
-	if (extractArgs(stack,oper,context,args) != 1)
+	// clearKey(key[,matchValue])
+	ExpOperation* key = 0;
+	ExpOperation* matchValue = 0;
+	if (!extractStackArgs(1,this,stack,oper,context,args,&key,&matchValue))
 	    return false;
-	NamedList* sect = m_owner->config().getSection(toString());
-	if (sect)
-	    sect->clearParam(*static_cast<ExpOperation*>(args[0]));
+	handleCfgClearKey(m_owner->config(),toString(),*key,matchValue);
     }
     else if (oper.name() == YSTRING("keys")) {
 	if (extractArgs(stack,oper,context,args) != 0)
