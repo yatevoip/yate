@@ -2826,7 +2826,7 @@ bool JsCode::evalList(ObjList& stack, GenObject* context) const
 {
     XDebug(this,DebugInfo,"JsCode::evalList(%p,%p)",&stack,context);
     JsRunner* runner = static_cast<JsRunner*>(context);
-    const ObjList* (& opcode) = runner->m_opcode;
+    const ObjList*& opcode = runner->m_opcode;
     while (opcode) {
 	const ExpOperation* o = static_cast<const ExpOperation*>(opcode->get());
 	opcode = opcode->skipNext();
