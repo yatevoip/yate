@@ -23,8 +23,17 @@
 
 using namespace TelEngine;
 
+// Debug JsObject::assignProps() behaviour
+//#define DEBUG_JsObject_assignProps
+#ifdef XDEBUG
+#ifndef DEBUG_JsObject_assignProps
+#define DEBUG_JsObject_assignProps
+#endif
+#endif
+
 namespace { // anonymous
 
+#define MKASSIGN(typ) construct->params().addParam(new ExpOperation((int64_t)JsObject:: Assign ## typ,"Assign" # typ))
 // Object object
 class JsObjectObj : public JsObject
 {
@@ -38,10 +47,22 @@ public:
 	{
 	    construct->params().addParam(new ExpFunction("keys"));
 	    construct->params().addParam(new ExpFunction("global"));
+	    construct->params().addParam(new ExpFunction("assign"));
+	    construct->params().addParam(new ExpFunction("assignProps"));
+	    MKASSIGN(SkipPrefix);
+	    MKASSIGN(SkipNull);
+	    MKASSIGN(SkipUndefined);
+	    MKASSIGN(SkipEmpty);
+	    MKASSIGN(SkipObject);
+	    MKASSIGN(SkipArrayProps);
+	    MKASSIGN(SkipArrayIndex);
+	    MKASSIGN(Filled);
+	    MKASSIGN(FilledSkipObject);
 	}
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 };
+#undef MKASSIGN
 
 // Date object
 class JsDate : public JsObject
@@ -646,7 +667,7 @@ ExpOperation* JsObject::find(ExpOperation* oper, const JPath& path)
 // Utility: retrieve a JSON candidate from given list item
 // Advance the list
 // Return pointer to candidate, NULL if not found
-static inline GenObject* nextJSONCandidate(ObjList*& crt, bool isNs = true)
+static inline GenObject* nextJSONCandidate(ObjList*& crt, bool isNs = true, bool undef = false)
 {
     if (!crt)
 	return 0;
@@ -661,6 +682,8 @@ static inline GenObject* nextJSONCandidate(ObjList*& crt, bool isNs = true)
 	const String& n = isNs ? static_cast<NamedString*>(gen)->name() : gen->toString();
 	if (!n || n == JsObject::protoName() || YOBJECT(JsFunction,gen) || YOBJECT(ExpFunction,gen))
 	    continue;
+	if (undef)
+	    return gen;
 	const ExpOperation* op = YOBJECT(ExpOperation,gen);
 	if (!(op && JsParser::isUndefined(*op)))
 	    return gen;
@@ -671,7 +694,8 @@ static inline GenObject* nextJSONCandidate(ObjList*& crt, bool isNs = true)
 // Utility: retrieve a JSON candidate from given hash list
 // Advance the list
 // Return pointer to candidate, NULL if not found
-static inline GenObject* nextJSONCandidate(const HashList& hash, unsigned int& idx, ObjList*& crt)
+static inline GenObject* nextJSONCandidate(const HashList& hash, unsigned int& idx, ObjList*& crt,
+    bool undef = false)
 {
     GenObject* gen = nextJSONCandidate(crt,false);
     if (gen)
@@ -681,11 +705,190 @@ static inline GenObject* nextJSONCandidate(const HashList& hash, unsigned int& i
 	crt = hash.getList(idx);
 	if (!crt)
 	    continue;
-	gen = nextJSONCandidate(crt,false);
+	gen = nextJSONCandidate(crt,false,undef);
 	if (gen)
 	    return gen;
     }
     return 0;
+}
+
+int JsObject::assignProps(JsObject* src, unsigned int flags, ObjList* props,
+    const String& prefix, const String& addPrefix, GenObject* context)
+{
+    if (!src)
+	return 0;
+
+    if (props) {
+	props = props->skipNull();
+	if (!props)
+	    return 0;
+    }
+
+    bool skipPref = prefix.length() && (flags & AssignSkipPrefix);
+    bool skipNull = 0 != (flags & AssignSkipNull);
+    bool skipUndef = 0 != (flags & AssignSkipUndefined);
+    bool skipObject = 0 != (flags & AssignSkipObject);
+    bool skipEmptyStr = 0 != (flags & AssignSkipEmpty);
+    JsArray* jsaSrc = YOBJECT(JsArray,src);
+    bool jsaCpIdxOnly = true;
+    if (jsaSrc) {
+	if (0 == (flags & (AssignSkipArrayProps | AssignSkipArrayIndex)))
+	    jsaSrc = 0;
+	else
+	    jsaCpIdxOnly = 0 != (flags & AssignSkipArrayProps);
+    }
+
+#ifdef DEBUG_JsObject_assignProps
+    String extra;
+    if (skipPref)
+	extra.append("prefix",",");
+    if (skipNull)
+	extra.append("null",",");
+    if (skipUndef)
+	extra.append("undefined",",");
+    if (skipObject)
+	extra.append("object",",");
+    if (skipEmptyStr)
+	extra.append("empty-str",",");
+    if (extra)
+	extra = " skip=" + extra;
+    if (jsaSrc)
+	extra << " srcArray=" << (jsaCpIdxOnly ? "indexes" : "properties");
+    Debug(DebugCall,"JsObject::assign '%s' src=(%p) '%s' props=(%p) prefix='%s' addPrefix='%s'"
+	" flags=0x%x%s [%p]",
+	toString().safe(),src,src->toString().safe(),props,prefix.safe(),addPrefix.safe(),
+	flags,extra.safe(),this);
+#endif
+
+    int n = 0;
+    bool native = false;
+    bool checkFrozen = true;
+    while (true) {
+	const HashList* hash = 0;
+	const NamedList* params = 0;
+	if (!native) {
+	    hash = src->getHashListParams();
+	    if (!hash)
+		params = &(src->params());
+	}
+	else {
+	    params = src->nativeParams();
+	    if (!params)
+		break;
+	}
+	unsigned int idx = 0;
+	ObjList* crt = hash ? hash->getList(0) : params->paramList()->skipNull();
+#ifdef DEBUG_JsObject_assignProps
+	Debug(DebugInfo,"JsObject::assign src=(%p) processing %s (%p) crt=(%p) [%p]",
+	    src,(hash ? "hashlist" : (native ? "native params" : "params")),
+	    (hash ? (void*)hash : (void*)params),crt,this);
+#endif
+	while (true) {
+#ifdef DEBUG_JsObject_assignProps
+#define JSOBJECT_ASSIGN_SKIP(reason) { \
+    Debug(DebugAll,"JsObject::assign src=(%p) skipping (%p) '%s': %s [%p]", \
+	src,gen,name.safe(),reason,this); \
+    continue; \
+}
+#else
+#define JSOBJECT_ASSIGN_SKIP(reason) { continue; }
+#endif
+	    GenObject* gen = hash ? nextJSONCandidate(*hash,idx,crt,true) :
+		nextJSONCandidate(crt,true,true);
+	    if (!gen)
+		break;
+	    const String& name = gen->toString();
+	    ExpOperation* op = YOBJECT(ExpOperation,gen);
+	    ExpWrapper* wr = 0;
+	    NamedString* ns = 0;
+	    if (op) {
+		if (skipNull && JsParser::isNull(*op))
+		    JSOBJECT_ASSIGN_SKIP("null value")
+		if (skipUndef && JsParser::isUndefined(*op))
+		    JSOBJECT_ASSIGN_SKIP("undefined value")
+		wr = YOBJECT(ExpWrapper,gen);
+		if (wr) {
+		    if (skipObject && JsParser::objPresent(*op))
+			JSOBJECT_ASSIGN_SKIP("object value")
+		}
+		else if (skipEmptyStr && !*op)
+		    JSOBJECT_ASSIGN_SKIP("empty value")
+	    }
+	    else {
+		ns = YOBJECT(NamedString,gen);
+		if (!ns)
+		    JSOBJECT_ASSIGN_SKIP("not ExpOperation/NamedString")
+		if (skipEmptyStr && !*ns)
+		    JSOBJECT_ASSIGN_SKIP("empty value")
+	    }
+
+	    // Filter name
+	    bool doSkipPref = false;
+	    if (props) {
+		if (!props->find(name))
+		    JSOBJECT_ASSIGN_SKIP("not found in list")
+		doSkipPref = skipPref && name.startsWith(prefix);
+	    }
+	    else if (prefix) {
+		if (!name.startsWith(prefix))
+		    JSOBJECT_ASSIGN_SKIP("not starting with prefix")
+		doSkipPref = skipPref;
+	    }
+
+	    // Array: filter props/indexes
+	    if (jsaSrc) {
+		bool isIndex = (name.toInteger(-1) >= 0);
+		if (isIndex != jsaCpIdxOnly)
+		    JSOBJECT_ASSIGN_SKIP((isIndex ? "is index" : "is property"))
+	    }
+
+	    // Add the property
+	    if (checkFrozen) {
+		if (frozen()) {
+		    Debug(DebugWarn,"Object '%s' is frozen in assign() [%p]",toString().safe(),this);
+		    return -1;
+		}
+		checkFrozen = false;
+	    }
+	    
+	    // Handle name prefix remove / add
+	    String tmp;
+	    const String* newName = &name;
+	    if (doSkipPref || addPrefix) {
+		if (addPrefix)
+		    tmp = addPrefix;
+		if (doSkipPref)
+		    tmp << (name.c_str() + prefix.length());
+		else
+		    tmp << name;
+		newName = &tmp;
+	    }
+
+#ifdef DEBUG_JsObject_assignProps
+	    Debug(DebugAll,"JsObject::assign src=(%p) set param (%p) '%s' old=%s type='%s' [%p]",
+		src,gen,newName->safe(),((newName != &name) ? name.safe() : "same"),
+		(wr ? "ExpWrapper" : (op ? "ExpOperation" : "NamedString")),this);
+#endif
+	    ExpOperation* setOp = op;
+	    if (!op)
+		setOp = new ExpOperation(*ns,*newName);
+	    else if (newName != &name)
+		setOp = op->clone(*newName);
+	    ObjList stack;
+	    if (runAssign(stack,*setOp,context))
+		n++;
+	    if (setOp != op)
+		TelEngine::destruct(setOp);
+	}
+	if (native)
+	    break;
+	native = true;
+#undef JSOBJECT_ASSIGN_SKIP
+    }
+#ifdef DEBUG_JsObject_assignProps
+    Debug(DebugCall,"JsObject::assignProps src=(%p) copied %d [%p]",src,n,this);
+#endif
+    return n;
 }
 
 // Utility used in internalToJSON to handle recursivity
@@ -1223,6 +1426,76 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
+    else if (oper.name() == YSTRING("assign")) {
+	// assign(dest[,src[,src1 ...])
+	ObjList args;
+	int n = extractArgs(this,stack,oper,context,args);
+	if (n < 1)
+	    return false;
+	ExpOperation* destOp = YOBJECT(ExpWrapper,args.get());
+	JsObject* dest = JsParser::objPresent(destOp);
+	if (dest) {
+	    for (ObjList* o = args.next(); o; o = o->next()) {
+		JsObject* src = JsParser::objPresent(YOBJECT(ExpOperation,o->get()));
+		if (src && (0 > dest->assignProps(src)))
+		    return false;
+	    }
+	}
+	ExpEvaluator::pushOne(stack,destOp->clone());
+    }
+    else if (oper.name() == YSTRING("assignProps")) {
+	// assignProps(dest,src[,flags,props,prefix,addPrefix])
+	ObjList args;
+	int n = extractArgs(this,stack,oper,context,args);
+	if (n < 2)
+	    return false;
+	ExpOperation* destOp = YOBJECT(ExpOperation,args.get());
+	JsObject* dest = JsParser::objPresent(destOp);
+	ObjList* o = args.next();
+	JsObject* src = JsParser::objPresent(YOBJECT(ExpOperation,o->get()));
+	n = 0;
+	if (dest && src) {
+	    unsigned int flags = 0;
+	    ObjList* props = 0;
+	    const String* prefix = 0;
+	    const String* addPrefix = 0;
+	    o = o->next();
+	    for (int i = 0; o; o = o->next(), ++i) {
+		ExpOperation* op = YOBJECT(ExpOperation,o->get());
+		if (!op || JsParser::isNull(*op) || JsParser::isUndefined(*op))
+		    continue;
+		switch (i) {
+		    case 0: // flags
+			flags = op->isInteger() ? (unsigned int)op->toInteger() : 0;
+			continue;
+		    case 1: // props
+			{
+			    JsArray* ar = YOBJECT(JsArray,op);
+			    if (ar) {
+				props = new ObjList;
+				ar->toStringList(*props);
+			    }
+			    else
+				props = op->split(',');
+			}
+			continue;
+		    case 2: // prefix
+			prefix = op;
+			continue;
+		    case 3: // addPrefix
+			addPrefix = op;
+			continue;
+		}
+		break;
+	    }
+	    n = dest->assignProps(src,flags,props,prefix ? *prefix : String::empty(),
+		addPrefix ? *addPrefix : String::empty(),context);
+	    TelEngine::destruct(props);
+	    if (n < 0)
+		return false;
+	}
+	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)n));
+    }
     else
 	return JsObject::runNative(stack,oper,context);
     return true;
@@ -1626,6 +1899,19 @@ bool JsArray::runNative(ObjList& stack, const ExpOperation& oper, GenObject* con
 	return JsObject::runNative(stack,oper,context);
     return true;
 }
+
+unsigned int JsArray::toStringList(ObjList& list, bool emptyOk)
+{
+    unsigned int n = 0;
+    for (int32_t i = 0; i < length(); ++i) {
+	NamedString* ns = params().getParam(String(i));
+	if (!(ns && (emptyOk || *ns)))
+	    continue;
+	list.append(new String(*ns));
+	n++;
+    }
+    return n;
+};
 
 bool JsArray::runNativeSlice(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
