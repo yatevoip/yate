@@ -103,7 +103,7 @@ NamedList& NamedList::setParam(const String& name, const char* value)
     return *this;
 }
 
-NamedList& NamedList::clearParam(const String& name, char childSep)
+NamedList& NamedList::clearParam(const String& name, char childSep, const String* value)
 {
     XDebug(DebugInfo,"NamedList::clearParam(\"%s\",'%.1s')",
 	name.c_str(),&childSep);
@@ -113,7 +113,8 @@ NamedList& NamedList::clearParam(const String& name, char childSep)
     ObjList *p = &m_params;
     while (p) {
         NamedString *s = static_cast<NamedString *>(p->get());
-        if (s && ((s->name() == name) || s->name().startsWith(tmp)))
+        if (s && ((s->name() == name) || s->name().startsWith(tmp))
+	    && (!value || value->matches(*s)))
             p->remove();
 	else
 	    p = p->next();

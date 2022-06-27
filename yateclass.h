@@ -687,7 +687,6 @@ do { if (!!(pGenObj) && (pGenObj)->traceId()) TraceDebug((pGenObj)->traceId(),##
  * Outputs a debug string with trace ID and emits an alarm if a callback is installed
  * @param traceId The trace ID associated with this message
  * @param component Component that emits the alarm
- * @param info Extra alarm information
  * @param level The level of the alarm
  * @param format A printf() style format string
  */
@@ -1029,7 +1028,7 @@ YATE_API inline uint32_t hashInt32(uint32_t val)
 
 /**
  * Compute a hash for a pointer
- * @param val Pointer to hash
+ * @param ptr Pointer to hash
  * @return Hash value
  */
 YATE_API inline uint32_t hashPtr(const void* ptr)
@@ -5577,9 +5576,10 @@ public:
      * Clears all instances of a named string in the parameter list.
      * @param name Name of the string to remove
      * @param childSep If set clears all child parameters in format name+childSep+anything
+     * @param value Optional pointer to string used to match parameter's value (may be a regexp)
      * @return Reference to this NamedList
      */
-    NamedList& clearParam(const String& name, char childSep = 0);
+    NamedList& clearParam(const String& name, char childSep = 0, const String* value = 0);
 
     /**
      * Remove a specific parameter
