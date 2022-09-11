@@ -224,6 +224,7 @@ const TokenDict IAXInfoElement::s_ieData[] = {
     {"CALLTOKEN",         CALLTOKEN},
     {"CAPABILITY2",       CAPABILITY2},
     {"FORMAT2",           FORMAT2},
+    {"CALLINGANI2",       CALLINGANI2},
     {0,0}
 };
 
@@ -455,6 +456,7 @@ bool IAXIEList::createFromFrame(const IAXFullFrame* frame, bool incoming)
 	    case IAXInfoElement::RR_PKTS:
 	    case IAXInfoElement::RR_DROPPED:
 	    case IAXInfoElement::RR_OOO:
+	    case IAXInfoElement::CALLINGANI2:
 		if (data[i] != 4) {
 		    i = 0xFFFF;
 		    break;
@@ -683,6 +685,7 @@ void IAXIEList::toString(String& dest, const char* indent)
 	    case IAXInfoElement::RR_DROPPED:
 	    case IAXInfoElement::RR_OOO:
 	    case IAXInfoElement::RR_DELAY:
+	    case IAXInfoElement::CALLINGANI2:
 		dest << (unsigned int)((static_cast<IAXInfoElementNumeric*>(ie))->data());
 		break;
 	    case IAXInfoElement::TRANSFERID:
