@@ -476,6 +476,7 @@ bool IAXIEList::createFromFrame(const IAXFullFrame* frame, bool incoming)
 	    case IAXInfoElement::CALLINGTNS:
 	    case IAXInfoElement::FIRMWAREVER:
 	    case IAXInfoElement::RR_DELAY:
+	    case IAXInfoElement::ENCRYPTION:
 		if (data[i] != 2) {
 		    i = 0xFFFF;
 		    break;
@@ -489,7 +490,6 @@ bool IAXIEList::createFromFrame(const IAXFullFrame* frame, bool incoming)
 	    case IAXInfoElement::CALLINGPRES:
 	    case IAXInfoElement::CALLINGTON:
 	    case IAXInfoElement::CAUSECODE:
-	    case IAXInfoElement::ENCRYPTION:
 		if (data[i] != 1) {
 		    i = 0xFFFF;
 		    break;
@@ -508,10 +508,12 @@ bool IAXIEList::createFromFrame(const IAXFullFrame* frame, bool incoming)
 		i += 1;
 		break;
 	    default:
-		Debug(DebugInfo,"IAX Frame(%u,%u) with unknown IE identifier %u [%p]",
+		Debug(DebugWarn,"IAX Frame(%u,%u) with unknown IE identifier %u [%p]",
 		    frame->type(),frame->subclass(),data[i-1],frame);
 		appendBinary((IAXInfoElement::Type)data[i-1],data+i+1,data[i]);
 		i += data[i] + 1;
+		// unknown IEs are skipped by asterisk for future compatibility
+		break;
 	}
 	if (i == 0xFFFF)
 	    break;
@@ -704,11 +706,11 @@ void IAXIEList::toString(String& dest, const char* indent)
 	    case IAXInfoElement::CALLINGTNS:		//TODO: print more data
 	    case IAXInfoElement::FIRMWAREVER:
 	    case IAXInfoElement::VERSION:
+	    case IAXInfoElement::ENCRYPTION:		//TODO: print more data
 		ie->toString(dest);
 		break;
 	    // 1 byte
 	    case IAXInfoElement::IAX_UNKNOWN:
-	    case IAXInfoElement::ENCRYPTION:		//TODO: print more data
 		ie->toString(dest);
 		break;
 	    case IAXInfoElement::CALLINGPRES:
