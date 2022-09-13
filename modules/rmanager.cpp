@@ -432,9 +432,12 @@ Connection* RManagerListener::checkCreate(Socket* sock, const char* addr)
 	return 0;
     }
     // should check IP address here
-    if (m_cfg.getBoolValue("logged",true))
-	Output("Remote%s connection from %s to %s",
-	    (secure ? " secure" : ""),addr,m_address.c_str());
+    if (m_cfg.getBoolValue("logged",true)) {
+	char tmp[30];
+	Debugger::formatTime(tmp);
+	Output("Remote%s connection from %s to %s time: %s",
+	    (secure ? " secure" : ""),addr,m_address.c_str(),tmp);
+    }
     Connection* conn = new Connection(sock,addr,this);
     if (conn->error()) {
 	conn->destruct();
@@ -468,8 +471,11 @@ Connection::~Connection()
     s_mutex.lock();
     s_connList.remove(this,false);
     s_mutex.unlock();
-    if (cfg().getBoolValue("logged",true))
-	Output("Closing connection to %s",m_address.c_str());
+    if (cfg().getBoolValue("logged",true)) {
+	char tmp[30];
+	Debugger::formatTime(tmp);
+	Output("Closing connection to %s time: %s",m_address.c_str(),tmp);
+    }
     Socket* tmp = m_socket;
     m_socket = 0;
     yield();
