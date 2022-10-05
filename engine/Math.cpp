@@ -57,10 +57,14 @@ static inline void unpackMsb8(uint8_t*& d, uint8_t val)
 }
 
 // Copy string, advance dest and src, return src
-static inline const char* copyInc(char*& dest, const char* src, unsigned int n)
+static inline const char* copyInc(char*& dest, const char* src, unsigned int n,
+    bool strLen = false)
 {
     if (n) {
-	::strncpy(dest,src,n);
+	if (strLen)
+	    ::strcpy(dest,src);
+	else
+	    ::strncpy(dest,src,n);
 	dest += n;
     }
     return src + n;
@@ -100,11 +104,11 @@ String& RefStorage::dumpSplit(String& buf, const String& str, unsigned int lineL
     const char* src = str.c_str();
     src = copyInc(dest,src,firstLineLen);
     for (; nFullLines; nFullLines--) {
-	copyInc(dest,linePrefix,linePrefLen);
+	copyInc(dest,linePrefix,linePrefLen,true);
 	src = copyInc(dest,src,lineLen);
     }
     if (lastLineLen) {
-	copyInc(dest,linePrefix,linePrefLen);
+	copyInc(dest,linePrefix,linePrefLen,true);
 	src = copyInc(dest,src,lastLineLen);
     }
     copyInc(dest,suffix,suffixLen);
