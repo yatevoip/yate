@@ -1038,7 +1038,7 @@ bool Transport::addSocket(Socket* socket,SocketAddr& socketAddress)
     if (m_listenNotify) {
 	String* name = new String("Transport:");
 	name->append(socketAddress.host() + ":");
-	name->append((int)socketAddress.port());
+	*name << socketAddress.port();
 	addName(name);
 	Transport* newTrans = new Transport((TransportType)m_type,name);
 	if (!transportNotify(newTrans,socketAddress)) {

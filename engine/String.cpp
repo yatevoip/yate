@@ -36,6 +36,14 @@
 
 namespace TelEngine {
 
+static inline char* strAlloc(unsigned int n, char* old = 0)
+{
+    char* data = (char*)::realloc(old,n + 1);
+    if (!data)
+	Debug("String",DebugFail,"realloc(%u) returned NULL!",n + 1);
+    return data;
+}
+
 // String to regular integer conversion, takes into account overflows
 static int strtoi(const char* nptr, char** endptr, int base)
 {
@@ -1255,6 +1263,35 @@ String& String::insert(unsigned int pos, const char* value, int len)
     return *this;
 }
 
+// Insert characters in string into current string
+String& String::insert(unsigned int pos, char value, unsigned int len)
+{
+    if (!(value && len))
+	return *this;
+
+    if (pos > m_length)
+	pos = m_length;
+    unsigned int newLen = len + m_length;
+    char* data = strAlloc(newLen,pos < m_length ? 0 : m_string);
+    if (!data)
+	return *this;
+    if (m_string) {
+	if (!pos)
+	    // Insert before existing, copy old data after it
+	    ::memcpy(data + len,m_string,m_length);
+	else if (pos == m_length)
+	    // Data reallocated. Reset held pointer
+	    m_string = 0;
+	else {
+	    // Insert middle
+	    ::memcpy(data,m_string,pos);
+	    ::memcpy(data + pos + len,m_string + pos,m_length - pos);
+	}
+    }
+    ::memset(data + pos,value,len);
+    return changeStringData(data,newLen);
+}
+
 static char* string_printf(unsigned int& length, const char* format, va_list& va)
 {
     if (TelEngine::null(format) || !length)
@@ -1694,71 +1731,147 @@ String String::sqlEscape(const char* str, char extraEsc)
     return s;
 }
 
-String String::uriEscape(const char* str, char extraEsc, const char* noEsc)
+static inline bool isUriNoEsc(char c, const char* noEsc)
 {
-    String s;
-    if (TelEngine::null(str))
-	return s;
-    char c;
-    while ((c=*str++)) {
-	if ((unsigned char)c < ' ' || c == '%' || c == extraEsc ||
-	    ((c == ' ' || c == '+' || c == '?' || c == '&') && !(noEsc && ::strchr(noEsc,c))))
-	    s << '%' << hexEncode(c >> 4) << hexEncode(c);
-	else
-	    s += c;
-    }
-    return s;
+    return (c == ' ' || c == '+' || c == '?' || c == '&') && !(noEsc && ::strchr(noEsc,c));
 }
 
-String String::uriEscape(const char* str, const char* extraEsc, const char* noEsc)
+static inline char isUriEscape(char c, char extraEsc, const char* noEsc)
 {
-    String s;
-    if (TelEngine::null(str))
-	return s;
-    char c;
-    while ((c=*str++)) {
-	if ((unsigned char)c < ' ' || c == '%' || (extraEsc && ::strchr(extraEsc,c)) ||
-	    ((c == ' ' || c == '+' || c == '?' || c == '&') && !(noEsc && ::strchr(noEsc,c))))
-	    s << '%' << hexEncode(c >> 4) << hexEncode(c);
-	else
-	    s += c;
-    }
-    return s;
+    if ((unsigned char)c < ' ' || c == '%' || c == extraEsc || isUriNoEsc(c,noEsc))
+	return c;
+    return 0;
 }
 
-String String::uriUnescape(const char* str, int* errptr)
+static inline char isUriEscape(char c, const char* extraEsc, const char* noEsc)
 {
-    String s;
+    if ((unsigned char)c < ' ' || c == '%' || (extraEsc && ::strchr(extraEsc,c))
+	|| isUriNoEsc(c,noEsc))
+	return c;
+    return 0;
+}
+
+static inline String& uriEscapeFunc(String& buf, const char* str, const char* noEsc,
+    char extraCh, const char* extraStr)
+{
     if (TelEngine::null(str))
-	return s;
-    const char *pos = str;
+	return buf;
+    unsigned int escape = 0;
     char c;
-    while ((c=*pos++)) {
-	if ((unsigned char)c < ' ') {
+    const char* strPtr = str;
+    if (extraStr) {
+	while ((c = *strPtr++)) {
+	    if (isUriEscape(c,extraStr,noEsc))
+		escape++;
+	}
+    }
+    else {
+	while ((c = *strPtr++)) {
+	    if (isUriEscape(c,extraCh,noEsc))
+		escape++;
+	}
+    }
+    if (!escape)
+	return buf << str;
+    unsigned int oldLen = buf.length();
+    buf.append(' ',(escape * 2) + (strPtr - str - 1));
+    if (buf.length() == oldLen)
+	return buf;
+    char* dest = (char*)buf.c_str() + oldLen;
+    if (extraStr) {
+	while ((c = *str++)) {
+	    if (isUriEscape(c,extraStr,noEsc)) {
+		*dest++ = '%';
+		*dest++ = hexEncode(c >> 4);
+		*dest++ = hexEncode(c);
+	    }
+	    else
+		*dest++ = c;
+	}
+    }
+    else {
+	while ((c = *str++)) {
+	    if (isUriEscape(c,extraCh,noEsc)) {
+		*dest++ = '%';
+		*dest++ = hexEncode(c >> 4);
+		*dest++ = hexEncode(c);
+	    }
+	    else
+		*dest++ = c;
+	}
+    }
+    return buf;
+}
+
+String& String::uriEscapeTo(String& buf, const char* str, char extraEsc, const char* noEsc)
+{
+    return uriEscapeFunc(buf,str,noEsc,extraEsc,0);
+}
+
+String& String::uriEscapeTo(String& buf, const char* str, const char* extraEsc, const char* noEsc)
+{
+    return uriEscapeFunc(buf,str,noEsc,0,extraEsc);
+}
+
+String& String::uriUnescapeTo(String& buf, const char* str, bool setPartial, int* errptr)
+{
+    if (TelEngine::null(str))
+	return buf;
+    char c;
+    bool unescape = false;
+    const char* pos = str;
+    while ((c = *pos++)) {
+	if ((unsigned char)c < ' ' || c == '%') {
+	    unescape = true;
+	    break;
+	}
+    }
+    int ePtr = -1;
+    if (unescape) {
+	char* newData = strAlloc(::strlen(str));
+	if (!newData) {
 	    if (errptr)
-		*errptr = (pos-str) - 1;
-	    return s;
+		*errptr = 0;
+	    return buf;
 	}
-	else if (c == '%') {
-	    int hiNibble = hexDecode(*pos++);
-	    if (hiNibble < 0) {
-		if (errptr)
-		    *errptr = (pos-str) - 1;
-		return s;
+	char* set = newData;
+	pos = str;
+	while ((c = *pos++)) {
+	    if ((unsigned char)c < ' ') {
+		ePtr = (pos - str) - 1;
+		break;
 	    }
-	    int loNibble = hexDecode(*pos++);
-	    if (loNibble < 0) {
-		if (errptr)
-		    *errptr = (pos-str) - 1;
-		return s;
+	    if (c == '%') {
+		int hiNibble = hexDecode(*pos++);
+		if (hiNibble < 0) {
+		    ePtr = (pos - str) - 1;
+		    break;
+		}
+		int loNibble = hexDecode(*pos++);
+		if (loNibble < 0) {
+		    ePtr = (pos - str) - 1;
+		    break;
+		}
+		c = ((hiNibble << 4) | loNibble) & 0xff;
 	    }
-	    c = ((hiNibble << 4) | loNibble) & 0xff;
+	    *set++ = c;
 	}
-	s += c;
+	if (ePtr < 0 || setPartial) {
+	    *set = 0;
+	    if (buf.c_str() != str)
+		buf << newData;
+	    else
+		buf = newData;
+	}
+	::free(newData);
     }
+    else if (buf.c_str() != str)
+	buf << str;
+    else
+	buf = str;
     if (errptr)
-	*errptr = -1;
-    return s;
+	*errptr = ePtr;
+    return buf;
 }
 
 unsigned int String::hash(const char* value, unsigned int h)
@@ -2213,6 +2326,19 @@ const String& String::decodeFlags(uint64_t flags, const TokenDict64* tokens, boo
     }
     if (flags && unknownflag)
 	append(String(flags),",");
+    return *this;
+}
+
+String& String::changeStringData(char* data, unsigned int len)
+{
+    char* tmp = m_string;
+    if (data)
+	data[len] = 0;
+    m_string = data;
+    m_length = len;
+    if (tmp)
+	::free(tmp);
+    changed();
     return *this;
 }
 

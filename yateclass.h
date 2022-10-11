@@ -2282,7 +2282,6 @@ public:
     inline int lenUtf8(uint32_t maxChar = 0x10ffff, bool overlong = false) const
 	{ return lenUtf8(m_string,maxChar,overlong); }
 
-	
     /**
      * Fix an UTF-8 encoded string by replacing invalid sequences
      * @param replace String to replace invalid sequences, use U+FFFD if null
@@ -2292,7 +2291,7 @@ public:
      */
     int fixUtf8(const char* replace = 0, uint32_t maxChar = 0x10ffff, bool overlong = false);
 
-     /**
+    /**
      * Encode flags from dictionary values
      * @param tokens The dictionary containing the flags
      * @return Encoded flags
@@ -2323,6 +2322,7 @@ public:
      * @return Decoded flags
      */
      const String& decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag = true);
+
     /**
      * Check if a string starts with UTF-8 Byte Order Mark
      * @param str String to check for BOM
@@ -2820,6 +2820,15 @@ public:
 	{ return append(&list,separator,force); }
 
     /**
+     * Append buffer filled with character to current string
+     * @param value Character to insert. NUL character will be ignored
+     * @param len Number of characters to append
+     * @return Reference to the String
+     */
+    inline String& append(char value, unsigned int len = 1)
+	{ return insert(length(),value,len); }
+
+    /**
      * Explicit double append
      * @param value Value to append
      * @param decimals Number of decimals
@@ -2837,16 +2846,12 @@ public:
 
     /**
      * Insert a character into current string
-     * @param pos Position to insert. The character will be appended if position is greater than curent length
+     * @param pos Position to insert. Negative or greater than curent length: append
      * @param value Character to insert. NUL character will be ignored
+     * @param len Number of characters to insert
      * @return Reference to the String
      */
-    inline String& insert(unsigned int pos, char value) {
-	    if (!value)
-		return *this;
-	    char s[] = {value};
-	    return insert(pos,s,1);
-	}
+    String& insert(unsigned int pos, char value, unsigned int len = 1);
 
     /**
      * Build a String in a printf style.
@@ -3103,13 +3108,48 @@ public:
 	{ return sqlEscape(c_str(),extraEsc); }
 
     /**
+     * Append an escaped string suitable for use in URIs
+     * @param buf Destination buffer
+     * @param str String to convert to escaped format
+     * @param extraEsc Character to escape other than the default ones
+     * @param noEsc Optional pointer to string of characters that shouldn't be escaped
+     * @return Destination buffer reference
+     */
+    static String& uriEscapeTo(String& buf, const char* str, char extraEsc = 0,
+	const char* noEsc = 0);
+
+    /**
+     * Append an escaped string suitable for use in URIs
+     * @param buf Destination buffer
+     * @param str String to convert to escaped format
+     * @param extraEsc Pointer to string of characters to escape other than the defaults
+     * @param noEsc Optional pointer to string of characters that shouldn't be escaped
+     * @return Destination buffer reference
+     */
+    static String& uriEscapeTo(String& buf, const char* str, const char* extraEsc,
+	const char* noEsc = 0);
+
+    /**
+     * Append an escaped string suitable for use in URIs
+     * @param buf Destination buffer
+     * @param extraEsc Character to escape other than the default ones
+     * @param noEsc Optional pointer to string of characters that shouldn't be escaped
+     * @return Destination buffer reference
+     */
+    inline String& uriEscapeTo(String& buf, char extraEsc = 0, const char* noEsc = 0) const
+	{ return uriEscapeTo(buf,c_str(),extraEsc,noEsc); }
+
+    /**
      * Create an escaped string suitable for use in URIs
      * @param str String to convert to escaped format
      * @param extraEsc Character to escape other than the default ones
      * @param noEsc Optional pointer to string of characters that shouldn't be escaped
      * @return The string with special characters escaped
      */
-    static String uriEscape(const char* str, char extraEsc = 0, const char* noEsc = 0);
+    static inline String uriEscape(const char* str, char extraEsc = 0, const char* noEsc = 0) {
+	    String tmp;
+	    return uriEscapeTo(tmp,str,extraEsc,noEsc);
+	}
 
     /**
      * Create an escaped string suitable for use in URIs
@@ -3118,7 +3158,10 @@ public:
      * @param noEsc Optional pointer to string of characters that shouldn't be escaped
      * @return The string with special characters escaped
      */
-    static String uriEscape(const char* str, const char* extraEsc, const char* noEsc = 0);
+    static inline String uriEscape(const char* str, const char* extraEsc, const char* noEsc = 0) {
+	    String tmp;
+	    return uriEscapeTo(tmp,str,extraEsc,noEsc);
+	}
 
     /**
      * Create an escaped string suitable for use in URI
@@ -3130,20 +3173,56 @@ public:
 	{ return uriEscape(c_str(),extraEsc,noEsc); }
 
     /**
+     * Decode and append an URI escaped string back to its raw form
+     * It is safe to call this method with 'str' set to buf.c_str()
+     * @param buf Destination buffer
+     * @param str String to convert to unescaped format
+     * @param setPartial Copy partial (succeeded) string on failure
+     * @param errptr Pointer to an integer to receive the place of 1st error
+     * @return Destination buffer reference
+     */
+    static String& uriUnescapeTo(String& buf, const char* str, bool setPartial = false,
+	int* errptr = 0);
+
+    /**
+     * Decode an URI escaped string back to its raw form
+     * @param buf Destination buffer
+     * @param setPartial Copy partial (succeeded) string on failure
+     * @param errptr Pointer to an integer to receive the place of 1st error
+     * @return Destination buffer reference
+     */
+    inline String& uriUnescapeTo(String& buf, bool setPartial = false, int* errptr = 0) const
+	{ return uriUnescapeTo(buf,c_str(),setPartial,errptr); }
+
+    /**
+     * In place decode an URI escaped string back to its raw form
+     * @param setPartial Copy partial (succeeded) string on failure
+     * @param errptr Pointer to an integer to receive the place of 1st error
+     * @return String reference
+     */
+    inline String& uriUnescapeStr(bool setPartial = false, int* errptr = 0)
+	{ return uriUnescapeTo(*this,c_str(),setPartial,errptr); }
+
+    /**
      * Decode an URI escaped string back to its raw form
      * @param str String to convert to unescaped format
      * @param errptr Pointer to an integer to receive the place of 1st error
+     * @param setPartial Copy partial (succeeded) string on failure
      * @return The string with special characters unescaped
      */
-    static String uriUnescape(const char* str, int* errptr = 0);
+    static inline String uriUnescape(const char* str, int* errptr = 0, bool setPartial = true) {
+	    String tmp;
+	    return uriUnescapeTo(tmp,str,setPartial,errptr);
+	}
 
     /**
      * Decode an URI escaped string back to its raw form
      * @param errptr Pointer to an integer to receive the place of 1st error
+     * @param setPartial Copy partial (succeeded) string on failure
      * @return The string with special characters unescaped
      */
-    inline String uriUnescape(int* errptr = 0) const
-	{ return uriUnescape(c_str(),errptr); }
+    inline String uriUnescape(int* errptr = 0, bool setPartial = true) const
+	{ return uriUnescape(c_str(),errptr,setPartial); }
 
     /**
      * Atom string support helper
@@ -3160,6 +3239,7 @@ protected:
      virtual void changed();
 
 private:
+    String& changeStringData(char* data, unsigned int len);
     void clearMatches();
     char* m_string;
     unsigned int m_length;
