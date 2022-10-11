@@ -231,6 +231,8 @@ const TokenDict SocketAddr::s_familyName[] = {
     {0,0},
 };
 
+const char* SocketAddr::s_ifaceNameExtraEscape = ".:[]";
+
 SocketAddr::SocketAddr(const struct sockaddr* addr, socklen_t len)
     : m_address(0), m_length(0)
 {
@@ -265,7 +267,9 @@ void SocketAddr::clear()
 {
     m_length = 0;
     m_host.clear();
+    m_iface.clear();
     m_addr.clear();
+    m_addrFull.clear();
     void* tmp = m_address;
     m_address = 0;
     if (tmp)
@@ -432,7 +436,15 @@ bool SocketAddr::host(const String& name)
     }
     switch (family()) {
 	case AF_INET:
-	    {
+	    if (name.find('%') >= 0) {
+		String tmp, ifc;
+		splitIface(name,tmp,&ifc);
+		if (host(tmp)) {
+		    iface(ifc,true);
+		    return true;
+		}
+	    }
+	    else {
 		in_addr_t a = inet_addr(name);
 		if (a == INADDR_NONE) {
 #ifdef HAVE_GHBN_R
@@ -458,6 +470,7 @@ bool SocketAddr::host(const String& name)
 		}
 		if (a != INADDR_NONE) {
 		    ((struct sockaddr_in*)m_address)->sin_addr.s_addr = a;
+		    m_iface.clear();
 		    stringify();
 		    return true;
 		}
@@ -466,25 +479,30 @@ bool SocketAddr::host(const String& name)
 #ifdef AF_INET6
 	case AF_INET6:
 	    if (name.find('%') >= 0) {
-		String tmp, iface;
-		splitIface(name,tmp,&iface);
+		String tmp, ifc;
+		splitIface(name,tmp,&ifc);
 		if (!host(tmp))
-		    return false;
-		if (iface)
+		    break;
+		if (ifc && iface(ifc,true)) {
 #ifndef _WINDOWS
-		    scopeId(if_nametoindex(iface));
+		    scopeId(if_nametoindex(m_iface));
 #else
-		    scopeId(iface.toInteger(0,0,0));
+		    scopeId(m_iface.toInteger(0,0,0));
 #endif
+		}
+		else
+		    m_iface.clear();
 		return true;
 	    }
 #ifdef HAVE_PTON
 	    if (inet_pton(family(),name,&((struct sockaddr_in6*)m_address)->sin6_addr) > 0) {
+		m_iface.clear();
 		stringify();
 		return true;
 	    }
 #endif
 	    if (resolveIPv6(m_address,name)) {
+		m_iface.clear();
 		stringify();
 		return true;
 	    }
@@ -493,11 +511,12 @@ bool SocketAddr::host(const String& name)
 #ifdef HAS_AF_UNIX
 	case AF_UNIX:
 	    if (name.length() >= (UNIX_PATH_MAX-1))
-		return false;
+		break;
 	    ::strcpy(((struct sockaddr_un*)m_address)->sun_path,name.c_str());
 	    stringify();
 	    return true;
 #endif
+	    break;
     }
     return false;
 }
@@ -508,15 +527,20 @@ int SocketAddr::family(const String& addr)
     if (!addr)
 	return Unknown;
     bool ipv6 = false;
+    int percent = -1;
     for (unsigned int i = 0; i < addr.length(); i++) {
 	if (addr[i] == '/')
 	    return Unix;
 	if (addr[i] == ':')
 	    ipv6 = true;
+	else if (percent < 0 && addr[i] == '%')
+	    percent = i;
     }
     if (ipv6)
 	return IPv6;
-    in_addr_t a = inet_addr(addr);
+    if (!percent)
+	return Unknown;
+    in_addr_t a = percent < 0 ? inet_addr(addr) : inet_addr(addr.substr(0,percent));
     if (a != INADDR_NONE || addr == YSTRING("255.255.255.255"))
 	return IPv4;
     return Unknown;
@@ -583,13 +607,23 @@ int SocketAddr::copyAddr(uint8_t* buf, struct sockaddr* addr)
 }
 
 // Append an address to a buffer
-String& SocketAddr::appendAddr(String& buf, const String& addr, int family)
+String& SocketAddr::appendAddr(String& buf, const String& addr, int family, const String& iface)
 {
     if (!addr)
 	return buf;
     // Address already starts with [
     if (addr[0] == '[') {
-	buf << addr;
+	if (!iface)
+	    return buf << addr;
+	char last = (addr[addr.length() - 1] == ']') ? ']' : 0;
+	if (last)
+	    buf.append(addr.c_str(),addr.length() - 1);
+	else
+	    buf << addr;
+	buf << '%';
+	escapeIface(buf,iface);
+	if (last)
+	    buf << last;
 	return buf;
     }
     if (family == Unknown) {
@@ -601,10 +635,19 @@ String& SocketAddr::appendAddr(String& buf, const String& addr, int family)
 		family = IPv6;
 	}
     }
-    if (family != IPv6)
-	buf << addr;
+    if (!iface) {
+	if (family != IPv6)
+	    return buf << addr;
+	return buf << '[' << addr << ']';
+    }
+    char last = (family != IPv6) ? 0 : ']';
+    if (last)
+	buf << '[' << addr << '%';
     else
-	buf << "[" << addr << "]";
+	buf << addr << '%';
+    escapeIface(buf,iface);
+    if (last)
+	buf << last;
     return buf;
 }
 
@@ -640,8 +683,8 @@ void SocketAddr::splitIface(const String& buf, String& addr, String* iface)
     }
     else {
 	if (iface)
-	    *iface = buf.substr(pos + 1);
-	addr = buf.substr(0,pos);
+	    iface->assign(buf.c_str() + pos + 1,buf.length() - pos - 1);
+	addr.assign(buf.c_str(),pos);
     }
 }
 
@@ -656,7 +699,7 @@ void SocketAddr::split(const String& buf, String& addr, int& port, bool portPres
     if (buf[0] == '[') {
 	int p = buf.find(']',1);
 	if (p >= 1) {
-	    if (p < ((int)buf.length() - 1) && buf[p + 1] == ':')
+	    if (buf[p + 1] == ':')
 		port = buf.substr(p + 2).toInteger();
 	    addr.assign(buf.c_str() + 1,p - 1);
 	    return;
@@ -697,15 +740,22 @@ void SocketAddr::stringify()
 {
     m_host.clear();
     m_addr.clear();
+    m_addrFull.clear();
     if (m_length && m_address)
 	stringify(m_host,m_address);
 }
 
 // Store host:port in m_addr
-void SocketAddr::updateAddr() const
+void SocketAddr::updateAddr(bool full) const
 {
-    m_addr.clear();
-    appendTo(m_addr,host(),port(),family());
+    if (full) {
+	m_addrFull.clear();
+	appendTo(m_addrFull,host(),port(),family(),m_iface);
+    }
+    else {
+	m_addr.clear();
+	appendTo(m_addr,host(),port(),family());
+    }
 }
 
 int SocketAddr::port() const
@@ -740,6 +790,7 @@ bool SocketAddr::port(int newport)
 	    return false;
     }
     m_addr.clear();
+    m_addrFull.clear();
     return true;
 }
 
@@ -1573,6 +1624,24 @@ bool File::listDirectory(const char* path, ObjList* dirs, ObjList* files, int* e
 }
 
 
+unsigned int Socket::s_features = 0
+#ifdef IPPROTO_IPV6
+    | FProtoIpv6
+#endif
+#ifdef IPV6_V6ONLY
+    | FIpv6Only
+#endif
+#ifdef SO_BINDTODEVICE
+    | FBindToIface
+#endif
+#if defined(_WINDOWS) || defined(HAVE_POLL)
+    | FEfficientSelect
+#endif
+#ifdef SO_EXCLUSIVEADDRUSE
+    | FExclusiveAddrUse
+#endif
+;
+
 Socket::Socket()
     : m_handle(invalidHandle())
 {
@@ -1740,9 +1809,30 @@ bool Socket::canSelect() const
     return canSelect(m_handle);
 }
 
-bool Socket::bind(struct sockaddr* addr, socklen_t addrlen)
+bool Socket::bind(struct sockaddr* addr, socklen_t addrlen,
+    const char* iface, int ifLen)
 {
+    if (iface && ifLen &&
+	!bindIface(iface,ifLen,addr ? addr->sa_family : SocketAddr::Unknown))
+	    return false;
     return checkError(::bind(m_handle,addr,addrlen));
+}
+
+bool Socket::bindIface(const char* name, int len, int family)
+{
+    // IPv6 interface should be set in address header
+    if (!(name && len) || family == SocketAddr::IPv6)
+	return true;
+#ifdef SO_BINDTODEVICE
+    if (len < 0)
+	len = strlen(name);
+    if (!setOption(SOL_SOCKET,SO_BINDTODEVICE,name,len))
+	return false;
+#else
+    m_error = EINVAL;
+    return false;
+#endif // SO_BINDTODEVICE
+    return true;
 }
 
 bool Socket::listen(unsigned int backlog)
@@ -1882,6 +1972,19 @@ bool Socket::getPeerName(SocketAddr& addr)
     if (ok)
 	addr.assign((struct sockaddr*)buf,len);
     return ok;
+}
+
+bool Socket::getBoundIface(String& buf)
+{
+#ifdef SO_BINDTODEVICE
+    char tmp[IF_NAMESIZE];
+    socklen_t len = IF_NAMESIZE;
+    if (getOption(SOL_SOCKET,SO_BINDTODEVICE,tmp,&len)) {
+	buf << tmp;
+	return true;
+    }
+#endif
+    return false;
 }
 
 int Socket::sendTo(const void* buffer, int length, const struct sockaddr* addr, socklen_t adrlen, int flags)

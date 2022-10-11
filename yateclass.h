@@ -7109,12 +7109,36 @@ public:
 
     /**
      * Get the host and port of this address
-     * @return Address String (host:port)
+     * @param full Retrieve the full address, interface included
+     * @return Address String (host:port or host%iface:port)
      */
-    inline const String& addr() const {
-	    if (!m_addr)
-		updateAddr();
-	    return m_addr;
+    inline const String& addr(bool full = false) const {
+	    const String& s = full ? m_addrFull : m_addr;
+	    if (!s)
+		updateAddr(full);
+	    return s;
+	}
+
+    /**
+     * Get the interface to use for this address
+     * @return Interface to use for this address
+     */
+    inline const String& iface() const
+	{ return m_iface; }
+
+    /**
+     * Set the interface to use for this address
+     * @param name Interface to use for this address
+     * @param uriUnescape Set it to true to URI unescape the value
+     * @return True on success, false otherwise
+     */
+    inline bool iface(const char* name, bool uriUnescape = false) {
+	    m_iface = name;
+	    if (!m_iface || !uriUnescape)
+		return true;
+	    int e = -1;
+	    m_iface.uriUnescapeStr(false,&e);
+	    return e < 0;
 	}
 
     /**
@@ -7245,9 +7269,11 @@ public:
      * @param buf Destination buffer
      * @param addr Address to append
      * @param family Address family, set it to Unknown to detect
+     * @param iface Optional interface name
      * @return Buffer address
      */
-    static String& appendAddr(String& buf, const String& addr, int family = Unknown);
+    static String& appendAddr(String& buf, const String& addr, int family = Unknown,
+	const String& iface = String::empty());
 
     /**
      * Append an address to a buffer in the form addr:port
@@ -7255,11 +7281,12 @@ public:
      * @param addr Address to append
      * @param port Port to append
      * @param family Address family, set it to Unknown to detect
+     * @param iface Optional interface name
      * @return Buffer address
      */
     static inline String& appendTo(String& buf, const String& addr, int port,
-	int family = Unknown) {
-	    appendAddr(buf,addr,family) << ":" << port;
+	int family = Unknown, const String& iface = String::empty()) {
+	    appendAddr(buf,addr,family,iface) << ":" << port;
 	    return buf;
 	}
 
@@ -7268,12 +7295,13 @@ public:
      * @param addr Address to append
      * @param port Port to append
      * @param family Address family, set it to Unknown to detect
+     * @param iface Optional interface name
      * @return A String with concatenated address and port
      */
-    static inline String appendTo(const String& addr, int port, int family = Unknown) {
+    static inline String appendTo(const String& addr, int port, int family = Unknown,
+	const String& iface = String::empty()) {
 	    String buf;
-	    appendTo(buf,addr,port,family);
-	    return buf;
+	    return appendTo(buf,addr,port,family,iface);
 	}
 
     /**
@@ -7297,7 +7325,7 @@ public:
     /**
      * Split an address into ip/port.
      * Handled formats: addr, addr:port, [addr], [addr]:port
-     * It is safe call this method with the same destination and source string
+     * It is safe to call this method with the same destination and source string
      * @param buf Source buffer
      * @param addr Destination buffer for address
      * @param port Destination port
@@ -7333,6 +7361,22 @@ public:
      */
     static const TokenDict* dictFamilyName();
 
+    /**
+     * Retrieve the string for interface name extra URI escape in address
+     * @return Interface name extra URI escape in address
+     */
+    static inline const char* ifaceNameExtraEscape()
+	{ return s_ifaceNameExtraEscape; }
+
+    /**
+     * Escape an interface name
+     * @param buf Destination buffer
+     * @param name Interface name
+     * @return Destination buffer reference
+     */
+    static inline String& escapeIface(String& buf, const char* name)
+	{ return String::uriEscapeTo(buf,name,ifaceNameExtraEscape()); }
+
 protected:
     /**
      * Convert the host address to a String stored in m_host
@@ -7341,16 +7385,21 @@ protected:
 
     /**
      * Store host:port in m_addr
+     * Store host%iface:port in m_addrFull
+     * @param full Build the full addr
      */
-    virtual void updateAddr() const;
+    virtual void updateAddr(bool full = false) const;
 
     struct sockaddr* m_address;
     socklen_t m_length;
     String m_host;
+    String m_iface;
     mutable String m_addr;
+    mutable String m_addrFull;
 
 private:
     static const TokenDict s_familyName[];
+    static const char* s_ifaceNameExtraEscape;
 };
 
 /**
@@ -7952,6 +8001,17 @@ public:
     };
 
     /**
+     * Platform specific available features
+     */
+    enum Features {
+	FProtoIpv6           = 0x0001, // IPv6 protocol (IPPROTO_IPV6) socket option
+	FIpv6Only            = 0x0002, // IPv6 only socket option
+	FBindToIface         = 0x0004, // Bind to specific interface for non IPv6
+	FEfficientSelect     = 0x0008, // Efficient select() is available
+	FExclusiveAddrUse    = 0x0010, // Exclusive access may be indicated in reuse
+    };
+
+    /**
      * Default constructor, creates an invalid socket
      */
     Socket();
@@ -8146,19 +8206,34 @@ public:
 
     /**
      * Associates the socket with a local address
+     * Optionally associates the socket with a local interface (device)
      * @param addr Address to assign to this socket
      * @param addrlen Length of the address structure
+     * @param iface Interface to bind to, may start with '#' for an interface index
+     * @param ifLen Interface string length, -1 to detect
      * @return True if operation was successfull, false if an error occured
      */
-    virtual bool bind(struct sockaddr* addr, socklen_t addrlen);
+    virtual bool bind(struct sockaddr* addr, socklen_t addrlen,
+	const char* iface = 0, int ifLen = -1);
 
     /**
      * Associates the socket with a local address
+     * Optionally associates the socket with a local interface (device) if configured
      * @param addr Address to assign to this socket
      * @return True if operation was successfull, false if an error occured
      */
     inline bool bind(const SocketAddr& addr)
-	{ return bind(addr.address(), addr.length()); }
+	{ return bind(addr.address(),addr.length(),addr.iface(),addr.iface().length()); }
+
+    /**
+     * Associates the socket with a local interface (device)
+     * @param iface Interface to bind to, may start with '#' for an interface index
+     * @param ifLen Interface string length, -1 to detect
+     * @param family Address family
+     * NOTE: IPv6 family is ignored, it should be set in address specific field (scope id)
+     * @return True if operation was successfull, false if an error occured
+     */
+    virtual bool bindIface(const char* iface, int ifLen = -1, int family = SocketAddr::Unknown);
 
     /**
      * Start listening for incoming connections on the socket
@@ -8297,6 +8372,13 @@ public:
     bool getPeerName(SocketAddr& addr);
 
     /**
+     * Retrieve the name of the interface this socket is bound to
+     * @param buf Destination string
+     * @return True if operation was successfull, false if an error occured
+     */
+    virtual bool getBoundIface(String& buf);
+
+    /**
      * Send a message over a connected or unconnected socket
      * @param buffer Buffer for data transfer
      * @param length Length of the buffer
@@ -8429,6 +8511,13 @@ public:
      */
     static bool createPair(Socket& sock1, Socket& sock2, int domain = AF_UNIX);
 
+    /**
+     * Retrieve available features
+     * @return Available features mask
+     */
+    static inline unsigned int features()
+	{ return s_features; }
+
 protected:
 
     /**
@@ -8457,6 +8546,9 @@ protected:
 
     SOCKET m_handle;
     ObjList m_filters;
+
+private:
+    static unsigned int s_features;
 };
 
 /**
