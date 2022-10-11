@@ -30,6 +30,10 @@ using namespace TelEngine;
 // Ensure response code string representation is 3 digit long
 inline void setCode(String& dest, unsigned int code)
 {
+    if (code >= 1000) {
+	dest = "999";
+	return;
+    }
     char c[4];
     sprintf(c,"%03u",code);
     dest = c;
