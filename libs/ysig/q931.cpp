@@ -1471,6 +1471,8 @@ bool ISDNQ931Call::sendAlerting(SignallingMessage* sigMsg)
 		return sendReleaseComplete("congestion");
 	    }
 	}
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true,&q931()->parserData());
 	m_channelIDSent = true;
     }
@@ -1491,6 +1493,8 @@ bool ISDNQ931Call::sendCallProceeding(SignallingMessage* sigMsg)
 	m_rspBearerCaps = false;
     }
     if (!m_channelIDSent) {
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true);
 	m_channelIDSent = true;
     }
@@ -1519,6 +1523,8 @@ bool ISDNQ931Call::sendConnect(SignallingMessage* sigMsg)
 	    m_data.m_channelByNumber = true;
 	    m_data.m_channelSelect = lookup(m_circuit->code(),Q931Parser::s_dict_channelIDSelect_BRI);
 	}
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true,&q931()->parserData());
 	m_channelIDSent = true;
     }
