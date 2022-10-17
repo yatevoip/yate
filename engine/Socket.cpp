@@ -1809,6 +1809,11 @@ bool Socket::canSelect() const
     return canSelect(m_handle);
 }
 
+bool Socket::bind(struct sockaddr* addr, socklen_t addrlen)
+{
+    return bind(addr,addrlen,0);
+}
+
 bool Socket::bind(struct sockaddr* addr, socklen_t addrlen,
     const char* iface, int ifLen)
 {

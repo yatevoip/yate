@@ -8206,6 +8206,14 @@ public:
 
     /**
      * Associates the socket with a local address
+     * @param addr Address to assign to this socket
+     * @param addrlen Length of the address structure
+     * @return True if operation was successfull, false if an error occured
+     */
+    virtual bool bind(struct sockaddr* addr, socklen_t addrlen);
+
+    /**
+     * Associates the socket with a local address
      * Optionally associates the socket with a local interface (device)
      * @param addr Address to assign to this socket
      * @param addrlen Length of the address structure
@@ -8214,7 +8222,7 @@ public:
      * @return True if operation was successfull, false if an error occured
      */
     virtual bool bind(struct sockaddr* addr, socklen_t addrlen,
-	const char* iface = 0, int ifLen = -1);
+	const char* iface, int ifLen = -1);
 
     /**
      * Associates the socket with a local address
