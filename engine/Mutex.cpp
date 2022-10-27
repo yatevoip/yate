@@ -43,6 +43,7 @@ extern int pthread_mutexattr_settype(pthread_mutexattr_t *__attr, int __kind) __
 
 typedef pthread_mutex_t HMUTEX;
 typedef sem_t HSEMAPHORE;
+typedef pthread_rwlock_t rwlock_t;
 
 #endif /* ! _WINDOWS */
 
@@ -109,6 +110,42 @@ private:
     const char* m_name;
 };
 
+class RWLockPrivate
+{
+public:
+    RWLockPrivate(const char* name);
+    ~RWLockPrivate();
+    inline void ref()
+	{ ++m_refcount; }
+    inline void deref()
+	{ if (!--m_refcount) delete this; }
+    inline const char* name() const
+	{ return m_name; }
+    inline const char* owner() const
+	{ return m_nonRWLck ? m_nonRWLck->owner() : m_wrOwner; }
+    bool locked() const
+	{ return m_nonRWLck ? m_nonRWLck->locked() : (m_locked > 0); }
+    bool readLock(long maxWait = -1);
+    bool writeLock(long maxWwait = -1);
+    bool unlock();
+    static volatile int s_count;
+    static volatile int s_locks;
+private:
+#ifdef _WINDOWS
+    // we use m_nonRWLck
+#else
+    rwlock_t m_lock;
+#endif
+    MutexPrivate* m_nonRWLck;
+    int m_refcount;
+    const char* m_name;
+    unsigned int m_locked;
+    const char* m_wrOwner;
+#ifndef ATOMIC_OPS
+    Mutex m_mutex;
+#endif
+};
+
 class GlobalMutex {
 public:
     GlobalMutex();
@@ -129,11 +166,18 @@ static GlobalMutex s_global;
 static unsigned long s_maxwait = 0;
 static bool s_unsafe = MUTEX_STATIC_UNSAFE;
 static bool s_safety = false;
+#ifdef _WINDOWS
+static bool s_rwLockDisabled = true;
+#else
+static bool s_rwLockDisabled = false;
+#endif
 
 volatile int MutexPrivate::s_count = 0;
 volatile int MutexPrivate::s_locks = 0;
 volatile int SemaphorePrivate::s_count = 0;
 volatile int SemaphorePrivate::s_locks = 0;
+volatile int RWLockPrivate::s_count = 0;
+volatile int RWLockPrivate::s_locks = 0;
 bool GlobalMutex::s_init = true;
 
 // WARNING!!!
@@ -768,5 +812,350 @@ void Lock2::drop()
     if (mx1)
 	mx1->unlock();
 }
+
+RWLockPrivate::RWLockPrivate(const char* name)
+    : m_nonRWLck(0), m_refcount(1), m_name(name), m_locked(0), m_wrOwner(0)
+#ifndef ATOMIC_OPS
+    , m_mutex(true,"RWLockPrivate")
+#endif
+{
+    if (s_rwLockDisabled) {
+	m_nonRWLck = new MutexPrivate(true,name);
+	return;
+    }
+
+    GlobalMutex::lock();
+    s_count++;
+#ifdef _WINDOWS
+    // not implemented, uses m_nonRWLck
+#else
+    ::pthread_rwlock_init(&m_lock,0);
+#endif
+    GlobalMutex::unlock();
+}
+
+RWLockPrivate::~RWLockPrivate()
+{
+    if (m_nonRWLck) {
+	delete m_nonRWLck;
+	m_nonRWLck = 0;
+	return;
+    }
+
+    bool warn = false;
+    GlobalMutex::lock();
+    if (m_locked) {
+	warn = true;
+	--m_locked;
+	if (s_safety)
+	    --s_locks;
+#ifdef _WINDOWS
+	// not implemented, uses m_nonRWLck
+#else
+        ::pthread_rwlock_unlock(&m_lock);
+#endif
+    }
+    s_count--;
+#ifdef _WINDOWS
+    // not implemented, uses m_nonRWLck
+#else
+    ::pthread_rwlock_destroy(&m_lock);
+#endif
+    GlobalMutex::unlock();
+    if (m_locked)
+	Debug(DebugFail,"RWLockPrivate '%s' owned by '%s' destroyed with %u locks [%p]",
+	    m_name,m_wrOwner,m_locked,this);
+    else if (warn)
+	Debug(DebugCrit,"RWLockPrivate '%s' owned by '%s' unlocked in destructor [%p]",
+	    m_name,m_wrOwner,this);
+}
+
+bool RWLockPrivate::readLock(long maxwait)
+{
+    if (m_nonRWLck)
+	return m_nonRWLck->lock(maxwait);
+
+    int ret = -1;
+    bool warn = false;
+    if (s_maxwait && (maxwait < 0)) {
+	maxwait = (long)s_maxwait;
+	warn = true;
+    }
+    bool safety = s_safety;
+    if (safety)
+	GlobalMutex::lock();
+    Thread* thr = Thread::current();
+    if (thr)
+	thr->m_locking = true;
+    if (safety)
+	GlobalMutex::unlock();
+
+#ifdef _WINDOWS
+    // not implemented, uses m_nonRWLck
+#else
+    if (s_unsafe)
+	ret = 0;
+    if (maxwait < 0)
+	ret = ::pthread_rwlock_rdlock(&m_lock);
+    else if (!maxwait)
+	ret = ::pthread_rwlock_tryrdlock(&m_lock);
+    else {
+	u_int64_t t = Time::now() + maxwait;
+#ifdef HAVE_TIMEDRDLOCK
+	struct timeval tv;
+	struct timespec ts;
+	Time::toTimeval(&tv,t);
+	ts.tv_sec = tv.tv_sec;
+	ts.tv_nsec = 1000 * tv.tv_usec;
+	ret = ::pthread_rwlock_timedrdlock(&m_lock,&ts);
+#else
+	bool dead = false;
+	do {
+	    if (!dead) {
+		dead = Thread::check(false);
+		// give up only if caller asked for a limited wait
+		if (dead && !warn)
+		    break;
+	    }
+	    ret = ::pthread_rwlock_tryrdlock(&m_lock);
+	    if (!ret)
+		break;
+	    Thread::yield();
+	} while (t > Time::now());
+#endif
+    }
+#endif // _WINDOWS
+    if (safety)
+	GlobalMutex::lock();
+    if (thr)
+	thr->m_locking = false;
+    if (!ret) {
+	if (safety)
+	    ++s_locks;
+#ifdef ATOMIC_OPS
+#ifdef _WINDOWS
+	InterlockedIncrement((LONG*)&m_locked);
+#else
+	__sync_add_and_fetch(&m_locked,1);
+#endif
+#else
+	m_mutex.lock();
+	++m_locked;
+	m_mutex.unlock();
+#endif
+	if (thr)
+	    ++thr->m_locks;
+    }
+    if (safety)
+	GlobalMutex::unlock();
+    if (warn && ret)
+	Debug(DebugFail,"Thread '%s' could not lock for read RW lock '%s' writing-owned by '%s' after waiting for %ld usec! [%p]",
+	    Thread::currentName(),TelEngine::c_safe (m_name),TelEngine::c_safe(m_wrOwner),maxwait,this);
+    return ret == 0;
+}
+
+bool RWLockPrivate::writeLock(long maxwait)
+{
+    if (m_nonRWLck)
+	return m_nonRWLck->lock(maxwait);
+
+    int ret = -1;
+    bool warn = false;
+    if (s_maxwait && (maxwait < 0)) {
+	maxwait = (long)s_maxwait;
+	warn = true;
+    }
+    bool safety = s_safety;
+    if (safety)
+	GlobalMutex::lock();
+    Thread* thr = Thread::current();
+    if (thr)
+	thr->m_locking = true;
+    if (safety)
+	GlobalMutex::unlock();
+#ifdef _WINDOWS
+    // not implemented, uses m_nonRWLck
+#else
+    if (s_unsafe)
+	ret = 0;
+    if (maxwait < 0)
+	ret = ::pthread_rwlock_wrlock(&m_lock);
+    else if (!maxwait)
+	ret = ::pthread_rwlock_trywrlock(&m_lock);
+    else {
+	u_int64_t t = Time::now() + maxwait;
+#ifdef HAVE_TIMEDWRLOCK
+	struct timeval tv;
+	struct timespec ts;
+	Time::toTimeval(&tv,t);
+	ts.tv_sec = tv.tv_sec;
+	ts.tv_nsec = 1000 * tv.tv_usec;
+	ret = ::pthread_rwlock_timedwrlock(&m_lock,&ts);
+#else
+	bool dead = false;
+	do {
+	    if (!dead) {
+		dead = Thread::check(false);
+		// give up only if caller asked for a limited wait
+		if (dead && !warn)
+		    break;
+	    }
+	    ret = ::pthread_rwlock_trywrlock(&m_lock);
+	    if (!ret)
+		break;
+	    Thread::yield();
+	} while (t > Time::now());
+#endif
+    }
+#endif
+    if (safety)
+	GlobalMutex::lock();
+    if (thr)
+	thr->m_locking = false;
+    if (!ret) {
+	if (safety)
+	    ++s_locks;
+#ifdef ATOMIC_OPS
+#ifdef _WINDOWS
+	InterlockedIncrement((LONG*)&m_locked);
+#else
+	__sync_add_and_fetch(&m_locked,1);
+#endif
+#else
+	m_mutex.lock();
+	++m_locked;
+	m_mutex.unlock();
+#endif
+	m_wrOwner = Thread::currentName();
+	if (thr)
+	    ++thr->m_locks;
+    }
+    if (safety)
+	GlobalMutex::unlock();
+    if (warn && ret)
+	Debug(DebugFail,"Thread '%s' could not lock for write RW lock '%s' writing-owned by '%s' after waiting for %ld usec! [%p]",
+	    Thread::currentName(),TelEngine::c_safe(m_name),TelEngine::c_safe(m_wrOwner),maxwait,this);
+    return ret == 0;
+}
+
+bool RWLockPrivate::unlock()
+{
+    if (m_nonRWLck)
+	return m_nonRWLck->unlock();
+
+    int ok = -1;
+    bool safety = s_safety;
+    if (safety)
+	GlobalMutex::lock();
+
+    if (m_locked) {
+	Thread* thr = Thread::current();
+	if (thr)
+	    --thr->m_locks;
+#ifdef ATOMIC_OPS
+#ifdef _WINDOWS
+	int l = InterlockedDecrement((LONG*)&m_locked);
+#else
+	int l = __sync_sub_and_fetch(&m_locked,1);
+#endif
+#else
+	m_mutex.lock();
+	int l = --m_locked;
+	m_mutex.unlock();
+#endif
+
+	if (!l) {
+	    const char* tname = thr ? thr->name() : 0;
+	    if (m_wrOwner && tname != m_wrOwner)
+		Debug(DebugFail,"RWLockPrivate '%s' unlocked by '%s' but owned by '%s' [%p]",
+		    TelEngine::c_safe(m_name),TelEngine::c_safe(tname),TelEngine::c_safe(m_wrOwner),this);
+	    m_wrOwner = 0;
+	}
+	if (safety) {
+	    int locks = --s_locks;
+	    if (locks < 0) {
+		// this is very very bad - abort right now
+		abortOnBug(true);
+		s_locks = 0;
+		Debug(DebugFail,"RWLockPrivate::locks() is %d [%p]",locks,this);
+	    }
+	}
+#ifdef _WINDOWS
+	// not implemented, uses m_nonRWLck
+#else
+	ok = s_unsafe ? 0 : ::pthread_rwlock_unlock(&m_lock);
+#endif
+	if (ok)
+	    Debug(DebugFail,"Thread '%s' failed to unlock RW lock '%s' owned by '%s' [%p]",Thread::currentName(),
+		TelEngine::c_safe(m_name),TelEngine::c_safe(m_wrOwner),this);
+    }
+    else {
+	Debug(DebugFail,"Thread '%s' could not unlock already unlocked RW lock '%s' writing-owned by '%s' [%p]",Thread::currentName(),
+	    TelEngine::c_safe(m_name),TelEngine::c_safe(m_wrOwner),this);
+    }
+    if (safety)
+	GlobalMutex::unlock();
+    return ok == 0;
+}
+
+/**
+* class RWLock
+*/
+RWLock::RWLock(const char* name)
+{
+    m_private = new RWLockPrivate(name ? name : "?");
+}
+
+RWLock::RWLock(const RWLock& original)
+    : Lockable(),
+      m_private(original.privDataCopy())
+{
+}
+
+RWLock::~RWLock()
+{
+    RWLockPrivate* priv = m_private;
+    m_private = 0;
+    if (priv)
+	priv->deref();
+}
+
+bool RWLock::readLock(long maxwait)
+{
+    return m_private && m_private->readLock(maxwait);
+}
+
+bool RWLock::writeLock(long maxwait)
+{
+    return m_private && m_private->writeLock(maxwait);
+}
+
+bool RWLock::unlock()
+{
+    return m_private && m_private->unlock();
+}
+
+bool RWLock::locked() const
+{
+    return m_private && m_private->locked();
+}
+
+void RWLock::disableRWLock(bool disable)
+{
+#ifdef _WINDOWS
+    // we disable RWLock usage as it is not implemented
+    s_rwLockDisabled = true;
+#else
+    s_rwLockDisabled = disable;
+#endif
+}
+
+RWLockPrivate* RWLock::privDataCopy() const
+{
+    if (m_private)
+	m_private->ref();
+    return m_private;
+}
+
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

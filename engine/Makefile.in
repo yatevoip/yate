@@ -109,7 +109,7 @@ Resolver.o: @srcdir@/Resolver.cpp $(MKDEPS) $(CINC)
 	$(COMPILE) @RESOLV_INC@ -c $<
 
 Mutex.o: @srcdir@/Mutex.cpp $(MKDEPS) $(CINC)
-	$(COMPILE) @MUTEX_HACK@ -c $<
+	$(COMPILE) @ATOMIC_OPS@ @MUTEX_HACK@ -c $<
 
 Thread.o: @srcdir@/Thread.cpp $(MKDEPS) $(CINC)
 	$(COMPILE) @THREAD_KILL@ @THREAD_AFFINITY@ @HAVE_PRCTL@ -c $<

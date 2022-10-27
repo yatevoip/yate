@@ -2563,6 +2563,7 @@ void Engine::initLibrary(const String& line, String* output)
 			    ENGINE_SET_VAL_BREAK('s',s_lateabrt,true);
 			    ENGINE_INSTR_BREAK('m',setLockableWait());
 			    ENGINE_INSTR_BREAK('d',Lockable::enableSafety());
+			    ENGINE_INSTR_BREAK('r',RWLock::disableRWLock(true));
 			    default:
 				unkArgs.append("-D" + String(*pc)," ");
 			}
@@ -2900,6 +2901,9 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 				    break;
 				case 'd':
 				    Lockable::enableSafety();
+				    break;
+				case 'r':
+				    RWLock::disableRWLock(true);
 				    break;
 #ifdef RTLD_GLOBAL
 				case 'l':

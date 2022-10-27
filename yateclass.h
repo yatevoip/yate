@@ -6062,6 +6062,7 @@ protected:
 class MutexPrivate;
 class SemaphorePrivate;
 class ThreadPrivate;
+class RWLockPrivate;
 
 /**
  * An abstract base class for implementing lockable objects
@@ -6523,6 +6524,221 @@ private:
 };
 
 /**
+ * A read/write lock
+ * @short Read/write lock support
+ */
+class YATE_API RWLock : public Lockable
+{
+    friend class RWLockPrivate;
+public:
+    /**
+     * Build a read/write lock
+     * @param name Name of this lock
+     */
+    RWLock(const char* name = 0);
+
+    /**
+     * Copy constructor, creates a RWLock semaphore
+     * @param original Reference of the semaphore to share
+     */
+    RWLock(const RWLock& original);
+
+    /**
+     * Destructor
+     */
+    ~RWLock();
+
+    /**
+     * Unlock either the read or write lock held by the calling thread
+     * @return True if anything was unlocked
+     */
+    bool unlock();
+
+    /**
+     * Lock the read lock.
+     * @param maxWait Time to wait for locking to succeed, -1 to wait forever, 0 return immediately
+     * @return True if locking succeed
+     */
+    bool readLock(long maxWait = -1);
+
+    /**
+     * Lock the write lock.
+     * @param maxWait Time to wait for locking to succeed, -1 to wait forever, 0 return immediately
+     * @return True if locking succeed
+     */
+    bool writeLock(long maxWait = -1);
+
+    /**
+     * Lock the write lock. This behaves like a mutex
+     * @param maxWait Time to wait for locking to succeed, -1 to wait forever, 0 return immediately
+     * @return True if locking succeed
+     */
+    virtual bool lock(long maxWait = -1)
+	{ return writeLock(maxWait); }
+
+    /**
+     * Check if the object is currently locked - as it's asynchronous it
+     *  guarantees nothing if other thread changes the status
+     * @return True if the object was locked when the function was called
+     */
+    virtual bool locked() const;
+
+    /**
+     * Debugging method for disabling RW locks usage
+     * and replacing it with a non-recursive mutex
+     * @param disable True to disable RW locks usage
+     */
+    static void disableRWLock(bool disable);
+
+private:
+    RWLockPrivate* privDataCopy() const;
+    RWLockPrivate* m_private;
+};
+
+/**
+ * Ephemeral read lock on a read-write lock (stack allocated lock that is locked on
+ * creation and unlocked in destructor
+ */
+class RLock
+{
+public:
+    /**
+     * Create the lock, try to lock the object
+     * @param lck Reference to the object to lock
+     * @param maxWait Time in microseconds to wait, -1 wait forever
+     */
+    inline RLock(RWLock& lck, long maxWait = -1)
+ 	{ m_lock = lck.readLock(maxWait) ? &lck : 0; }
+
+    /**
+     * Create the lock, try to lock the object
+     * @param lck Pointer to the object to lock
+     * @param maxwait Time in microseconds to wait, -1 wait forever
+     */
+    inline RLock(RWLock* lck, long maxwait = -1)
+	{ m_lock = (lck && lck->readLock(maxwait)) ? lck : 0; }
+
+    /**
+     * Destroy the lock, unlock the mutex if it was locked
+     */
+    ~RLock()
+	{ if (m_lock) m_lock->unlock(); }
+
+    /**
+     * Return a pointer to the lockable object this lock holds
+     * @return A pointer to a Lockable or NULL if locking failed
+     */
+    inline RWLock* locked() const
+	{ return m_lock; }
+
+    /**
+     * Unlock the object if it was locked and drop the reference to it
+     */
+    inline void drop()
+	{ if (m_lock) m_lock->unlock(); m_lock = 0; }
+
+    /**
+     * Attempt to acquire a new lock on another object
+     * @param lck Pointer to the object to lock
+     * @param maxwait Time in microseconds to wait, -1 wait forever
+     * @return True if locking succeeded or same object was locked
+     */
+    inline bool acquire(RWLock* lck, long maxwait = -1)
+	{ return (lck && (lck == m_lock)) ||
+	    (drop(),(lck && (m_lock = lck->readLock(maxwait) ? lck : 0))); }
+
+    /**
+     * Attempt to acquire a new lock on another object
+     * @param lck Reference to the object to lock
+     * @param maxwait Time in microseconds to wait, -1 wait forever
+     * @return True if locking succeeded or same object was locked
+     */
+    inline bool acquire(RWLock& lck, long maxwait = -1)
+	{ return acquire(&lck,maxwait); }
+
+private:
+    RWLock* m_lock;
+
+    /** Make sure no Lock is ever created on heap */
+    inline void* operator new(size_t);
+
+    /** Never allocate an array of this class */
+    inline void* operator new[](size_t);
+};
+
+/**
+ * Ephemeral read lock on a read-write lock (stack allocated lock that is locked on
+ * creation and unlocked in destructor
+ */
+class WLock
+{
+public:
+    /**
+     * Create the lock, try to lock the object
+     * @param lck Reference to the object to lock
+     * @param maxWait Time in microseconds to wait, -1 wait forever
+     */
+    inline WLock(RWLock& lck, long maxWait = -1)
+ 	{ m_lock = lck.writeLock(maxWait) ? &lck : 0; }
+
+    /**
+     * Create the lock, try to lock the object
+     * @param lck Pointer to the object to lock
+     * @param maxWait Time in microseconds to wait, -1 wait forever
+     */
+    inline WLock(RWLock* lck, long maxWait = -1)
+	{ m_lock = (lck && lck->writeLock(maxWait)) ? lck : 0; }
+
+    /**
+     * Destroy the lock, unlock the mutex if it was locked
+     */
+    ~WLock()
+	{ if (m_lock) m_lock->unlock(); }
+
+    /**
+     * Return a pointer to the lockable object this lock holds
+     * @return A pointer to a Lockable or NULL if locking failed
+     */
+    inline RWLock* locked() const
+	{ return m_lock; }
+
+    /**
+     * Unlock the object if it was locked and drop the reference to it
+     */
+    inline void drop()
+	{ if (m_lock) m_lock->unlock(); m_lock = 0; }
+
+    /**
+     * Attempt to acquire a new lock on another object
+     * @param lck Pointer to the object to lock
+     * @param maxWait Time in microseconds to wait, -1 wait forever
+     * @return True if locking succeeded or same object was locked
+     */
+    inline bool acquire(RWLock* lck, long maxWait = -1)
+	{ return (lck && (lck == m_lock)) ||
+	    (drop(),(lck && (m_lock = lck->writeLock(maxWait) ? lck : 0))); }
+
+    /**
+     * Attempt to acquire a new lock on another object
+     * @param lck Reference to the object to lock
+     * @param maxWait Time in microseconds to wait, -1 wait forever
+     * @return True if locking succeeded or same object was locked
+     */
+    inline bool acquire(RWLock& lck, long maxWait = -1)
+	{ return acquire(&lck,maxWait); }
+
+private:
+    RWLock* m_lock;
+
+    /** Make sure no Lock is ever created on heap */
+    inline void* operator new(size_t);
+
+    /** Never allocate an array of this class */
+    inline void* operator new[](size_t);
+};
+
+
+/**
  * This class holds the action to execute a certain task, usually in a
  *  different execution thread.
  * @short Encapsulates a runnable task
@@ -6553,6 +6769,7 @@ class YATE_API Thread : public Runnable
     friend class ThreadPrivate;
     friend class MutexPrivate;
     friend class SemaphorePrivate;
+    friend class RWLockPrivate;
     YNOCOPY(Thread); // no automatic copies please
 public:
     /**

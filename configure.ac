@@ -309,6 +309,25 @@ MUTEX_HACK="$MUTEX_HACK -DHAVE_TIMEDWAIT"
 fi
 AC_MSG_RESULT([$have_sem_timedwait])
 
+have_rd_timedlock=""
+AC_CHECK_LIB([pthread], [pthread_rwlock_timedrdlock], [have_rd_timedlock="yes"])
+if [[ "x$have_rd_timedlock" = "x" ]]; then
+AC_CHECK_LIB([c], [pthread_rwlock_timedrdlock],[have_rd_timedlock="yes"])
+fi
+if [[ "x$have_rd_timedlock" = "xyes" ]]; then
+MUTEX_HACK="$MUTEX_HACK -DHAVE_TIMEDRDLOCK"
+fi
+
+have_wr_timedlock=""
+AC_CHECK_LIB([pthread], [pthread_rwlock_timedwrlock], [have_wr_timedlock="yes"])
+if [[ "x$have_wr_timedlock" = "x" ]]; then
+AC_CHECK_LIB([c], [pthread_rwlock_timedwrlock], [have_wr_timedlock="yes"])
+fi
+if [[ "x$have_rd_timedlock" = "xyes" ]]; then
+MUTEX_HACK="$MUTEX_HACK -DHAVE_TIMEDWRLOCK"
+fi
+
+
 CFLAGS="$SAVE_CFLAGS"
 LIBS="$SAVE_LIBS"
 AC_LANG_RESTORE
