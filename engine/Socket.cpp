@@ -1811,7 +1811,7 @@ bool Socket::canSelect() const
 
 bool Socket::bind(struct sockaddr* addr, socklen_t addrlen)
 {
-    return bind(addr,addrlen,0);
+    return checkError(::bind(m_handle,addr,addrlen));
 }
 
 bool Socket::bind(struct sockaddr* addr, socklen_t addrlen,
@@ -1819,8 +1819,8 @@ bool Socket::bind(struct sockaddr* addr, socklen_t addrlen,
 {
     if (iface && ifLen &&
 	!bindIface(iface,ifLen,addr ? addr->sa_family : SocketAddr::Unknown))
-	    return false;
-    return checkError(::bind(m_handle,addr,addrlen));
+	return false;
+    return bind(addr,addrlen);
 }
 
 bool Socket::bindIface(const char* name, int len, int family)
