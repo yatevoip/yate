@@ -1552,7 +1552,13 @@ public:
      *  If NULL, it will set as attributes the whole parameter list
      * @param skipPrefix Skip over the prefix when building attribute name
      */
-    void setAttributes(NamedList& list, const String& prefix, bool skipPrefix = true);
+    inline void setAttributes(const NamedList& list, const String& prefix = NamedList::empty(),
+	bool skipPrefix = true) {
+	    if (prefix)
+		m_element.copySubParams(list,prefix,skipPrefix);
+	    else
+		m_element.copyParams(list);
+	}
 
     /**
      * Add or replace an attribute

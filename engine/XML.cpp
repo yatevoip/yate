@@ -1965,14 +1965,6 @@ unsigned int XmlElement::copyAttributes(NamedList& list, const String& prefix) c
     return copy;
 }
 
-void XmlElement::setAttributes(NamedList& list, const String& prefix, bool skipPrefix)
-{
-    if (prefix)
-	m_element.copySubParams(list,prefix,skipPrefix);
-    else
-	m_element.copyParams(list);
-}
-
 // Retrieve a namespace attribute. Search in parent or inherited for it
 String* XmlElement::xmlnsAttribute(const String& name) const
 {
