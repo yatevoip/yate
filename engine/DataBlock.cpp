@@ -77,6 +77,14 @@ static InitG711 s_initG711;
 
 static const DataBlock s_empty;
 
+static inline void* dbAlloc(unsigned int n, void* oldBuf = 0)
+{
+    void* data = ::realloc(oldBuf,n);
+    if (!data)
+	Debug("DataBlock",DebugFail,"realloc(%u) returned NULL!",n);
+    return data;
+}
+
 const DataBlock& DataBlock::empty()
 {
     return s_empty;
@@ -128,6 +136,91 @@ void DataBlock::clear(bool deleteData)
 	if (deleteData)
 	    ::free(data);
     }
+}
+
+// Change (insert or append data) the current block
+bool DataBlock::change(unsigned int pos, const void* buf, unsigned int bufLen,
+    unsigned int extra, int extraVal, bool mayOverlap)
+{
+    unsigned int addLen = (buf ? bufLen : 0) + extra;
+    if (!addLen)
+	return true;
+    XDebug("DataBlock",DebugAll,
+	"change(%u,%p,%u,%d,%d,%u) add_lenlen=%u m_data=%p m_length=%u allocated=%u [%p]",
+	pos,buf,bufLen,extra,extraVal,mayOverlap,addLen,m_data,m_length,m_allocated,this);
+    if (!(buf && bufLen)) {
+	buf = 0;
+	bufLen = 0;
+    }
+    if (pos > m_length)
+	pos = m_length;
+    unsigned int newLen = m_length + addLen;
+    void* data = 0;
+    unsigned int aLen = 0;
+    // Allocate a new buffer if input data may overlap with existing
+    bool overlap = buf && (mayOverlap || buf == m_data);
+    if (overlap || newLen > m_allocated) {
+	aLen = allocLen(newLen);
+	// Append to existing: Realloc data. Avoid free
+	void* reallocAppend = (!overlap && pos == m_length) ? m_data : 0;
+	data = dbAlloc(aLen,reallocAppend);
+	if (!data)
+	    return false;
+	if (reallocAppend)
+	    clear(false);
+	else
+	    copyData(data,m_data,m_length,pos,addLen);
+    }
+    else {
+	moveData(m_data,m_length,pos,addLen);
+	data = m_data;
+    }
+    if (bufLen)
+	::memcpy((uint8_t*)data + pos,buf,bufLen);
+    if (extra)
+	::memset((uint8_t*)data + pos + bufLen,extraVal,extra);
+    if (aLen)
+	assign(data,newLen,false,aLen);
+    else
+	m_length = newLen;
+    return true;
+}
+
+#define DB_CHANGE_UINT_FUNC \
+    unsigned int n = 0; \
+    if (lsb) { \
+	while (len--) { \
+	    buf[n++] = (uint8_t)value; \
+	    value = value >> 8; \
+	} \
+    } \
+    else { \
+	uint8_t sh = (len - 1) * 8; \
+	while (len--) { \
+	    buf[n++] = (uint8_t)(value >> sh); \
+	    sh -= 8; \
+	} \
+    } \
+    return change(pos,(const void*)buf,n,0,0,false)
+
+bool DataBlock::change8(unsigned int pos, uint64_t value, unsigned int len, bool lsb)
+{
+    if (!len)
+	return true;
+    if (len > 8)
+	len = 8;
+    uint8_t buf[8] = {0,0,0,0,0,0,0,0};
+    DB_CHANGE_UINT_FUNC;
+}
+
+bool DataBlock::change4(unsigned int pos, uint32_t value, unsigned int len, bool lsb)
+{
+    if (!len)
+	return true;
+    if (len > 4)
+	len = 4;
+    uint8_t buf[4] = {0,0,0,0};
+    DB_CHANGE_UINT_FUNC;
 }
 
 DataBlock& DataBlock::assign(void* value, unsigned int len, bool copyData, unsigned int allocated)
@@ -196,76 +289,6 @@ DataBlock& DataBlock::operator=(const DataBlock& value)
 {
     assign(value.data(),value.length());
     return *this;
-}
-
-void DataBlock::append(const DataBlock& value)
-{
-    if (m_length) {
-	if (value.length()) {
-	    unsigned int len = m_length+value.length();
-	    if (len <= m_allocated) {
-		::memcpy(m_length+(char*)m_data,value.data(),value.length());
-		m_length = len;
-		return;
-	    }
-	    unsigned int aLen = allocLen(len);
-	    void *data = ::malloc(aLen);
-	    if (data) {
-		::memcpy(data,m_data,m_length);
-		::memcpy(m_length+(char*)data,value.data(),value.length());
-		assign(data,len,false,aLen);
-	    }
-	    else
-		Debug("DataBlock",DebugFail,"malloc(%d) returned NULL!",aLen);
-	}
-    }
-    else
-	assign(value.data(),value.length());
-}
-
-void DataBlock::append(const String& value)
-{
-    if (m_length) {
-	if (value.length()) {
-	    unsigned int len = m_length+value.length();
-	    if (len <= m_allocated) {
-		::memcpy(m_length+(char*)m_data,value.safe(),value.length());
-		m_length = len;
-		return;
-	    }
-	    unsigned int aLen = allocLen(len);
-	    void *data = ::malloc(aLen);
-	    if (data) {
-		::memcpy(data,m_data,m_length);
-		::memcpy(m_length+(char*)data,value.safe(),value.length());
-		assign(data,len,false,aLen);
-	    }
-	    else
-		Debug("DataBlock",DebugFail,"malloc(%d) returned NULL!",aLen);
-	}
-    }
-    else
-	assign((void*)value.c_str(),value.length());
-}
-
-void DataBlock::insert(const DataBlock& value)
-{
-    unsigned int vl = value.length();
-    if (m_length) {
-	if (vl) {
-	    unsigned int len = m_length+vl;
-	    void *data = ::malloc(len);
-	    if (data) {
-		::memcpy(data,value.data(),vl);
-		::memcpy(vl+(char*)data,m_data,m_length);
-		assign(data,len,false);
-	    }
-	    else
-		Debug("DataBlock",DebugFail,"malloc(%d) returned NULL!",len);
-	}
-    }
-    else
-	assign(value.data(),vl);
 }
 
 unsigned int DataBlock::allocLen(unsigned int len) const
@@ -366,60 +389,24 @@ inline signed char hexDecode(char c)
     return -1;
 }
 
-// Build this data block from a hexadecimal string representation.
+static inline bool retResult(bool ok, int result, int* res)
+{
+    if (res)
+	*res = result;
+    return ok;
+}
+
+// Change data from a hexadecimal string representation.
 // Each octet must be represented in the input string with 2 hexadecimal characters.
 // If a separator is specified, the octets in input string must be separated using
 //  exactly 1 separator. Only 1 leading or 1 trailing separators are allowed
-bool DataBlock::unHexify(const char* data, unsigned int len, char sep)
+bool DataBlock::changeHex(unsigned int pos, const char* data, unsigned int len, char sep,
+    bool guessSep, bool emptyOk, int* res)
 {
-    clear();
     if (!(data && len))
-	return true;
+	return retResult(emptyOk,0,res);
 
-    // Calculate the destination buffer length
-    unsigned int n = 0;
-    if (!sep) {
-	if (0 != (len % 2))
-	    return false;
-	n = len / 2;
-    }
-    else {
-	// Remove leading and trailing separators
-	if (data[0] == sep) {
-	    data++;
-	    len--;
-	}
-	if (len && data[len-1] == sep)
-	    len--;
-	// No more leading and trailing separators allowed
-	if (2 != (len % 3))
-	    return (bool)(len == 0);
-	n = (len + 1) / 3;
-    }
-    if (!n)
-	return true;
-
-    char* buf = (char*)::malloc(n);
-    unsigned int iBuf = 0;
-    for (unsigned int i = 0; i < len; i += (sep ? 3 : 2)) {
-	signed char c1 = hexDecode(data[i]);
-	signed char c2 = hexDecode(data[i+1]);
-	if (c1 == -1 || c2 == -1 || (sep && (iBuf != n - 1) && (sep != data[i+2])))
-	    break;
-	buf[iBuf++] = (c1 << 4) | c2;
-    }
-    if (iBuf >= n)
-	assign(buf,n,false);
-    else
-	::free(buf);
-    return (iBuf >= n);
-}
-
-// This variant of unHexify automatically detects presence of separators
-bool DataBlock::unHexify(const char* data, unsigned int len)
-{
-    char sep = 0;
-    if (len > 2) {
+    if (!sep && guessSep && len > 2) {
 	const char* s = " :;.,-/|";
 	while (char c = *s++) {
 	    unsigned int offs = 2;
@@ -431,38 +418,140 @@ bool DataBlock::unHexify(const char* data, unsigned int len)
 	    }
 	}
     }
-    return unHexify(data,len,sep);
+    
+    // Calculate the destination buffer length
+    unsigned int n = 0;
+    if (!sep) {
+	if (0 != (len % 2))
+	    return retResult(false,-3,res);
+	n = len / 2;
+    }
+    else {
+	// Remove leading and trailing separators
+	if (data[0] == sep) {
+	    data++;
+	    len--;
+	}
+	if (len && data[len - 1] == sep)
+	    len--;
+	// No more leading and trailing separators allowed
+	if (!len)
+	    return retResult(emptyOk,0,res);
+	if (2 != (len % 3))
+	    return retResult(false,-3,res);
+	n = (len + 1) / 3;
+    }
+    if (!n)
+	return retResult(emptyOk,0,res);
+
+    unsigned int newLen = m_length + n;
+    unsigned int aLen = allocLen(newLen);
+    void* newData = dbAlloc(aLen);
+    if (!newData)
+	return retResult(false,-1,res);
+    if (pos > m_length)
+	pos = m_length;
+    char* buf = (char*)newData + pos;
+    unsigned int iBuf = 0;
+    for (unsigned int i = 0; i < len; i += (sep ? 3 : 2)) {
+	signed char c1 = hexDecode(*data++);
+	signed char c2 = hexDecode(*data++);
+	if (c1 == -1 || c2 == -1 || (sep && (iBuf != n - 1) && (sep != *data++)))
+	    break;
+	buf[iBuf++] = (c1 << 4) | c2;
+    }
+    if (iBuf < n) {
+	::free(newData);
+	return retResult(false,-2,res);
+    }
+    copyData(newData,m_data,m_length,pos,n);
+    assign(newData,newLen,false,aLen);
+    return retResult(true,n,res);
 }
 
-String DataBlock::sqlEscape(char extraEsc) const
+static inline bool dbIsEscape(char c, char extraEsc)
 {
-    unsigned int len = m_length;
-    unsigned int i;
-    for (i = 0; i < m_length; i++) {
-	char c = static_cast<char*>(m_data)[i];
-	if (c == '\0' || c == '\r' || c == '\n' || c == '\\' || c == '\'' || c == extraEsc)
-	    len++;
+    return c == '\0' || c == '\r' || c == '\n' || c == '\\' || c == '\'' || c == extraEsc;
+}
+
+String& DataBlock::sqlEscape(String& str, const void* data, unsigned int len, char extraEsc)
+{
+    if (!(data && len))
+	return str;
+    unsigned int useLen = len;
+    char* ds = (char*)data;
+    for (unsigned int i = 0; i < len; i++) {
+	if (dbIsEscape(*ds++,extraEsc))
+	    useLen++;
     }
-    String tmp(' ',len);
-    char* d = const_cast<char*>(tmp.c_str());
-    for (i = 0; i < m_length; i++) {
-	char c = static_cast<char*>(m_data)[i];
-	if (c == '\0' || c == '\r' || c == '\n' || c == '\\' || c == '\'' || c == extraEsc)
+    // No escape needed ?
+    if (useLen == len)
+	return str.append((const char*)data,len);
+    unsigned int sLen = str.length();
+    str.append(' ',useLen);
+    char* d = ((char*)(str.c_str())) + sLen;
+    ds = (char*)data;
+    for (unsigned int i = 0; i < len; i++) {
+	char c = *ds++;
+	if (dbIsEscape(c,extraEsc)) {
 	    *d++ = '\\';
-	switch (c) {
-	    case '\0':
-		c = '0';
-		break;
-	    case '\r':
-		c = 'r';
-		break;
-	    case '\n':
-		c = 'n';
-		break;
+	    switch (c) {
+		case '\0':
+		    c = '0';
+		    break;
+		case '\r':
+		    c = 'r';
+		    break;
+		case '\n':
+		    c = 'n';
+		    break;
+	    }
 	}
 	*d++ = c;
     }
-    return tmp;
+    return str;
+}
+
+void DataBlock::moveData(void* buf, unsigned int len, unsigned int pos, unsigned int space)
+{
+    if (!buf || pos >= len)
+	return;
+    unsigned int delta = pos + space;
+    if (!delta)
+	return;
+    uint8_t* src = (uint8_t*)buf;
+    uint8_t* dest = (uint8_t*)buf + delta;
+    if (pos) {
+	// Insert middle. Keep old data until pos. Copy the rest
+	len -= pos;
+	src += pos;
+    }
+    if (delta < len)
+	::memmove(dest,src,len);
+    else
+	::memcpy(dest,src,len);
+}
+
+void DataBlock::copyData(void* dest, const void* src, unsigned int len, unsigned int pos,
+    unsigned int space)
+{
+    if (!(src && dest && len))
+	return;
+    uint8_t* d = (uint8_t*)dest;
+    const uint8_t* s = (const uint8_t*)src;
+    if (!pos)
+	// Data insert before existing, copy old data after it
+	::memcpy(d + space,s,len);
+    else if (pos == len)
+	// Data added to existing, copy old at start
+	::memcpy(d,s,len);
+    else if (space) {
+	// Insert middle
+	::memcpy(d,s,pos);
+	::memcpy(d + pos + space,s + pos,len - pos);
+    }
+    else
+	::memcpy(d,s,len);
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

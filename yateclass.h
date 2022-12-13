@@ -4788,7 +4788,6 @@ private:
 class YATE_API DataBlock : public GenObject
 {
 public:
-
     /**
      * Constructs an empty data block
      * @param overAlloc How many bytes of memory to overallocate
@@ -4903,33 +4902,142 @@ public:
     DataBlock& assign(void* value, unsigned int len, bool copyData = true, unsigned int allocated = 0);
 
     /**
+     * Change the current block. Insert or append data and/or fill with value
+     * @param pos Buffer position, append at end if past buffer end
+     * @param buf Data to copy
+     * @param bufLen Data length, ignored if 'buf' is NULL
+     * @param extra Number of extra filled bytes to handle after given buffer
+     * @param extraVal Value to fill
+     * @param mayOverlap Set it to false if a buffer is given and you are sure it's not inside current block
+     * @return True on success, false on failure (memory allocation error)
+     */
+    bool change(unsigned int pos, const void* buf, unsigned int bufLen,
+	unsigned int extra = 0, int extraVal = 0, bool mayOverlap = true);
+
+    /**
+     * Change (append or insert unsigned integer data) to the current block
+     * @param pos Buffer position, append at end if past buffer end
+     * @param value Value to append
+     * @param len Number of bytes to handle
+     * @param lsb Byte direction. Less/most significant byte
+     * @return True on success, false on failure (memory allocation error)
+     */
+    bool change8(unsigned int pos, uint64_t value, unsigned int len = 8, bool lsb = true);
+
+    /**
+     * Change (append or insert unsigned integer data) to the current block
+     * @param pos Buffer position, append at end if past buffer end
+     * @param value Value to append
+     * @param len Number of bytes to handle
+     * @param lsb Byte direction. Less/most significant byte
+     * @return True on success, false on failure (memory allocation error)
+     */
+    bool change4(unsigned int pos, uint32_t value, unsigned int len = 4, bool lsb = true);
+
+    /**
      * Append data to the current block
      * @param value Data to append
      * @param len Length of data
+     * @param mayOverlap Set it to false if you are sure the buffer it's not inside current block
      */
-    inline void append(void* value, unsigned int len) {
-	    DataBlock tmp(value,len,false);
-	    append(tmp);
-	    tmp.clear(false);
+    inline void append(const void* value, unsigned int len, bool mayOverlap = true) {
+	    if (value && len)
+		change(length(),value,len,0,0,mayOverlap);
 	}
 
     /**
      * Append data to the current block
      * @param value Data to append
+     * @param mayOverlap Set it to false if you are sure the buffer it's not inside current block
      */
-    void append(const DataBlock& value);
+    inline void append(const DataBlock& value, bool mayOverlap = true) {
+	    if (value.length())
+		change(length(),value.data(),value.length(),0,0,mayOverlap);
+	}
 
     /**
      * Append a String to the current block
      * @param value String to append
      */
-    void append(const String& value);
+    inline void append(const String& value) {
+	    if (value.length())
+		change(length(),value.c_str(),value.length(),0,0,false);
+	}
+
+    /**
+     * Append unsigned integer data to the current block
+     * @param value Value to append
+     * @param len Number of bytes to handle
+     * @param lsb Byte direction. Less/most significant byte
+     */
+    inline void append8(uint64_t value, unsigned int len = 8, bool lsb = true)
+	{ change8(length(),value,len,lsb); }
+
+    /**
+     * Append unsigned integer data to the current block
+     * @param value Value to append
+     * @param len Number of bytes to handle
+     * @param lsb Byte direction. Less/most significant byte
+     */
+    inline void append4(uint32_t value, unsigned int len = 4, bool lsb = true)
+	{ change4(length(),value,len,lsb); }
+
+    /**
+     * Append 1 byte to the current block
+     * @param value Value to append
+     */
+    inline void append1(uint8_t value)
+	{ append((const void*)&value,1,true); }
+
+    /**
+     * Insert data in the current block
+     * @param buf Data to copy
+     * @param bufLen Data length
+     * @param pos Buffer position
+     * @param mayOverlap Set it to false if you are sure the buffer it's not inside current block
+     */
+    inline void insert(const void* buf, unsigned int bufLen, unsigned int pos = 0,
+	bool mayOverlap = true)
+	{ change(pos,buf,bufLen,0,0,mayOverlap); }
 
     /**
      * Insert data before the current block
      * @param value Data to insert
+     * @param pos Buffer position
+     * @param mayOverlap Set it to false if you are sure the buffer it's not inside current block
      */
-    void insert(const DataBlock& value);
+    inline void insert(const DataBlock& value, unsigned int pos = 0, bool mayOverlap = true)
+	{ insert(value.data(),value.length(),pos,mayOverlap); }
+
+    /**
+     * Insert unsigned integer data in the current block
+     * @param value Value to insert
+     * @param len Number of bytes to handle
+     * @param pos Buffer position, append at end if greater than current length
+     * @param lsb Byte direction. Less/most significant byte
+     */
+    inline void insert8(uint64_t value, unsigned int len = 8, unsigned int pos = 0,
+	bool lsb = true)
+	{ change8(pos,value,len,lsb); }
+
+    /**
+     * Insert unsigned integer data in the current block
+     * @param value Value to insert
+     * @param len Number of bytes to handle
+     * @param pos Buffer position, append at end if greater than current length
+     * @param lsb Byte direction. Less/most significant byte
+     */
+    inline void insert4(uint32_t value, unsigned int len = 4, unsigned int pos = 0,
+	bool lsb = true)
+	{ change4(pos,value,len,lsb); }
+
+    /**
+     * Insert 1 byte in the current block
+     * @param value Value to insert
+     * @param pos Buffer position, append at end if greater than current length
+     */
+    inline void insert1(uint8_t value, unsigned int pos = 0)
+	{ insert((const void*)&value,1,pos,true); }
 
     /**
      * Resize (re-alloc or free) this block if required size is not the same as the current one
@@ -4997,6 +5105,59 @@ public:
 	const String& dFormat, unsigned maxlen = 0);
 
     /**
+     * Change data data in current block from a hexadecimal string representation. Append or insert.
+     * Each octet must be represented in the input string with 2 hexadecimal characters.
+     * If a separator is specified, the octets in input string must be separated using
+     *  exactly 1 separator. Only 1 leading or 1 trailing separators are allowed.
+     * @param pos Position to insert, append if past buffer end
+     * @param data Input character string
+     * @param len Length of the input string
+     * @param sep Separator character used between octets. 0 if no separator is expected or
+     *  should be guessed
+     * @param guessSep Guess separator value. Ignored if 'sep' is non 0
+     * @param emptyOk Return success on empty hex buffer, false otherwise
+     * @param res Optional pointer to be filled with result. Negative on failure, number of used bytes otherwise
+     * @return True on success, false on failure (invalid hex string, empty hex buffer or memory allocation error)
+     */
+    bool changeHex(unsigned int pos, const char* data, unsigned int len, char sep = 0,
+	bool guessSep = true, bool emptyOk = true, int* res = 0);
+
+    /**
+     * Change data data in current block from a hexadecimal string representation. Append or insert.
+     * Each octet must be represented in the input string with 2 hexadecimal characters.
+     * If a separator is specified, the octets in input string must be separated using
+     *  exactly 1 separator. Only 1 leading or 1 trailing separators are allowed.
+     * @param pos Position to insert, append if past buffer end
+     * @param data Input character string
+     * @param sep Separator character used between octets. 0 if no separator is expected or
+     *  should be guessed
+     * @param guessSep Guess separator value. Ignored if 'sep' is non 0
+     * @param emptyOk Return success on empty hex buffer, false otherwise
+     * @param res Optional pointer to be filled with result. Negative on failure, number of used bytes otherwise
+     * @return True on success, false on failure (invalid hex string, empty hex buffer or memory allocation error)
+     */
+    inline bool changeHex(unsigned int pos, const String& data, char sep = 0, bool guessSep = true,
+	bool emptyOk = true, int* res = 0)
+	{ return changeHex(pos,data.c_str(),data.length(),sep,guessSep,emptyOk,res); }
+
+    /**
+     * Append data in current block from a hexadecimal string representation.
+     * Each octet must be represented in the input string with 2 hexadecimal characters.
+     * If a separator is specified, the octets in input string must be separated using
+     *  exactly 1 separator. Only 1 leading or 1 trailing separators are allowed.
+     * @param data Input character string
+     * @param sep Separator character used between octets. 0 if no separator is expected or
+     *  should be guessed
+     * @param guessSep Guess separator value. Ignored if 'sep' is non 0
+     * @param emptyOk Return success on empty hex buffer, false otherwise
+     * @param res Optional pointer to be filled with result. Negative on failure, number of used bytes otherwise
+     * @return True on success, false on failure (invalid hex string, empty hex buffer or memory allocation error)
+     */
+    inline bool appendHex(const String& data, char sep = 0, bool guessSep = true,
+	bool emptyOk = true, int* res = 0)
+	{ return changeHex(length(),data,sep,guessSep,emptyOk,res); }
+
+    /**
      * Build this data block from a hexadecimal string representation.
      * Each octet must be represented in the input string with 2 hexadecimal characters.
      * If a separator is specified, the octets in input string must be separated using
@@ -5006,7 +5167,10 @@ public:
      * @param sep Separator character used between octets. 0 if no separator is expected
      * @return True if the input string was succesfully parsed, false otherwise
      */
-    bool unHexify(const char* data, unsigned int len, char sep);
+    inline bool unHexify(const char* data, unsigned int len, char sep) {
+	    clear();
+	    return changeHex(length(),data,len,sep,false);
+	}
 
     /**
      * Build this data block from a hexadecimal string representation.
@@ -5017,7 +5181,10 @@ public:
      * @param len Length of the input string
      * @return True if the input string was succesfully parsed, false otherwise
      */
-    bool unHexify(const char* data, unsigned int len);
+    inline bool unHexify(const char* data, unsigned int len) {
+	    clear();
+	    return changeHex(length(),data,len);
+	}
 
     /**
      * Build this data block from a hexadecimal string representation.
@@ -5029,11 +5196,66 @@ public:
 	{ return unHexify(data.c_str(),data.length()); }
 
     /**
+     * Add block values as escaped string suitable for use in SQL queries.
+     * Escape binary zeros and other special characters
+     * @param str Destination string
+     * @param extraEsc Character to escape other than the default ones
+     * @return Destination string reference
+     */
+    inline String& sqlEscape(String& str, char extraEsc = 0) const
+	{ return sqlEscape(str,data(),length(),extraEsc); }
+
+    /**
      * Create an escaped string suitable for use in SQL queries
      * @param extraEsc Character to escape other than the default ones
      * @return A string with binary zeros and other special characters escaped
      */
-    String sqlEscape(char extraEsc) const;
+    inline String sqlEscape(char extraEsc) const {
+	    String tmp;
+	    return sqlEscape(tmp,extraEsc);
+	}
+
+    /**
+     * Add block values as escaped string suitable for use in SQL queries.
+     * Escape binary zeros and other special characters
+     * @param str Destination string
+     * @param data Binary data buffer
+     * @param len Buffer length
+     * @param extraEsc Character to escape other than the default ones
+     * @return Destination string reference
+     */
+    static String& sqlEscape(String& str, const void* data, unsigned int len, char extraEsc = 0);
+
+    /**
+     * Safely move data in the same buffer
+     * It is assumed the buffer is large enough to hold data
+     * pos<=len or pos+space=0: no change
+     * otherwise: move len-pos bytes from buf+pos to buf+pos+space
+     * @param buf The buffer
+     * @param len Buffer length
+     * @param pos Buffer position to move data from
+     * @param space Optional number of bytes to make space at given position
+     */
+    static void moveData(void* buf, unsigned int len, unsigned int pos, unsigned int space = 0);
+
+    /**
+     * Copy buffers. It is assumed the destination and source don't overlap
+     * It is also assumed the destination buffer is large enough to hold data
+     * pos=0: copy len bytes from src to dest+space
+     *  (assume destination buffer is a copy of source buffer with other data inserted at start)
+     * pos=len: copy len bytes from src to dest
+     *  (assume destination buffer is a copy of source buffer with other data added)
+     * otherwise: copy pos bytes from src to dest, copy len-pos bytes from src+pos to dest+pos+space
+     *  (assume destination buffer is a copy of source buffer with other data inserted in the middle)
+     * The following combinations leads to plain data copy: (pos=0 AND space=0), (pos=len), (len>pos AND space=0)
+     * @param dest Destination buffer
+     * @param src Source buffer
+     * @param len Number of bytes to copy (source length)
+     * @param pos Source/destination buffer buffer position
+     * @param space Optional number of bytes to make space at given position
+     */
+    static void copyData(void* dest, const void* src, unsigned int len, unsigned int pos = 0,
+	unsigned int space = 0);
 
 private:
     unsigned int allocLen(unsigned int len) const;
