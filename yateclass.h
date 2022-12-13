@@ -5633,16 +5633,127 @@ public:
     NamedList& addParam(const char* name, const char* value, bool emptyOK = true);
 
     /**
+     * Append a named string in the parameter list from signed integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, int64_t value) {
+	    NamedString* ns = new NamedString(name);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
+
+    /**
+     * Append a named string in the parameter list from unsigned integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, uint64_t value) {
+	    NamedString* ns = new NamedString(name);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
+
+    /**
+     * Append a named string in the parameter list from signed integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, int32_t value) {
+	    NamedString* ns = new NamedString(name);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
+
+    /**
+     * Append a named string in the parameter list from unsigned integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, uint32_t value) {
+	    NamedString* ns = new NamedString(name);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
+
+    /**
+     * Append a named string in the parameter list from floating point value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, double value) {
+	    NamedString* ns = new NamedString(name);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
+
+    /**
+     * Add a named string in the parameter list from boolean value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, bool value)
+	{ return addParam(name,String::boolText(value)); }
+
+    /**
+     * Add a named string in the parameter list from encoded flags
+     * @param name Name of the string
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownflag True (default) to add unknown flags
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, unsigned int flags, const TokenDict* tokens,
+	bool unknownflag = true) {
+	    NamedString* ns = new NamedString(name);
+	    ns->decodeFlags(flags,tokens,unknownflag);
+	    return addParam(ns);
+	}
+
+    /**
+     * Add a named string in the parameter list from encoded flags
+     * @param name Name of the string
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownflag True (default) to add unknown flags
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, uint64_t flags, const TokenDict64* tokens,
+	bool unknownflag = true) {
+	    NamedString* ns = new NamedString(name);
+	    ns->decodeFlags(flags,tokens,unknownflag);
+	    return addParam(ns);
+	}
+
+    /**
+     * Hexify a buffer and add it to parameters list
+     * @param list Destination list
+     * @param name Parameter name
+     * @param buf Buffer to add
+     * @param len Buffer length
+     * @param sep Optiona separamtor (defaults to space)
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParamHex(const char* name, const void* buf,
+	unsigned int len, char sep = 0) {
+	    NamedString* ns = new NamedString(name);
+	    if (buf && len)
+		ns->hexify((void*)buf,len,sep);
+	    return addParam(ns);
+	}
+
+    /**
      * Set a named string in the parameter list.
      * @param param Parameter to set or add
      * @return Reference to this NamedList
      */
-    inline NamedList& setParam(NamedString* param)
-    {
-	if (param)
-	    m_params.setUnique(param);
-	return *this;
-    }
+    NamedList& setParam(NamedString* param);
 
     /**
      * Set a named string in the parameter list.
@@ -5651,6 +5762,87 @@ public:
      * @return Reference to this NamedList
      */
     NamedList& setParam(const String& name, const char* value);
+
+     /**
+     * Set a named string in the parameter list from signed integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, int64_t value);
+
+    /**
+     * Set a named string in the parameter list from unsigned integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, uint64_t value);
+
+    /**
+     * Set a named string in the parameter list from signed integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, int32_t value);
+
+    /**
+     * Set a named string in the parameter list from unsigned integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, uint32_t value);
+
+    /**
+     * Set a named string in the parameter list from floating point value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, double value);
+
+    /**
+     * Set a named string in the parameter list from boolean value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @return Reference to this NamedList
+     */
+    inline NamedList& setParam(const String& name, bool value)
+	{ return setParam(name,String::boolText(value)); }
+
+    /**
+     * Set a named string in the parameter list from encoded flags
+     * @param name Name of the string
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownflag True (default) to add unknown flags
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, unsigned int flags, const TokenDict* tokens,
+	bool unknownflag = true);
+
+    /**
+     * Set a named string in the parameter list from encoded flags
+     * @param name Name of the string
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownflag True (default) to add unknown flags
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, uint64_t flags, const TokenDict64* tokens,
+	bool unknownflag = true);
+
+    /**
+     * Set a named string in the parameter list.
+     * @param name Name of the string
+     * @param buf Buffer to hexify
+     * @param len Buffer length
+     * @param sep Optional separator
+     * @return Reference to this NamedList
+     */
+    NamedList& setParamHex(const String& name, const void* buf, unsigned int len, char sep = 0);
 
     /**
      * Clears all instances of a named string in the parameter list.
@@ -5680,10 +5872,20 @@ public:
 
     /**
      * Copy all parameters from another NamedList, does not clear list first
+     * @param replace Replace (set params) or append (add param)
+     * @param original NamedList to copy the parameters from
+     * @param copyUserData Copy user data for known objects (DataBlock, XmlElement)
+     * @return Reference to this NamedList
+     */
+    NamedList& copyParams(bool replace, const NamedList& original, bool copyUserData = false);
+
+    /**
+     * Copy all parameters from another NamedList, does not clear list first
      * @param original NamedList to copy the parameters from
      * @return Reference to this NamedList
      */
-    NamedList& copyParams(const NamedList& original);
+    inline NamedList& copyParams(const NamedList& original)
+	{ return copyParams(true,original); }
 
     /**
      * Copy multiple parameters from another NamedList, clears them if not present there

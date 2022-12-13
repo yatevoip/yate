@@ -18,6 +18,7 @@
  */
 
 #include "yateclass.h"
+#include "yatexml.h"
 
 using namespace TelEngine;
 
@@ -36,11 +37,7 @@ NamedList::NamedList(const char* name)
 NamedList::NamedList(const NamedList& original)
     : String(original)
 {
-    ObjList* dest = &m_params;
-    for (const ObjList* l = original.m_params.skipNull(); l; l = l->skipNext()) {
-	const NamedString* p = static_cast<const NamedString*>(l->get());
-	dest = dest->append(new NamedString(p->name(),*p));
-    }
+    copyParams(false,original);
 }
 
 NamedList::NamedList(const char* name, const NamedList& original, const String& prefix)
@@ -80,27 +77,132 @@ NamedList& NamedList::addParam(const char* name, const char* value, bool emptyOK
     return *this;
 }
 
-NamedList& NamedList::setParam(const String& name, const char* value)
+NamedList& NamedList::setParam(NamedString* param)
 {
-    XDebug(DebugInfo,"NamedList::setParam(\"%s\",\"%s\")",name.c_str(),value);
-    ObjList *p = m_params.skipNull();
-    while (p) {
-        NamedString *s = static_cast<NamedString*>(p->get());
-        if (s->name() == name) {
-            *s = value;
+    XDebug(DebugAll,"NamedList::setParam(%p) [%p]",param,this);
+    if (!param)
+	return *this;
+    ObjList* o = m_params.skipNull();
+    while (o) {
+        NamedString* s = static_cast<NamedString*>(o->get());
+        if (s->name() == param->name()) {
+	    o->set(param);
 	    return *this;
 	}
-	ObjList* next = p->skipNext();
+	ObjList* next = o->skipNext();
 	if (next)
-	    p = next;
+	    o = next;
 	else
 	    break;
     }
-    if (p)
-	p->append(new NamedString(name,value));
+    if (o)
+	o->append(param);
     else
-	m_params.append(new NamedString(name,value));
-    return *this;
+	m_params.append(param);
+    return *this;   
+}
+
+static inline NamedString* nlSetParamCreate(NamedList& list, const String& name, ObjList*& append)
+{
+    append = list.paramList()->skipNull();
+    while (append) {
+        NamedString* ns = static_cast<NamedString*>(append->get());
+        if (ns->name() == name) {
+	    append = 0;
+	    return ns;
+	}
+	ObjList* next = append->skipNext();
+	if (!next)
+	    return new NamedString(name);
+	append = next;
+    }
+    append = list.paramList();
+    return new NamedString(name);
+}
+
+NamedList& NamedList::setParam(const String& name, unsigned int flags, const TokenDict* tokens,
+    bool unknownflag)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) flags=%u tokens=%p unkFlag=%u [%p]",
+	name.safe(),flags,tokens,unknownflag,this);
+    ObjList* append = 0;
+    NamedString* ns = nlSetParamCreate(*this,name,append);
+    *static_cast<String*>(ns) = "";
+    ns->decodeFlags(flags,tokens,unknownflag);
+    if (append)
+	append->append(ns);
+    return *this;   
+}
+
+NamedList& NamedList::setParam(const String& name, uint64_t flags, const TokenDict64* tokens,
+    bool unknownflag)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) flags64=" FMT64U " tokens=%p unkFlag=%u [%p]",
+	name.safe(),flags,tokens,unknownflag,this);
+    ObjList* append = 0;
+    NamedString* ns = nlSetParamCreate(*this,name,append);
+    *static_cast<String*>(ns) = "";
+    ns->decodeFlags(flags,tokens,unknownflag);
+    if (append)
+	append->append(ns);
+    return *this;   
+}
+
+NamedList& NamedList::setParamHex(const String& name, const void* buf, unsigned int len, char sep)
+{
+    XDebug(DebugAll,"NamedList::setParamHex(%s,%p,%u,%c) [%p]",name.safe(),buf,len,sep,this);
+    ObjList* append = 0;
+    NamedString* ns = nlSetParamCreate(*this,name,append);
+    ns->hexify((void*)buf,len,sep);
+    if (append)
+	append->append(ns);
+    return *this;   
+}
+
+template <class Obj> NamedList& nlSetParamValue(NamedList& list, const String& name, Obj& value)
+{
+    ObjList* append = 0;
+    NamedString* ns = nlSetParamCreate(list,name,append);
+    *static_cast<String*>(ns) = value;
+    if (append)
+	append->append(ns);
+    return list;
+}
+
+NamedList& NamedList::setParam(const String& name, const char* value)
+{
+    XDebug(DebugAll,"NamedList::setParam('%s','%s') [%p]",name.c_str(),value,this);
+    return nlSetParamValue(*this,name,value);
+}
+
+NamedList& NamedList::setParam(const String& name, int64_t value)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) INT64=" FMT64 " [%p]",name.c_str(),value,this);
+    return nlSetParamValue(*this,name,value);
+}
+
+NamedList& NamedList::setParam(const String& name, uint64_t value)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) UINT64=" FMT64U " [%p]",name.c_str(),value,this);
+    return nlSetParamValue(*this,name,value);
+}
+
+NamedList& NamedList::setParam(const String& name, int32_t value)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) INT32=%d [%p]",name.c_str(),value,this);
+    return nlSetParamValue(*this,name,value);
+}
+
+NamedList& NamedList::setParam(const String& name, uint32_t value)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) UINT32=%u [%p]",name.c_str(),value,this);
+    return nlSetParamValue(*this,name,value);
+}
+
+NamedList& NamedList::setParam(const String& name, double value)
+{
+    XDebug(DebugAll,"NamedList::setParam(%s) DOUBLE=%f [%p]",name.c_str(),value,this);
+    return nlSetParamValue(*this,name,value);
 }
 
 NamedList& NamedList::clearParam(const String& name, char childSep, const String* value)
@@ -155,12 +257,37 @@ NamedList& NamedList::copyParam(const NamedList& original, const String& name, c
     return *this;
 }
 
-NamedList& NamedList::copyParams(const NamedList& original)
+static inline NamedString* nlCopyParam(const NamedString& param)
 {
-    XDebug(DebugInfo,"NamedList::copyParams(%p) [%p]",&original,this);
+    NamedPointer* np = YOBJECT(NamedPointer,&param);
+    if (!(np && np->userData()))
+	return 0;
+    GenObject* ud = 0;
+#define NP_COPY_PARAM_INTERNAL(Type) \
+    ud = YOBJECT(Type,np->userData()); \
+    if (ud) \
+	return new NamedPointer(np->name(),new Type(*(Type*)ud),*np)
+    NP_COPY_PARAM_INTERNAL(DataBlock);
+    NP_COPY_PARAM_INTERNAL(XmlElement);
+#undef NP_COPY_PARAM_INTERNAL
+    return 0;
+}
+    
+NamedList& NamedList::copyParams(bool replace, const NamedList& original, bool copyUserData)
+{
+    XDebug(DebugInfo,"NamedList::copyParams(%p,%u) [%p]",&original,replace,this);
+    ObjList* append = replace ? 0 : &m_params;
     for (const ObjList* l = original.m_params.skipNull(); l; l = l->skipNext()) {
 	const NamedString* p = static_cast<const NamedString*>(l->get());
-	setParam(p->name(),*p);
+	NamedString* ns = 0;
+	if (copyUserData)
+	    ns = nlCopyParam(*p);
+	if (!ns)
+	    ns = new NamedString(p->name(),*p);
+	if (append)
+	    append = append->append(ns);
+	else
+	    setParam(ns);
     }
     return *this;
 }
