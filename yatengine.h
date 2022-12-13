@@ -39,6 +39,7 @@ namespace TelEngine {
  */
 class YATE_API Configuration : public String
 {
+    friend class Engine;
     YNOCOPY(Configuration); // no automatic copies please
 public:
     /**
@@ -226,10 +227,21 @@ public:
     bool save() const;
 
 private:
+    /**
+     * Load the main configuration file
+     * @param warn True to also warn if the configuration could not be loaded
+     * @return True if successfull, false for failure
+     */
+    inline bool loadMain(bool warn = true) {
+	    m_main = true;
+	    return load(warn);
+	}
+
     ObjList *getSectHolder(const String& sect) const;
     ObjList *makeSectHolder(const String& sect);
-    bool loadFile(const char* file, String sect, unsigned int depth, bool warn);
+    bool loadFile(const char* file, String sect, unsigned int depth, bool warn, void* priv);
     ObjList m_sections;
+    bool m_main;
 };
 
 /**

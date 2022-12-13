@@ -137,11 +137,6 @@
 ; The time will be added to message handler name as #<MSEC>.<USEC>
 ;trace_msg_handler_time=no
 
-; configuration_disable_include_silent: boolean: Disable silent include in Configuration files
-; The '$includesilent' directives of configuration file will be handled as '$include' if this
-;  parameter is set to boolean true
-;configuration_disable_include_silent=no
-
 
 [modules]
 ; This section should hold one line for each module whose loading behaviour
@@ -234,3 +229,18 @@ h323chan.yate=yes
 
 ; dtmfdups: bool: Allow duplicate DTMFs (detected with different methods)
 ;dtmfdups=disable
+
+
+[configuration]
+; Options for Configuration files
+; These parameters are handled on first load only (repeated parameters are ignored)
+; This section should be the first handled section if you need to apply parameters on this file also
+
+; max_depth: integer: Maximum include depth
+; Allowed interval: 3..10
+;max_depth=3
+
+; disable_include_silent: boolean: Disable silent include in Configuration files
+; The '$includesilent' directives of configuration file will be handled as '$include' if this
+;  parameter is set to boolean true
+;disable_include_silent=no

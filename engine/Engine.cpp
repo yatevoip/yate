@@ -1584,10 +1584,7 @@ int Engine::engineInit()
 #endif
     CapturedEvent::capturing(s_capture);
     s_cfg = configFile(s_cfgfile);
-    s_cfg.load();
-    NamedList* sect = s_cfg.getSection(YSTRING("debug"));
-    if (sect)
-	s_debugInit.copyParams(false,*sect);
+    s_cfg.loadMain();
     s_capture = s_cfg.getBoolValue("general","startevents",s_capture);
     CapturedEvent::capturing(s_capture);
     if (s_capture && s_startMsg)
@@ -1758,6 +1755,9 @@ int Engine::engineInit()
     }
     // Reload configuration file so conditionals will take into account runtime parameters
     s_cfg.load();
+    NamedList* sect = s_cfg.getSection(YSTRING("debug"));
+    if (sect)
+	s_debugInit.copyParams(false,*sect);
     vars = s_cfg.getSection("variables");
     if (vars) {
 	unsigned int n = vars->length();

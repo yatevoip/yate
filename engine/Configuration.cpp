@@ -22,9 +22,41 @@
 #include <stdio.h>
 #include <string.h>
 
-#define MAX_DEPTH 3
-
 using namespace TelEngine;
+
+static unsigned int s_maxDepth = 3;
+static bool s_disableIncludeSilent = false;
+
+class ConfigurationPrivate
+{
+public:
+    inline ConfigurationPrivate(bool isMain)
+	: main(isMain)
+	{}
+    inline void addingParam(const String& sect, const String& name, const String& value) {
+	    if (!main)
+		return;
+	    if (sect != YSTRING("configuration"))
+		return;
+	    if (s_maxDepthInit && name == YSTRING("max_depth")) {
+		s_maxDepthInit = false;
+		s_maxDepth = value.toInteger(3,0,3,10);
+		return;
+	    }
+	    if (s_disableIncludeSilentInit && name == YSTRING("disable_include_silent")) {
+		s_disableIncludeSilentInit = false;
+		s_disableIncludeSilent = value.toBoolean();
+		return;
+	    }
+	}
+
+    bool main;
+    static bool s_maxDepthInit;
+    static bool s_disableIncludeSilentInit;
+};
+bool ConfigurationPrivate::s_maxDepthInit = true;
+bool ConfigurationPrivate::s_disableIncludeSilentInit = true;
+
 
 // Text sort callback
 static int textSort(GenObject* obj1, GenObject* obj2, void* context)
@@ -40,11 +72,12 @@ static int textSort(GenObject* obj1, GenObject* obj2, void* context)
 
 
 Configuration::Configuration()
+    : m_main(false)
 {
 }
 
 Configuration::Configuration(const char* filename, bool warn)
-    : String(filename)
+    : String(filename), m_main(false)
 {
     load(warn);
 }
@@ -185,7 +218,8 @@ bool Configuration::load(bool warn)
     m_sections.clear();
     if (null())
 	return false;
-    return loadFile(c_str(),"",0,warn);
+    ConfigurationPrivate priv(m_main);
+    return loadFile(c_str(),"",0,warn,&priv);
 }
 
 static inline char* cfgReadLine(FILE* f, char* buf, int rd,
@@ -240,15 +274,16 @@ static inline char* cfgReadLine(FILE* f, char* buf, int rd,
     return pc;
 }
 
-bool Configuration::loadFile(const char* file, String sect, unsigned int depth, bool warn)
+bool Configuration::loadFile(const char* file, String sect, unsigned int depth, bool warn, void* priv)
 {
+    ConfigurationPrivate& cfg = *(ConfigurationPrivate*)priv;
     DDebug(DebugInfo,"Configuration::loadFile(\"%s\",[%s],%u,%s)",
 	file,sect.c_str(),depth,String::boolText(warn));
-    if (depth > MAX_DEPTH) {
+    if (depth > s_maxDepth) {
 	Debug(DebugWarn,"Refusing to open config file '%s' at include depth %u",file,depth);
 	return false;
     }
-    int warnSilent = warn ? -1 : 0;
+    bool warnSilent = s_disableIncludeSilent ? warn : false;
     FILE *f = ::fopen(file,"r");
     if (f) {
 	bool ok = true;
@@ -329,12 +364,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			}
 			path << s;
 			ObjList files;
-			if (silent && warnSilent < 0) {
-			    bool off = Engine::config().getBoolValue(YSTRING("general"),
-				YSTRING("configuration_disable_include_silent"));
-			    warnSilent = off ? (warn ? 1 : 0) : 0;
-			}
-			bool doWarn = silent ? (warnSilent > 0) : warn;
+			bool doWarn = silent ? warnSilent : warn;
 			if (File::listDirectory(path,0,&files)) {
 			    path << Engine::pathSeparator();
 			    DDebug(DebugAll,"Configuration loading up to %u files from '%s'",
@@ -343,7 +373,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			    while (String* it = static_cast<String*>(files.remove(false))) {
 				if (!(it->startsWith(".") || it->endsWith("~")
 					|| it->endsWith(".bak") || it->endsWith(".tmp")))
-				    ok = (loadFile(path + *it,sect,depth+1,doWarn) || noerr) && ok;
+				    ok = (loadFile(path + *it,sect,depth+1,doWarn,priv) || noerr) && ok;
 #ifdef DEBUG
 				else
 				    Debug(DebugAll,"Configuration skipping over file '%s'",it->c_str());
@@ -352,7 +382,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			    }
 			}
 			else
-			    ok = (loadFile(path,sect,depth+1,doWarn) || noerr) && ok;
+			    ok = (loadFile(path,sect,depth+1,doWarn,priv) || noerr) && ok;
 			continue;
 		    }
 		    Engine::runParams().replaceParams(s);
@@ -380,7 +410,9 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 		    break;
 		s += pc;
 	    }
-	    addValue(sect,key,s.trimBlanks());
+	    s.trimBlanks();
+	    cfg.addingParam(sect,key,s);
+	    addValue(sect,key,s);
 	}
 	::fclose(f);
 	return ok;
