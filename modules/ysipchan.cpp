@@ -336,6 +336,7 @@ protected:
     // Initialize a socket
     Socket* initSocket(SocketAddr& addr, Mutex* mutex, int backLogBuffer, bool forceBind,
 	String& reason);
+    void initialize(const NamedList& params, bool first);
 
     unsigned int m_bindInterval;         // Interval to try binding
     u_int64_t m_nextBind;                // Next time to bind
@@ -347,6 +348,7 @@ protected:
     bool m_ipv6Support;                  // IPv6 supported
     bool m_setRtpAddr;                   // Set rtp address from bind address
     String m_bindRtpLocalAddr;           // Rtp local address set from bind address
+    uint64_t m_warnBindFailDelay;        // Delay failed to bind debug message
 
 private:
     String m_name;                       // Listener name
@@ -1307,6 +1309,8 @@ static bool s_preventive_bye = true;
 static bool s_ignoreVia = true;          // Ignore Via headers and send answer back to the source
 static bool s_changeParty2xx = false;    // Change party when handling 2xx. Ignored if autochangeparty is disabled
 static bool s_warnPacketUDP = true;      // Warn when receiving possible truncated packet
+static uint64_t s_warnBindFailDelay = 0; // Delay listener failed to bind warning
+static bool s_warnNoDefTranUDP = true;   // Warn when a default UDP transport is not set
 static bool s_initialHeaders = false;    // Put all headers as received in initial message sent to yate
 static bool s_sipt_isup = false;         // Control the application/isup body processing
 static bool s_printMsg = true;           // Print sent/received SIP messages to output
@@ -1398,6 +1402,21 @@ static inline String& getGlobal(String& dest, String& src)
 {
     Lock lck(s_globalMutex);
     return (dest = src);
+}
+
+static inline uint64_t getWarnFailToBindDelay(const String& val)
+{
+    if (s_engineStart)
+	return 0;
+    int tmp = val.toInteger(0,0,0,BIND_RETRY_MAX);
+    if (tmp > 0) {
+	if (tmp < (int)s_bindRetryMs)
+	    tmp = s_bindRetryMs;
+	return 1000 * (uint64_t)tmp;
+    }
+    if (val == YSTRING("start"))
+	return ULLONG_MAX;
+    return 0;
 }
 
 // Get an address. Check if enclosed in []
@@ -2849,6 +2868,7 @@ YateSIPListener::YateSIPListener(const char* name, int proto, const String& addr
     : m_bindInterval(0), m_nextBind(0),
     m_bind(true), m_address(addr), m_port(port),
     m_ipv6(false), m_ipv6Support(false), m_setRtpAddr(false),
+    m_warnBindFailDelay(s_warnBindFailDelay),
     m_name(name), m_proto(proto)
 {
 }
@@ -3030,6 +3050,7 @@ Socket* YateSIPListener::initSocket(SocketAddr& lAddr, Mutex* mutex,
 	    type,lName(),lAddr.addr().c_str(),lAddr.familyName());
 	m_nextBind = 0;
 	m_bindInterval = 0;
+	m_warnBindFailDelay = 0;
 	return sock;
     }
     String s;
@@ -3038,7 +3059,18 @@ Socket* YateSIPListener::initSocket(SocketAddr& lAddr, Mutex* mutex,
 	Thread::errorString(tmp,sock->error());
 	s << " (" << sock->error() << " '" << tmp << "')";
     }
-    Alarm(&plugin,"socket",DebugWarn,
+    Time now = Time::now();
+    if (m_warnBindFailDelay) {
+	if (m_warnBindFailDelay == ULLONG_MAX) {
+	    if (s_engineStart)
+		m_warnBindFailDelay = 0;
+	}
+	else if (m_warnBindFailDelay >= now)
+	    m_warnBindFailDelay = 0;
+	else if (m_warnBindFailDelay < BIND_RETRY_MAX)
+	    m_warnBindFailDelay += now;
+    }
+    Alarm(&plugin,"socket",m_warnBindFailDelay ? DebugAll : DebugWarn,
 	"Listener(%s,'%s') failed to start on addr='%s' port=%d ipv6=%s: %s%s",
 	type,lName(),addr.safe(),port,String::boolText(ipv6),
 	reason.c_str(),s.safe());
@@ -3046,9 +3078,18 @@ Socket* YateSIPListener::initSocket(SocketAddr& lAddr, Mutex* mutex,
 	m_bindInterval = s_bindRetryMs;
     else if (m_bindInterval < BIND_RETRY_MAX)
 	m_bindInterval *= 2;
-    m_nextBind = Time::now() + m_bindInterval * 1000;
+    m_nextBind = now + m_bindInterval * 1000;
     YateSIPTransport::resetSocket(sock,0);
     return 0;
+}
+
+void YateSIPListener::initialize(const NamedList& params, bool first)
+{
+    if (first) {
+	const String* wbfd = params.getParam(YSTRING("warn_bind_fail_delay"));
+	if (wbfd)
+	    m_warnBindFailDelay = getWarnFailToBindDelay(*wbfd);
+    }
 }
 
 
@@ -3349,6 +3390,7 @@ YateSIPUDPTransport::YateSIPUDPTransport(const String& id)
 bool YateSIPUDPTransport::init(const NamedList& params, const NamedList& defs, bool first,
     Thread::Priority prio)
 {
+    YateSIPListener::initialize(params,first);
     updateRtpAddr(params,m_rtpLocalAddr,this);
     m_default = params.getBoolValue("default",toString() == YSTRING("general"));
     m_forceBind = params.getBoolValue("udp_force_bind",true);
@@ -4267,6 +4309,7 @@ YateSIPTCPListener::~YateSIPTCPListener()
 // Init data
 void YateSIPTCPListener::init(const NamedList& params, bool first)
 {
+    YateSIPListener::initialize(params,first);
     m_initialized = true;
     const String& addr = params["addr"];
     int port = params.getIntValue("port");
@@ -5158,7 +5201,7 @@ void YateSIPEndPoint::updateDefUdpTransport()
 	Debug(&plugin,DebugInfo,"Default UDP transport is '%s'",
 	    m_defTransport->toString().c_str());
     else if (!Engine::exiting())
-	Debug(&plugin,DebugNote,"Default UDP transport not set");
+	Debug(&plugin,s_warnNoDefTranUDP ? DebugNote : DebugAll,"Default UDP transport not set");
 }
 
 // Retrieve a transport by name. Return referrenced object
@@ -9618,6 +9661,8 @@ void SIPDriver::initialize()
 	s_dtmfMethods.setDefault();
     s_globalMutex.unlock();
     s_warnPacketUDP = true;
+    s_warnBindFailDelay = getWarnFailToBindDelay(gen[YSTRING("warn_bind_fail_delay")]);
+    s_warnNoDefTranUDP = gen.getBoolValue(YSTRING("warn_no_default_udp_transport"),true);
     s_checkAllowInfo = s_cfg.getBoolValue("general","check_allow_info",true);
     s_missingAllowInfoDefVal = s_cfg.getBoolValue("general","missing_allow_info",true);
     s_honorDtmfDetect = s_cfg.getBoolValue("general","honor_dtmf_detect",true);

@@ -376,6 +376,18 @@
 ; This parameter is applied on reload
 ;initial_headers=no
 
+; warn_bind_fail_delay: integer/string: Delay failed to bind debug message
+; This parameter may be used when listener is going to bind on an IP which may become
+;  available later
+; Values:
+;  integer: Delay in milliseconds. Interval: 500..60000
+;  'start': Delay until engine starts (engine.start message is handled by module) 
+;warn_bind_fail_delay=0
+
+; warn_no_default_udp_transport: boolean: Warn if there is not default UDP transport
+; This parameter is applied on reload
+;warn_no_default_udp_transport=yes
+
 
 [options]
 ; Controls the behaviour for SIP options retrieval
@@ -548,6 +560,7 @@
 ; The following parameters can be overridden from 'general' section:
 ;   UDP: maxpkt, buffer
 ;   TCP/TLS: tcp_maxpkt
+;   All: warn_bind_fail_delay
 
 ; type: keyword: Listener type
 ; Allowed values:
