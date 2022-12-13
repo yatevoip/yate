@@ -5961,7 +5961,6 @@ public:
 
     /**
      * Hexify a buffer and add it to parameters list
-     * @param list Destination list
      * @param name Parameter name
      * @param buf Buffer to add
      * @param len Buffer length
