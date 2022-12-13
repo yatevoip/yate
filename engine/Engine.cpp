@@ -305,6 +305,7 @@ static int s_exit = -1;
 unsigned int Engine::s_congestion = 0;
 static Mutex s_congMutex(false,"Congestion");
 static bool s_debug = true;
+static NamedList s_debugInit("");
 static bool s_capture = CAPTURE_EVENTS;
 static int s_maxevents = 25;
 static Mutex s_eventsMutex(false,"EventsList");
@@ -1584,6 +1585,9 @@ int Engine::engineInit()
     CapturedEvent::capturing(s_capture);
     s_cfg = configFile(s_cfgfile);
     s_cfg.load();
+    NamedList* sect = s_cfg.getSection(YSTRING("debug"));
+    if (sect)
+	s_debugInit.copyParams(false,*sect);
     s_capture = s_cfg.getBoolValue("general","startevents",s_capture);
     CapturedEvent::capturing(s_capture);
     if (s_capture && s_startMsg)
@@ -1859,18 +1863,14 @@ int Engine::run()
 	if (s_debug) {
 	    // one-time sending of debug setup messages
 	    s_debug = false;
-	    const NamedList* sect = s_cfg.getSection("debug");
-	    if (sect) {
-		unsigned int n = sect->length();
-		for (unsigned int i = 0; i < n; i++) {
-		    const NamedString* str = sect->getParam(i);
-		    if (!(str && str->name() && *str))
-			continue;
-		    Message* m = new Message("engine.debug");
-		    m->addParam("module",str->name());
-		    m->addParam("line",*str);
-		    enqueue(m);
-		}
+	    for (ObjList* o = s_debugInit.paramList()->skipNull(); o; o = o->skipNext()) {
+		const NamedString* str = static_cast<NamedString*>(o->get());
+		if (!(str->name() && *str))
+		    continue;
+		Message* m = new Message("engine.debug");
+		m->addParam("module",str->name());
+		m->addParam("line",*str);
+		enqueue(m);
 	    }
 	}
 	else if (s_capture) {
@@ -2278,6 +2278,8 @@ void Engine::initPlugins()
     for (; l; l = l->skipNext()) {
 	Plugin *p = static_cast<Plugin *>(l->get());
 	TempObjectCounter cnt(p->objectsCounter(),true);
+	if (s_debug)
+	    p->debugSet(s_debugInit[p->toString()]);
 	p->initialize();
 	if (exiting()) {
 	    Output("Initialization aborted, exiting...");

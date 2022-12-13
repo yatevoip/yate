@@ -1333,28 +1333,17 @@ bool Module::setDebug(Message& msg, const String& target)
 	return false;
 
     NamedCounter* counter = objectsCounter();
-    String str = msg.getValue("line");
-    if (str.startSkip("level")) {
-	int dbg = debugLevel();
-	str >> dbg;
-	if (str == "+") {
-	    if (debugLevel() > dbg)
-		dbg = debugLevel();
-	}
-	else if (str == "-") {
-	    if (debugLevel() < dbg)
-		dbg = debugLevel();
-	}
-	debugLevel(dbg);
-    }
-    else if (str == "reset") {
-	debugLevel(TelEngine::debugLevel());
-	debugEnabled(true);
+    const String& line = msg[YSTRING("line")];
+    debugSet(line);
+    String str = line;
+    if (str.startSkip("level"))
+	;
+    else if (str == YSTRING("reset")) {
 	if (counter)
 	    counter->enable(getObjCounting());
     }
     else if (str.startSkip("objects")) {
-	bool dbg = (str == "reset") ? getObjCounting() : (counter && counter->enabled());
+	bool dbg = (str == YSTRING("reset")) ? getObjCounting() : (counter && counter->enabled());
 	str >> dbg;
 	if (counter)
 	    counter->enable(dbg);

@@ -684,6 +684,31 @@ void DebugEnabler::debugCopy(const DebugEnabler* original)
     m_chain = 0;
 }
 
+void DebugEnabler::debugSet(const char* desc)
+{
+    if (TelEngine::null(desc))
+	return;
+    String s(desc);
+    if (s.startSkip("level")) {
+	int dbg = debugLevel();
+	s >> dbg;
+	if (s == YSTRING("+")) {
+	    if (debugLevel() > dbg)
+		dbg = debugLevel();
+	}
+	else if (s == YSTRING("-")) {
+	    if (debugLevel() < dbg)
+		dbg = debugLevel();
+	}
+	debugLevel(dbg);
+    }
+    else if (s == YSTRING("reset")) {
+	debugLevel(TelEngine::debugLevel());
+	debugEnabled(true);
+    }
+}
+
+
 Debugger::Debugger(const char* name, const char* format, ...)
     : m_name(name), m_level(DebugAll)
 {

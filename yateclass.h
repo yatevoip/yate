@@ -385,6 +385,12 @@ public:
      */
     void debugCopy(const DebugEnabler* original = 0);
 
+    /**
+     * Set debug from description
+     * @param desc Debug description. [level [NNN][+-]] or 'reset'
+     */
+    void debugSet(const char* desc);
+
 protected:
     /**
      * Set the current debug name
