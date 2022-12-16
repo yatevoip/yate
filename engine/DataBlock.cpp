@@ -130,6 +130,7 @@ void* DataBlock::getObject(const String& name) const
 void DataBlock::clear(bool deleteData)
 {
     m_length = 0;
+    m_allocated = 0;
     if (m_data) {
 	void *data = m_data;
 	m_data = 0;
@@ -159,7 +160,7 @@ bool DataBlock::change(unsigned int pos, const void* buf, unsigned int bufLen,
     unsigned int aLen = 0;
     // Allocate a new buffer if input data may overlap with existing
     bool overlap = buf && (mayOverlap || buf == m_data);
-    if (overlap || newLen > m_allocated) {
+    if (!m_data || overlap || newLen > m_allocated) {
 	aLen = allocLen(newLen);
 	// Append to existing: Realloc data. Avoid free
 	void* reallocAppend = (!overlap && pos == m_length) ? m_data : 0;
