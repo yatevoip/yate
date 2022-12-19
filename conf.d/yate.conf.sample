@@ -236,11 +236,12 @@ h323chan.yate=yes
 ; These parameters are handled on first load only (repeated parameters are ignored)
 ; This section should be the first handled section if you need to apply parameters on this file also
 
-; max_depth: integer: Maximum include depth
+; max_depth: integer: Maximum file include depth
 ; Allowed interval: 3..10
 ;max_depth=3
 
 ; disable_include_silent: boolean: Disable silent include in Configuration files
 ; The '$includesilent' directives of configuration file will be handled as '$include' if this
 ;  parameter is set to boolean true
+; Same applies for '$includesectionsilent': handled as '$includesection'
 ;disable_include_silent=no

@@ -25,37 +25,154 @@
 using namespace TelEngine;
 
 static unsigned int s_maxDepth = 3;
-static bool s_disableIncludeSilent = false;
+static int s_disableIncludeSilent = -1;
 
 class ConfigurationPrivate
 {
 public:
-    inline ConfigurationPrivate(bool isMain)
-	: main(isMain)
+    enum Include {
+	IncludeNone = 0,
+	Include = 1,
+	IncludeSilent = 2,
+	IncludeRequire = 3,
+    };
+    inline ConfigurationPrivate(Configuration& cfg, bool isMain)
+	: m_cfg(cfg), m_main(isMain)
 	{}
     inline void addingParam(const String& sect, const String& name, const String& value) {
-	    if (!main)
-		return;
-	    if (sect != YSTRING("configuration"))
+	    if (!m_main || sect != YSTRING("configuration"))
 		return;
 	    if (s_maxDepthInit && name == YSTRING("max_depth")) {
 		s_maxDepthInit = false;
 		s_maxDepth = value.toInteger(3,0,3,10);
-		return;
 	    }
-	    if (s_disableIncludeSilentInit && name == YSTRING("disable_include_silent")) {
-		s_disableIncludeSilentInit = false;
-		s_disableIncludeSilent = value.toBoolean();
-		return;
+	    else if (s_disableIncludeSilent < 0 && name == YSTRING("disable_include_silent"))
+		s_disableIncludeSilent = value.toBoolean() ? 1 : 0;
+	}
+    inline bool prepareIncludeSection(const String& sect, String& s, const char* file, bool warn,
+	bool& ok) {
+	    int inc = getIncludeSect(s);
+	    if (!inc)
+		return false;
+	    NamedList* nl = sect ? m_cfg.getSection(sect) : 0;
+	    if (nl) {
+		nl->addParam("[]",s);
+		if (!m_includeSections.find(nl))
+		    m_includeSections.append(nl)->setDelete(false);
+		XDebug(DebugAll,"Config '%s' prepared section '%s' include '%s' file='%s'",
+		    m_cfg.safe(),sect.safe(),s.safe(),(file == m_cfg.c_str() ? "<same>" : file));
+	    }
+	    else {
+		if (inc == IncludeRequire)
+		    ok = false;
+		if (getWarn(warn,inc == IncludeSilent)) {
+		    String tmp;
+		    if (file != m_cfg.c_str())
+			tmp.printf(" in included file '%s'",file);
+		    Debug(DebugNote,"Config '%s' found '%s' outside any section%s",
+			m_cfg.safe(),s.safe(),tmp.safe());
+		}
+	    }
+	    return true;
+	}
+    inline void processIncludeSections(bool warn, bool& ok) {
+	    for (ObjList* o = m_includeSections.skipNull(); o; o = o->skipNext()) {
+		ObjList stack;
+		processInclude(static_cast<NamedList*>(o->get()),stack,warn,ok);
 	    }
 	}
+    inline bool getWarn(bool warn, bool silent)
+	{ return (warn && silent) ? (s_disableIncludeSilent > 0) : warn; }
 
-    bool main;
+    static inline int getIncludeSect(String& buf, bool setName = false) {
+	    if (buf.startsWith("$includesection",true))
+		{ if (setName) buf = buf.substr(16,buf.length() - 16); return Include; }
+	    if (buf.startsWith("$includesectionsilent",true))
+		{ if (setName) buf = buf.substr(22,buf.length() - 22); return IncludeSilent; }
+	    if (buf.startsWith("$requiresection",true))
+		{ if (setName) buf = buf.substr(16,buf.length() - 16); return IncludeRequire; }
+	    return 0;
+	}
+
     static bool s_maxDepthInit;
-    static bool s_disableIncludeSilentInit;
+
+private:
+    void processInclude(NamedList* sect, ObjList& stack, bool warn, bool& ok);
+
+    Configuration& m_cfg;
+    bool m_main;
+    ObjList m_includeSections;
+    ObjList m_includeSectProcessed;
 };
 bool ConfigurationPrivate::s_maxDepthInit = true;
-bool ConfigurationPrivate::s_disableIncludeSilentInit = true;
+
+void ConfigurationPrivate::processInclude(NamedList* sect, ObjList& stack, bool warn, bool& ok)
+{
+    if (!sect || m_includeSectProcessed.find(sect))
+	return;
+    stack.append(sect)->setDelete(false);
+#ifdef XDEBUG
+    String tmp;
+    tmp.append(stack," -> ");
+    Debug(DebugInfo,"Config '%s' processing include section stack: %s",
+	m_cfg.safe(),tmp.safe());
+#endif
+    for (ObjList* o = sect->paramList()->skipNull(); o;) {
+	NamedString* s = static_cast<NamedString*>(o->get());
+	int inc = 0;
+	if ('[' == s->name()[0] && ']' == s->name()[1])
+	    inc = getIncludeSect(*s,true);
+	if (!inc) {
+	    o = o->skipNext();
+	    continue;
+	}
+	Engine::runParams().replaceParams(*s);
+	if (*s) {
+	    String error;
+	    if (!stack[*s]) {
+		// NOTE: We are adding current section to processed after processing it
+		//       Handle already processed sections whithout checking for recursive include
+		NamedList* incSect = static_cast<NamedList*>(m_includeSectProcessed[*s]);
+		if (!incSect) {
+		    incSect = m_cfg.getSection(*s);
+		    if (incSect && incSect != sect)
+			processInclude(incSect,stack,warn,ok);
+		    else
+			error = incSect ? "recursive include" : "not found";
+		}
+		if (!error) {
+		    XDebug(DebugAll,"Config '%s' including section '%s' in '%s'",
+			m_cfg.safe(),incSect->safe(),sect->safe());
+		    for (ObjList* p = incSect->paramList()->skipNull(); p; p = p->skipNext()) {
+			NamedString* ns = static_cast<NamedString*>(p->get());
+			o->insert(new NamedString(ns->name(),*ns));
+			// Update current element (replaced by insert)
+			o = o->next();
+		    }
+		}
+	    }
+	    else {
+		error.append(stack," -> ");
+		error = "recursive include stack=" + error;
+	    }
+	    if (error) {
+		if (inc == IncludeRequire)
+		    ok = false;
+		if (getWarn(warn,inc == IncludeSilent))
+		    Debug(DebugNote,"Config '%s' not including section '%s' in '%s': %s",
+			m_cfg.safe(),s->safe(),sect->safe(),error.c_str());
+	    }
+	}
+	o->remove();
+	o = o->skipNull();
+	if (o)
+	    continue;
+	sect->paramList()->compact();
+	break;
+    }
+    stack.remove(sect,false);
+    m_includeSectProcessed.insert(sect)->setDelete(false);
+}
 
 
 // Text sort callback
@@ -218,7 +335,7 @@ bool Configuration::load(bool warn)
     m_sections.clear();
     if (null())
 	return false;
-    ConfigurationPrivate priv(m_main);
+    ConfigurationPrivate priv(*this,m_main);
     return loadFile(c_str(),"",0,warn,&priv);
 }
 
@@ -280,10 +397,10 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
     DDebug(DebugInfo,"Configuration::loadFile(\"%s\",[%s],%u,%s)",
 	file,sect.c_str(),depth,String::boolText(warn));
     if (depth > s_maxDepth) {
-	Debug(DebugWarn,"Refusing to open config file '%s' at include depth %u",file,depth);
+	Debug(DebugWarn,"Config '%s' refusing to load config file '%s' at include depth %u",
+	    c_str(),file,depth);
 	return false;
     }
-    bool warnSilent = s_disableIncludeSilent ? warn : false;
     FILE *f = ::fopen(file,"r");
     if (f) {
 	bool ok = true;
@@ -336,6 +453,8 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 		    }
 		    if (!enabled)
 			continue;
+		    if (cfg.prepareIncludeSection(sect,s,file,warn,ok))
+			continue;
 		    bool noerr = false;
 		    bool silent = false;
 		    if (s.startSkip("$require") || (noerr = s.startSkip("$include"))
@@ -364,7 +483,7 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 			}
 			path << s;
 			ObjList files;
-			bool doWarn = silent ? warnSilent : warn;
+			bool doWarn = cfg.getWarn(warn,silent);
 			if (File::listDirectory(path,0,&files)) {
 			    path << Engine::pathSeparator();
 			    DDebug(DebugAll,"Configuration loading up to %u files from '%s'",
@@ -415,13 +534,15 @@ bool Configuration::loadFile(const char* file, String sect, unsigned int depth, 
 	    addValue(sect,key,s);
 	}
 	::fclose(f);
+	if (!depth)
+	    cfg.processIncludeSections(warn,ok);
 	return ok;
     }
     if (warn) {
 	int err = errno;
 	if (depth)
-	    Debug(DebugNote,"Failed to open included config file '%s' (%d: %s)",
-		file,err,strerror(err));
+	    Debug(DebugNote,"Config '%s' failed to open included config file '%s' (%d: %s)",
+		c_str(),file,err,strerror(err));
 	else
 	    Debug(DebugNote,"Failed to open config file '%s', using defaults (%d: %s)",
 		file,err,strerror(err));
