@@ -1738,7 +1738,8 @@ bool Connection::processCommand(const char *line, bool saveLine)
             writeStr("Missing configuration name\r\n");
         else {
             String conf = Engine::configFile(str);
-            Configuration cfg(conf,false);
+	    Configuration cfg;
+	    cfg = conf;
             if (!cfg.load()) {
                 str = "Failed to load configuration file '" + conf + "'\r\n";
                 writeStr(str);
