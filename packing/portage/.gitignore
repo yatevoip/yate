@@ -1,0 +1,6 @@
+Makefile
+yate.ebuild
+core*
+*.orig
+*~
+.*.swp

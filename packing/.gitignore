@@ -1,0 +1,5 @@
+revision.txt
+core*
+*.orig
+*~
+.*.swp

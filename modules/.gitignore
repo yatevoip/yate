@@ -1,0 +1,10 @@
+Makefile
+YateLocal*
+core*
+*.o
+*.a
+*.so
+*.yate
+*.orig
+*~
+.*.swp

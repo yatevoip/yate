@@ -1,0 +1,7 @@
+Makefile
+YateLocal.mak
+*.pyc
+core*
+*.orig
+*~
+.*.swp
