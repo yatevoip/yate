@@ -1172,6 +1172,75 @@ template <class Obj> void destruct(Obj*& obj)
     { if (obj) { obj->destruct(); obj = 0; } }
 
 /**
+ * This class holds an automatic (owned) GenObject pointer
+ * @short GenObject pointer holder (owned)
+ */
+class YATE_API AutoGenObject
+{
+    YNOCOPY(AutoGenObject); // no automatic copies please
+public:
+    /**
+     * Constructor
+     * @param gen Optional pointer to object
+     */
+    inline AutoGenObject(GenObject* gen = 0)
+	: m_pointer(gen)
+	{}
+
+    /**
+     * Destructor
+     */
+    inline ~AutoGenObject()
+	{ set(); }
+
+    /**
+     * Take the pointer. Caller retains ownership
+     * @return GenObject pointer, NULL if not set
+     */
+    inline GenObject* take() {
+	    GenObject* gen = m_pointer;
+	    m_pointer = 0;
+	    return gen;
+	}
+
+    /**
+     * Assignment from pointer
+     * @param gen New pointer value
+     */
+    inline AutoGenObject& operator=(GenObject* gen)
+	{ set(gen); return *this; }
+
+    /**
+     * Conversion to regular pointer operator
+     * @return The stored pointer
+     */
+    inline operator GenObject*() const
+	{ return m_pointer; }
+
+    /**
+     * Member access operator
+     */
+    inline GenObject* operator->() const
+	{ return m_pointer; }
+
+    /**
+     * Dereferencing operator
+     */
+    inline GenObject& operator*() const
+	{ return *m_pointer; }
+
+private:
+    inline void set(GenObject* gen = 0) {
+	    if (m_pointer == gen)
+		return;
+	    GenObject* tmp = m_pointer;
+	    m_pointer = gen;
+	    TelEngine::destruct(tmp);
+	}
+    GenObject* m_pointer;
+};
+
+/**
  * A reference counted object.
  * Whenever using multiple inheritance you should inherit this class virtually.
  */
@@ -1784,6 +1853,14 @@ public:
      * @return Capacity of the vector
      */
     unsigned int assign(ObjList& list, bool move = true, unsigned int maxLen = 0);
+
+    /**
+     * Resize the vector. Reset data if not kept
+     * @param len New vector length
+     * @param keepData Keep old data
+     * @return Capacity of the vector
+     */
+    unsigned int resize(unsigned int len, bool keepData = false);
 
     /**
      * Retrieve and remove an object from the vector

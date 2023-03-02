@@ -18,6 +18,7 @@
  */
 
 #include "yateclass.h"
+#include <string.h>
 
 using namespace TelEngine;
 
@@ -486,6 +487,47 @@ unsigned int ObjVector::assign(ObjList& list, bool move, unsigned int maxLen)
     return maxLen;
 }
 
+static inline void clearObjVector(GenObject** objs, unsigned int len)
+{
+    while (len--) {
+	TelEngine::destruct(*objs);
+	objs++;
+    }
+}
+
+unsigned int ObjVector::resize(unsigned int len, bool keepData)
+{
+    if (!len) {
+	clear();
+	return length();
+    }
+    if (len == length()) {
+	if (!keepData) {
+	    if (m_delete)
+		clearObjVector(m_objects,length());
+	    ::memset(m_objects,0,length() * sizeof(GenObject*));
+	}
+	return length();
+    }
+    GenObject** buf = new GenObject*[len];
+    if (!(keepData && length()))
+	::memset(buf,0,len * sizeof(GenObject*));
+    else if (len < length()) {
+	::memcpy(buf,m_objects,len * sizeof(GenObject*));
+	::memset(m_objects,0,len * sizeof(GenObject*));
+    }
+    else {
+	::memcpy(buf,m_objects,length() * sizeof(GenObject*));
+	::memset(m_objects,0,length() * sizeof(GenObject*));
+	if (len > length())
+	    ::memset(buf + length(),0,(length() - len) * sizeof(GenObject*));
+    }
+    clear();
+    m_objects = buf;
+    m_length = len;
+    return length();
+}
+
 unsigned int ObjVector::count() const
 {
     if (!m_objects)
@@ -558,10 +600,8 @@ void ObjVector::clear()
     unsigned int len = m_length;
     m_length = 0;
     m_objects = 0;
-    if (m_delete && objs) {
-	for (unsigned int i = 0; i < len; i++)
-	    TelEngine::destruct(objs[i]);
-    }
+    if (m_delete && objs)
+	clearObjVector(objs,len);
     delete[] objs;
 }
 
