@@ -2563,7 +2563,7 @@ public:
      * @param upCase Set to true to use upper case characters in hexa
      * @return Reference to the String
      */
-    String& hexify(void* data, unsigned int len, char sep = 0, bool upCase = false);
+    String& hexify(const void* data, unsigned int len, char sep = 0, bool upCase = false);
 
     /**
      * Assignment operator.

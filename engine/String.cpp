@@ -684,7 +684,7 @@ String& String::assign(char value, unsigned int repeat)
     return *this;
 }
 
-String& String::hexify(void* data, unsigned int len, char sep, bool upCase)
+String& String::hexify(const void* data, unsigned int len, char sep, bool upCase)
 {
     const char* hex = upCase ? "0123456789ABCDEF" : "0123456789abcdef";
     if (data && len) {
