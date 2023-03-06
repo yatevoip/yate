@@ -21,9 +21,9 @@
 
 #include <yatephone.h>
 
-#include <stdio.h>
 #include <mysql.h>
 #include <mysqld_error.h>
+#include <errmsg.h>
 
 #ifndef CLIENT_MULTI_STATEMENTS
 #define CLIENT_MULTI_STATEMENTS 0
@@ -67,6 +67,11 @@ class MyConn : public String
     friend class MyAcct;
 
 public:
+    // NOTE: Use negative values: mysql uses positive
+    enum QueryError {
+	ConnDisconnected = -1,
+	DbDisconnected = -2,
+    };
 
     inline MyConn(const String& name, MyAcct* conn)
 	: String(name),
@@ -79,11 +84,37 @@ public:
     void runQueries();
     int queryDbInternal(DbQuery* query);
 
+    static const TokenDict s_error[];
+
 private:
     MYSQL* m_conn;
     MyAcct* m_owner;
     DbThread* m_thread;
     bool testDb();
+};
+
+class QueryStats : public Mutex
+{
+public:
+    inline QueryStats()
+	: m_total(0), m_failed(0), m_failedNoConn(0), m_queueTime(0), m_queryTime(0)
+	{}
+    inline QueryStats(const QueryStats& other)
+	{ *this = other; }
+    inline QueryStats& operator=(const QueryStats& other) {
+	    m_total = other.m_total;
+	    m_failed = other.m_failed;
+	    m_failedNoConn = other.m_failedNoConn;
+	    m_queueTime = other.m_queueTime;
+	    m_queryTime = other.m_queryTime;
+	    return *this;
+	}
+
+    uint64_t m_total;                    // Total queries
+    uint64_t m_failed;                   // Tried and failed queries
+    uint64_t m_failedNoConn;             // Not tried queries: no connection
+    uint64_t m_queueTime;                // Total time queries stayed in queue
+    uint64_t m_queryTime;                // Total DB query time
 };
 
 /**
@@ -97,6 +128,7 @@ public:
     MyAcct(const NamedList* sect);
     ~MyAcct();
 
+    bool initialize(const NamedList& params, bool constr = false);
     bool initDb();
     int initConns();
     void dropDb();
@@ -106,23 +138,14 @@ public:
 	{ return m_name; }
 
     void appendQuery(DbQuery* query);
-
-    void incTotal();
-    void incFailed();
-    void incErrorred();
-    void incQueryTime(u_int64_t with);
-    void lostConn();
-    void resetConn();
-    inline unsigned int total()
-	{ return m_totalQueries; }
-    inline unsigned int failed()
-	{ return m_failedQueries; }
-    inline unsigned int errorred()
-	{ return m_errorQueries; }
+    inline void resetLostConn() {
+	    Lock lck(m_statsMutex);
+	    m_failedConns = 0;
+	}
+    inline void stats(QueryStats& dest)
+	{ Lock lck(m_statsMutex); dest = m_stats; }
     inline bool hasConn()
 	{ return ((int)(m_poolSize - m_failedConns) > 0 ? true : false); }
-    inline unsigned int queryTime()
-        { return (unsigned int) m_queryTime; } //microseconds
     inline void setRetryWhen()
 	{ m_retryWhen = Time::msecNow() + m_retryTime * 1000; }
     inline u_int64_t retryWhen()
@@ -135,6 +158,9 @@ public:
 	{ return m_queryRetry; }
     virtual const String& toString() const
 	{ return m_name; }
+
+protected:
+    void queryEnded(DbQuery& query, bool ok = true);
 
 private:
     String m_name;
@@ -153,6 +179,7 @@ private:
     bool m_compress;
     String m_encoding;
     unsigned int m_queryRetry;
+    unsigned int m_warnQueryDuration;    // Warn if query duration exceeds this value
 
     int m_poolSize;
     ObjList m_connections;
@@ -162,12 +189,9 @@ private:
     Mutex m_queueMutex;
 
     // stats counters
-    unsigned int m_totalQueries;
-    unsigned int m_failedQueries;
-    unsigned int m_errorQueries;
-    u_int64_t m_queryTime;
+    QueryStats m_stats;
     unsigned int m_failedConns;
-    Mutex m_incMutex;
+    Mutex m_statsMutex;
 };
 
 /**
@@ -237,39 +261,88 @@ class DbQuery : public String, public Semaphore
 {
     friend class MyConn;
 public:
-    inline DbQuery(const String& query, Message* msg)
+    inline DbQuery(const String& query, Message* msg, uint64_t now = Time::now())
 	: String(query),
 	  Semaphore(1,"MySQL::query"),
-	  m_msg(msg), m_finished(false), m_cancelled(false)
+	  m_msg(msg), m_finished(false), m_cancelled(false), m_code(0),
+	  m_time(now), m_dequeued(0), m_start(0), m_end(0)
 	{ XDebug(&module,DebugAll,"DbQuery '%s' msg=(%p) [%p]",safe(),m_msg,this); }
-
     inline ~DbQuery()
 	{ XDebug(&module,DebugAll,"~DbQuery [%p]",this); }
-
     inline bool finished() const
 	{ return m_finished; }
-
     inline void setFinished() {
 	    m_finished = true;
 	    if (!m_msg)
 		destruct();
 	}
-
     inline bool cancelled() const
 	{ return m_cancelled; }
-
     inline void setCancelled()
 	{ m_cancelled = true; }
+    inline uint64_t time() const
+	{ return m_time; }
+    inline uint64_t dequeue() const
+	{ return m_dequeued; }
+    inline uint64_t start() const
+	{ return m_start; }
+    inline uint64_t end() const
+	{ return m_end; }
+    inline int error() const
+	{ return m_code; }
+    inline void setError(int code)
+	{ m_code = code; }
+    inline void setDequeued(uint64_t now = Time::now())
+	{ m_dequeued = now; }
+    inline void setStart(uint64_t now = Time::now())
+	{ m_start = now; }
+    inline void setEnd(uint64_t now = Time::now())
+	{ m_end = now; }
 
 private:
     Message* m_msg;
     bool m_finished;
     bool m_cancelled;
+    int m_code;
+    uint64_t m_time;
+    uint64_t m_dequeued;
+    uint64_t m_start;
+    uint64_t m_end;
 };
 
 static Mutex s_libMutex(false,"MySQL::lib");
 static int s_libCounter = 0;
 static unsigned int s_queryRetry = 1;
+
+const TokenDict MyConn::s_error[] = {
+    // Our errors
+    {"noconn", ConnDisconnected},                    // Connection is not connected when processing the query
+    {"noconn", DbDisconnected},                      // Database is not connected when handling the query
+    // mysql client errors
+#ifdef CR_SERVER_LOST
+    {"timeout", CR_SERVER_LOST},                     // Connection closed during query
+#endif
+#ifdef CR_SERVER_GONE_ERROR
+    {"timeout", CR_SERVER_GONE_ERROR},               // Connection closed between queries
+#endif
+    // mysql server errors
+#ifdef ER_QUERY_TIMEOUT
+    {"timeout", ER_QUERY_TIMEOUT},                   // Maximum query execution
+#endif
+#ifdef ER_CLIENT_INTERACTION_TIMEOUT
+    {"timeout", ER_CLIENT_INTERACTION_TIMEOUT},      // Client idle timeout
+#endif
+#ifdef ER_LOCK_DEADLOCK
+    {"deadlock", ER_LOCK_DEADLOCK},
+#endif
+    {0,0}
+};
+
+static inline unsigned int getQueryWarnDuration(const NamedList& params, unsigned int defVal = 0)
+{
+    defVal = params.getIntValue(YSTRING("warn_query_duration"),defVal,0);
+    return defVal ? (defVal < 50 ? 50 : defVal) : 0;
+}
 
 
 /**
@@ -320,16 +393,12 @@ void MyConn::runQueries()
 	DbQuery* query = static_cast<DbQuery*>(m_owner->m_queryQueue.remove(false));
 	if (!query)
 	    continue;
-	m_owner->incTotal();
 	mylock.drop();
 
 	DDebug(&module,DebugAll,"Connection '%s' will try to execute '%s'",
 	    c_str(),query->c_str());
-
-	int res = queryDbInternal(query);
-	if ((res < 0) && query->m_msg && !query->cancelled())
-	    query->m_msg->setParam("error","failure");
-
+	query->setDequeued();
+	queryDbInternal(query);
 	query->unlock();
 	query->setFinished();
 	DDebug(&module,DebugAll,"Connection '%s' finished executing query",c_str());
@@ -341,18 +410,28 @@ bool MyConn::testDb()
      return m_conn && !mysql_ping(m_conn);
 }
 
+static inline String& dumpUsec(String& buf, uint64_t us)
+{
+    us = (us + 500) / 1000;
+    return buf.printf("%u.%03u",(unsigned int)(us / 1000),(unsigned int)(us % 1000));
+}
+
 // perform the query, fill the message with data
 //  return number of rows, -1 for error
 int MyConn::queryDbInternal(DbQuery* query)
 {
     if (!testDb()) {
- 	m_owner->lostConn();
- 	m_owner->incFailed();
+	if (!query->cancelled()) {
+	    Debug(&module,DebugNote,"Connection '%s' query '%s' failed: disconnected",
+		c_str(),query->c_str());
+	    query->setError(ConnDisconnected);
+	}
+	m_owner->queryEnded(*query,false);
 	return -1;
     }
-    m_owner->resetConn();
-    u_int64_t start = Time::now();
+    m_owner->resetLostConn();
 
+    query->setStart();
     int retry = m_owner->queryRetry();
     do {
 	if (!mysql_real_query(m_conn,query->safe(),query->length()))
@@ -361,23 +440,32 @@ int MyConn::queryDbInternal(DbQuery* query)
 	    int err = mysql_errno(m_conn);
 #ifdef ER_LOCK_DEADLOCK
 	    if (err == ER_LOCK_DEADLOCK && retry-- > 0) {
-		Debug(&module,DebugInfo,"Query '%s' for '%s' failed code=%d. Retrying (remaining=%u)",
-		    query->c_str(),c_str(),err,retry);
+		Debug(&module,DebugInfo,
+		    "Connection '%s' query '%s' failed code=%d %s. Retrying (remaining=%d)",
+		    c_str(),query->c_str(),err,mysql_error(m_conn),retry);
 		continue;
 	    }
 #endif
-	    Debug(&module,DebugWarn,"Query '%s' for '%s' failed: code=%d %s",
-		query->c_str(),c_str(),err,mysql_error(m_conn));
+	    Debug(&module,DebugWarn,"Connection '%s' query '%s' failed: code=%d %s",
+		c_str(),query->c_str(),err,mysql_error(m_conn));
+	    query->setError(err);
 	}
-	u_int64_t duration = Time::now() - start;
-	m_owner->incQueryTime(duration);
-	m_owner->incErrorred();
+	m_owner->queryEnded(*query,false);
 	return -1;
     }
     while (true);
 
 #ifdef DEBUG
-    u_int64_t inter = Time::now();
+    uint64_t inter = Time::now();
+    unsigned int warnDuration = 1;
+#else
+    uint64_t inter = 0;
+    unsigned int warnDuration = 0;
+    if (query->m_msg) {
+	warnDuration = getQueryWarnDuration(*(query->m_msg),m_owner->m_warnQueryDuration);
+	if (warnDuration)
+	    inter = Time::now();
+    }
 #endif
     int total = 0;
     unsigned int warns = 0;
@@ -395,8 +483,8 @@ int MyConn::queryDbInternal(DbQuery* query)
 	    total += rows;
 	    if (query->m_msg) {
 		MYSQL_FIELD* fields = mysql_fetch_fields(res);
-		query->m_msg->setParam("columns",String(cols));
-		query->m_msg->setParam("rows",String(rows));
+		query->m_msg->setParam(YSTRING("columns"),cols);
+		query->m_msg->setParam(YSTRING("rows"),rows);
 		Array *a = new Array(cols,rows+1);
 		unsigned int c;
 		ObjList** columns = new ObjList*[cols];
@@ -450,18 +538,19 @@ int MyConn::queryDbInternal(DbQuery* query)
 	    mysql_free_result(res);
     } while (!mysql_next_result(m_conn));
 
-    u_int64_t finish = Time::now();
-    m_owner->incQueryTime(finish - start);
-#ifdef DEBUG
-    Debug(&module,DebugAll,"Query time for '%s' is %u+%u ms",c_str(),
-	(unsigned int)((inter-start+500)/1000),
-	(unsigned int)((finish-inter+500)/1000));
-#endif
-
+    m_owner->queryEnded(*query);
+    if (inter && (query->end() - query->start()) >= (1000 * warnDuration)) {
+	String t, q, f;
+	Debug(&module,warnDuration > 10 ? DebugNote : DebugAll,
+	    "Connection '%s' query time is %s %s+%s query='%s'",c_str(),
+	    dumpUsec(t,query->end() - query->start()).c_str(),
+	    dumpUsec(q,inter - query->start()).c_str(),
+	    dumpUsec(f,query->end() - inter).c_str(),query->c_str());
+    }
     if (query->m_msg) {
-	query->m_msg->setParam("affected",String(affected));
+	query->m_msg->setParam(YSTRING("affected"),affected);
 	if (warns)
-	    query->m_msg->setParam("warnings",String(warns));
+	    query->m_msg->setParam(YSTRING("warnings"),warns);
     }
     return total;
 }
@@ -474,12 +563,12 @@ MyAcct::MyAcct(const NamedList* sect)
       m_name(*sect),
       m_compress(false),
       m_queryRetry(s_queryRetry),
+      m_warnQueryDuration(0),
       m_poolSize(sect->getIntValue("poolsize",1,1)),
       m_queueSem(m_poolSize,"MySQL::queue"),
       m_queueMutex(false,"MySQL::queue"),
-      m_totalQueries(0), m_failedQueries(0), m_errorQueries(0),
-      m_queryTime(0), m_failedConns(0),
-      m_incMutex(false,"MySQL::inc")
+      m_failedConns(0),
+      m_statsMutex(false,"MySQL::stats")
 {
     int tout = sect->getIntValue("timeout",10000);
     // round to seconds
@@ -496,17 +585,14 @@ MyAcct::MyAcct(const NamedList* sect)
     m_compress = sect->getBoolValue("compress");
     m_queryRetry = sect->getIntValue(YSTRING("query_retry"),m_queryRetry,1,10);
     m_encoding = sect->getValue("encoding");
-
-    Debug(&module, DebugNote, "For account '%s' connection pool size is %d",
-	c_str(),m_poolSize);
-
     m_retryTime = sect->getIntValue("initretry",10); // default value is 10 seconds
     setRetryWhen(); // set retry interval
+    initialize(*sect,true);
 }
 
 MyAcct::~MyAcct()
 {
-    Debug(&module, DebugNote, "~MyAcct()");
+    Debug(&module,DebugAll,"Destroying account '%s' [%p]",c_str(),this);
     s_conns.remove(this,false);
     // FIXME: should we try to do it from this thread?
     dropDb();
@@ -515,9 +601,9 @@ MyAcct::~MyAcct()
 int MyAcct::initConns()
 {
     int count = m_connections.count();
-
-    DDebug(&module,DebugInfo,"MyAcct::initConns() - %d connections initialized already, pool required is of %d connections for '%s'",
-	count,m_poolSize,c_str());
+    Debug(&module,count != m_poolSize ? DebugInfo : DebugAll,
+	"Account '%s' initializing %d/%d connections [%p]",
+	c_str(),count,m_poolSize,this);
     // set new retry interval
     setRetryWhen();
 
@@ -570,6 +656,9 @@ int MyAcct::initConns()
 	    }
 	}
 	else {
+	    Debug(&module,DebugNote,"Connection '%s' failed to connect to server: %d %s [%p]",
+		mySqlConn->c_str(),mysql_errno(mySqlConn->m_conn),mysql_error(mySqlConn->m_conn),
+		mySqlConn);
 	    TelEngine::destruct(mySqlConn);
 	    return i;
 	}
@@ -578,14 +667,24 @@ int MyAcct::initConns()
     return m_poolSize;
 }
 
+bool MyAcct::initialize(const NamedList& params, bool constr)
+{
+    m_warnQueryDuration = getQueryWarnDuration(params);
+    if (constr) {
+	Debug(&module,DebugNote,
+	    "Created account '%s' poolsize=%d db='%s' host='%s' port=%u timeout=%u [%p]",
+	    c_str(),m_poolSize,m_db.safe(),m_host.safe(),m_port,m_timeout,this);
+	return true;
+    }
+    if (ok())
+	return true;
+    Debug(&module,DebugNote,"Reinitializing account '%s' [%p]",c_str(),this);
+    return initDb();
+}
+
 // initialize the database connection
 bool MyAcct::initDb()
 {
-    Lock lock(this);
-    // allow specifying the raw connection string
-    Debug(&module,DebugNote,"Initiating pool of %d connections for '%s'",
-	m_poolSize,c_str());
-
     s_libMutex.lock();
     if (0 == s_libCounter++) {
 	DDebug(&module,DebugAll,"Initializing the MySQL library");
@@ -593,16 +692,18 @@ bool MyAcct::initDb()
     }
     s_libMutex.unlock();
 
-    int initCons = initConns();
-    if (!initCons) {
-	Alarm(&module,"database",DebugWarn,"Could not initiate any connections for account '%s', trying again in %d seconds",
-	    c_str(),m_retryTime);
-	module.startInitThread();
-	return true;
-    }
-    if (initCons != m_poolSize) {
-	Alarm(&module,"database",DebugMild,"Could initiate only %d of %d connections for account '%s', trying again in %d seconds",
-	    initCons,m_poolSize,c_str(),m_retryTime);
+    Lock lck(this);
+    int n = initConns();
+    if (n != m_poolSize) {
+	if (!n)
+	    Alarm(&module,"database",DebugWarn,
+		"Could not create any connections for account '%s' re-trying in %d seconds",
+		c_str(),m_retryTime);
+	else
+	    Alarm(&module,"database",DebugMild,
+		"Initialized %d of %d connection(s) for account '%s' re-trying in %d seconds",
+		n,m_poolSize,c_str(),m_retryTime);
+	lck.drop();
 	module.startInitThread();
     }
     return true;
@@ -620,7 +721,7 @@ void MyAcct::dropDb()
 	    c->closeConn();
     }
     m_queryQueue.clear();
-    Debug(&module,DebugNote,"Database account '%s' closed",c_str());
+    Debug(&module,DebugNote,"Database account '%s' closed [%p]",c_str(),this);
 
     s_libMutex.lock();
     if (0 == --s_libCounter) {
@@ -628,60 +729,6 @@ void MyAcct::dropDb()
 	mysql_library_end();
     }
     s_libMutex.unlock();
-}
-
-void MyAcct::incTotal()
-{
-    XDebug(&module,DebugAll,"MyAcct::incTotal() [%p] - currently there have been %d queries",this,m_totalQueries);
-    m_incMutex.lock();
-    m_totalQueries++;
-    m_incMutex.unlock();
-    module.changed();
-}
-
-void MyAcct::incFailed()
-{
-    XDebug(&module,DebugAll,"MyAcct::incfailed() [%p] - currently there have been %d failed queries",this,m_failedQueries);
-    m_incMutex.lock();
-    m_failedQueries++;
-    m_incMutex.unlock();
-    module.changed();
-}
-
-void MyAcct::incErrorred()
-{
-    XDebug(&module,DebugAll,"MyAcct::incErrorred() [%p] - currently there have been %d errorred queries",this,m_errorQueries);
-    m_incMutex.lock();
-    m_errorQueries++;
-    m_incMutex.unlock();
-    module.changed();
-}
-
-void MyAcct::incQueryTime(u_int64_t with)
-{
-    XDebug(&module,DebugAll,"MyAcct::incQueryTime(with=" FMT64 ") [%p]",with,this);
-    m_incMutex.lock();
-    m_queryTime += with;
-    m_incMutex.unlock();
-    module.changed();
-}
-
-void MyAcct::lostConn()
-{
-    DDebug(&module,DebugAll,"MyAcct::lostConn() [%p]",this);
-    m_incMutex.lock();
-    if (m_failedConns < (unsigned int) m_poolSize)
-	m_failedConns++;
-    m_incMutex.unlock();
-    module.changed();
-}
-
-void MyAcct::resetConn()
-{
-    DDebug(&module,DebugAll,"MyAcct::hasConn() [%p]",this);
-    m_incMutex.lock();
-    m_failedConns = 0;
-    m_incMutex.unlock();
 }
 
 void MyAcct::appendQuery(DbQuery* query)
@@ -692,6 +739,29 @@ void MyAcct::appendQuery(DbQuery* query)
     m_queueMutex.unlock();
     m_queueSem.unlock();
 }
+
+void MyAcct::queryEnded(DbQuery& query, bool ok)
+{
+    if (query.start() && !query.end())
+	query.setEnd();
+    Lock lck(m_statsMutex);
+    m_stats.m_total++;
+    if (!ok) {
+	if (!query.start()) {
+	    // Not started. Lost connection
+	    m_stats.m_failedNoConn++;
+	    if (m_failedConns < (unsigned int)m_poolSize)
+		m_failedConns++;
+	}
+	else
+	    m_stats.m_failed++;
+    }
+    m_stats.m_queueTime += query.dequeue() - query.time();
+    m_stats.m_queryTime += query.end() - query.start();
+    lck.drop();
+    module.changed();
+}
+
 
 /**
   * DbThread
@@ -733,34 +803,45 @@ static inline bool findDb(RefPointer<MyAcct>& acct, const String& account)
 /**
   * MyHandler
   */
+static inline void fillQueryError(NamedList& params, int code, bool cancelled = false)
+{
+    if (cancelled)
+	params.setParam(YSTRING("error"),"cancelled");
+    else if (code) {
+	params.setParam(YSTRING("error"),lookup(code,MyConn::s_error,"failure"));
+	params.setParam(YSTRING("code"),code);
+    }
+}
+
 bool MyHandler::received(Message& msg)
 {
-    const String* str = msg.getParam("account");
+    const String* str = msg.getParam(YSTRING("account"));
     if (TelEngine::null(str))
 	return false;
     RefPointer<MyAcct> db;
-    if (!(findDb(db,*str) && db->ok()))
+    if (!(findDb(db,*str) && db->ok())) {
+	if (db)
+	    fillQueryError(msg,MyConn::DbDisconnected);
 	return false;
+    }
 
-    str = msg.getParam("query");
+    str = msg.getParam(YSTRING("query"));
     if (!TelEngine::null(str)) {
-	if (msg.getBoolValue("results",true)) {
+	if (msg.getBoolValue(YSTRING("results"),true)) {
 	    DbQuery* q = new DbQuery(*str,&msg);
 	    db->appendQuery(q);
-
 	    while (!q->finished()) {
 		if (!q->cancelled() && Thread::check(false))
 		    q->setCancelled();
 		q->lock(Thread::idleUsec());
 	    }
-	    if (q->cancelled())
-		msg.setParam(YSTRING("error"),"cancelled");
+	    fillQueryError(msg,q->error(),q->cancelled());
 	    TelEngine::destruct(q);
 	}
 	else
 	    db->appendQuery(new DbQuery(*str,0));
     }
-    msg.setParam("dbtype","mysqldb");
+    msg.setParam(YSTRING("dbtype"),"mysqldb");
     db = 0;
     return true;
 }
@@ -789,7 +870,7 @@ void InitThread::run()
 	Thread::sleep(1,true);
 	bool retryAgain = false;
 	s_acctMutex.lock();
-	for (ObjList* o = s_conns.skipNull(); o; o = o->next()) {
+	for (ObjList* o = s_conns.skipNull(); o; o = o->skipNext()) {
 	    MyAcct* acc = static_cast<MyAcct*>(o->get());
 	    if (acc->shouldRetryInit() && acc->retryWhen() <= Time::msecNow()) {
 		int count = acc->initConns();
@@ -839,24 +920,30 @@ MyModule::~MyModule()
 void MyModule::statusModule(String& str)
 {
     Module::statusModule(str);
-    str.append("format=Total|Failed|Errors|AvgExecTime",",");
+    str.append("format=Total|Failed|Errors|AvgExecTime|QueueTime|ExecTime",",");
 }
 
 void MyModule::statusParams(String& str)
 {
+    Lock lck(s_acctMutex);
     str.append("conns=",",") << s_conns.count();
     str.append("failed=",",") << s_failedConns;
 }
 
 void MyModule::statusDetail(String& str)
 {
-    for (unsigned int i = 0; i < s_conns.count(); i++) {
-	MyAcct* acc = static_cast<MyAcct*>(s_conns[i]);
-	str.append(acc->c_str(),",") << "=" << acc->total() << "|" << acc->failed() << "|" << acc->errorred() << "|";
-	if (acc->total() - acc->failed() > 0)
-	    str << (acc->queryTime() / (acc->total() - acc->failed()) / 1000); //miliseconds
+    QueryStats st;
+    Lock lck(s_acctMutex);
+    for (ObjList* o = s_conns.skipNull(); o; o = o->skipNext()) {
+	MyAcct* acc = static_cast<MyAcct*>(o->get());
+	acc->stats(st);
+	str.append(acc->c_str(),",") << "=" << st.m_total << "|" << st.m_failedNoConn
+	    << "|" << st.m_failed << "|";
+	if (st.m_total > st.m_failedNoConn)
+	    str << (st.m_queryTime / (st.m_total - st.m_failedNoConn) / 1000); // miliseconds
         else
 	    str << "0";
+	str << "|" << (st.m_queueTime / 1000) << "|" << (st.m_queryTime / 1000);
     }
 }
 
@@ -866,28 +953,29 @@ void MyModule::initialize()
     Module::initialize();
     Configuration cfg(Engine::configFile("mysqldb"));
     NamedList* general = cfg.createSection(YSTRING("general"));
-    if (m_init)
+    if (m_init) {
 	Engine::install(new MyHandler(cfg.getIntValue("general","priority",100)));
-    s_queryRetry = general->getIntValue(YSTRING("query_retry"),1,1,10);
-    installRelay(Halt);
+	installRelay(Halt);
+    }
     m_init = false;
+    s_queryRetry = general->getIntValue(YSTRING("query_retry"),1,1,10);
     s_failedConns = 0;
     for (unsigned int i = 0; i < cfg.sections(); i++) {
 	NamedList* sec = cfg.getSection(i);
 	if (!sec || (*sec == "general"))
 	    continue;
-	MyAcct* conn = findDb(*sec);
-	if (conn) {
-	    if (!conn->ok()) {
-		Debug(this,DebugNote,"Reinitializing connection '%s'",conn->toString().c_str());
-		conn->initDb();
-	    }
+	Lock lck(s_acctMutex);
+	RefPointer<MyAcct> db = findDb(*sec);
+	if (db) {
+	    lck.drop();
+	    db->initialize(*sec);
 	    continue;
 	}
-
-	conn = new MyAcct(sec);
+	MyAcct* conn = new MyAcct(sec);
 	s_conns.insert(conn);
+	lck.drop();
 	if (!conn->initDb()) {
+	    lck.acquire(s_acctMutex);
 	    s_conns.remove(conn);
 	    s_failedConns++;
 	}
@@ -905,19 +993,22 @@ bool MyModule::received(Message& msg, int id)
 
 void MyModule::genUpdate(Message& msg)
 {
-    Lock lock(this);
+    QueryStats st;
     unsigned int index = 0;
-    for (ObjList* o = s_conns.skipNull(); o; o = o->next()) {
+    Lock lock(s_acctMutex);
+    for (ObjList* o = s_conns.skipNull(); o; o = o->skipNext()) {
+	String idx(index++);
 	MyAcct* acc = static_cast<MyAcct*>(o->get());
-	msg.setParam(String("database.") << index,acc->toString());
-	msg.setParam(String("total.") << index,String(acc->total()));
-	msg.setParam(String("failed.") << index,String(acc->failed()));
-	msg.setParam(String("errorred.") << index,String(acc->errorred()));
-	msg.setParam(String("hasconn.") << index,String::boolText(acc->hasConn()));
-	msg.setParam(String("querytime.") << index,String(acc->queryTime()));
-	index++;
+	acc->stats(st);
+	msg.setParam("database." + idx,acc->toString());
+	msg.setParam("total." + idx,st.m_total);
+	msg.setParam("failed." + idx,st.m_failedNoConn);
+	msg.setParam("errorred." + idx,st.m_failed);
+	msg.setParam("hasconn." + idx,acc->hasConn());
+	msg.setParam("querytime." + idx,st.m_queryTime);
+	msg.setParam("queryqueue." + idx,st.m_queueTime);
     }
-    msg.setParam("count",String(index));
+    msg.setParam(YSTRING("count"),index);
 }
 
 }; // anonymous namespace
