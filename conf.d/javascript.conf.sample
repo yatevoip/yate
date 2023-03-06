@@ -74,3 +74,46 @@ eliza=eliza.js
 ; These scripts are loaded only after the engine and modules have initialized, immediately
 ;  after the dispatching of the "engine.start" message.
 ; The names must be unique and different from any in the [scripts] section.
+
+
+[handlers]
+; Install singleton message handlers
+; These handlers are running using a separate context for each handled message
+;
+; Description:
+; name=filename,callback,priority,trackname,parameters_prefix,filter,context,script_name
+;
+; Parameters (optional, unless otherwise specified):
+; name: Required. Name of the message to handle
+;     Names starting with 'handlerparam:' are ignored
+; filename: Required. Script to load
+; callback: Required. Callback function. Function is required to be present in script code
+; priority: Handler priority. Default: 100
+; trackname: Track name to be put in handled message 'handlers' parameter
+; parameters_prefix: Prefix for handler parameters specified in separate section parameters
+; filter: Message handler filter.
+;     Format: filter_param=filter_value. Ignored if 'filter_param' is empty.
+;     filter_value starting with '^' char is handled as regular expression
+; context: String to be passed to callback function
+; script_name: Name of the script. Used internally for debug purposes. Use 'script_file_name' if empty
+;
+; Notes:
+; - The following parameters are used to identify a handler:
+;   name,filename,callback,priority,trackname,filter,context,script_name
+;   An existing handler whose identity changed (not found in config) is removed at reload
+; - Multiple handlers for the same message may be installed
+
+; handlerparam:<parameters_prefix>:<param_name>: string: Configure a parameters for a handler
+; Some of these parameters may be set in message handler description also (ignored here if so)
+; They may be configured here since they may contain ',' in their contents
+; Parameters:
+; debug: string: Script debug (e.g. 'level 10'). This parameter is applied on reload
+; context: string: Context to be passed to callback function
+; filter: string: Message handler filter. See handler description for format
+; track_priority: boolean: Add priority to tracked name. Default: true
+; load_extensions: boolean: Load extension in script context when a message is handled
+;   This parameter is applied on reload
+;   Default: [general] 'auto_extensions'
+; keep_old_on_fail: boolean: Keep old code if failed to parse the new one
+;   This parameter is used when handler is re-loaded and script changed
+;   Default: [general] 'keep_old_on_fail'
