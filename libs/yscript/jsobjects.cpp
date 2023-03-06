@@ -23,14 +23,6 @@
 
 using namespace TelEngine;
 
-// Debug JsObject::assignProps() behaviour
-//#define DEBUG_JsObject_assignProps
-#ifdef XDEBUG
-#ifndef DEBUG_JsObject_assignProps
-#define DEBUG_JsObject_assignProps
-#endif
-#endif
-
 namespace { // anonymous
 
 #define MKASSIGN(typ) construct->params().addParam(new ExpOperation((int64_t)JsObject:: Assign ## typ,"Assign" # typ))
@@ -56,6 +48,8 @@ public:
 	    MKASSIGN(SkipObject);
 	    MKASSIGN(SkipArrayProps);
 	    MKASSIGN(SkipArrayIndex);
+	    MKASSIGN(DeepCopy);
+	    MKASSIGN(FreezeCopy);
 	    MKASSIGN(Filled);
 	    MKASSIGN(FilledSkipObject);
 	}
@@ -181,31 +175,45 @@ protected:
 //#define JS_DEBUG_REPLACE_REFERENCES
 #endif
 
-class RecursiveTrace
+// Debug JsObject::assignProps() behaviour
+#ifdef XDEBUG
+#ifndef DEBUG_JsObject_assignProps
+#define DEBUG_JsObject_assignProps
+#endif
+#else
+//#define DEBUG_JsObject_assignProps
+#endif
+
+static inline bool jsCopyNeedRecursiveTrace(GenObject* src, unsigned int flags)
+{
+    return src && 0 != (flags & JsObject::AssignDeepCopy);
+}
+
+class RecursiveTrace : public GenObject
 {
 public:
-    inline RecursiveTrace(bool toJSON, JsObject* rootJS, const GenObject* root)
-	: m_json(toJSON), m_root(root), m_rootJS(rootJS) {
+    inline RecursiveTrace(const char* oper, JsObject* rootJS, const GenObject* root,
+	bool traceRootJs = false)
+	: m_root(root), m_rootJS(rootJS) {
 	    m_append = &m_trace;
 #ifdef JS_DEBUG_RECURSIVE_TRACE
-	    Debug(DebugNote,"Start%s tracing root %p (%p)",m_json ? " JSON" : "",root,rootJS);
+	    m_info.printf("Trace recursive %s root=(%p)",oper,root);
+	    Debug(DebugNote,"%s starting",m_info.c_str());
 #endif
+	    if (traceRootJs)
+		traceJsObj(rootJS);
 	}
     inline bool isRoot(const GenObject* gen) const
 	{ return m_root == gen; }
     inline RecursiveTraceItem* find(const GenObject* gen) const {
-	    if (gen)
-		for (ObjList* o = m_trace.skipNull(); o; o = o->skipNext()) {
-		    RecursiveTraceItem* it = static_cast<RecursiveTraceItem*>(o->get());
-		    if (it->traced() == gen) {
+	    ObjList* o = findHolder(gen);
+	    if (!o)
+		return 0;
+	    RecursiveTraceItem* it = static_cast<RecursiveTraceItem*>(o->get());
 #ifdef JS_DEBUG_RECURSIVE_TRACE
-			Debug(DebugNote,"Found traced %p path='%s'",gen,it->safe());
+	    Debug(DebugNote,"%s found traced (%p) path='%s'",m_info.c_str(),gen,it->safe());
 #endif
-			return it;
-
-		    }
-		}
-	    return 0;
+	    return it;
 	}
     inline RecursiveTraceItem* findPath(const String& path) const {
 	    GenObject* gen = m_trace[path];
@@ -213,46 +221,78 @@ public:
 		return 0;
 	    RecursiveTraceItem* it = static_cast<RecursiveTraceItem*>(gen);
 #ifdef JS_DEBUG_RECURSIVE_TRACE
-	    Debug(DebugNote,"Found traced %p path='%s'",gen,it->safe());
+	    Debug(DebugNote,"%s found traced (%p) path='%s'",m_info.c_str(),gen,it->safe());
 #endif
 	    return it;
 	}
     inline void trace(const GenObject* obj, const String& path = String::empty()) {
-	    if (!obj)
-		return;
-	    debugTrace(false,obj,path);
-	    addTrace(obj,isRoot(obj),path);
+	    if (obj)
+		debugTrace(addTrace(obj,isRoot(obj),path),false);
 	}
-    inline void traceJsObj(const JsObject* obj, const String& path = String::empty()) {
+    inline RecursiveTraceItem* traceJsObj(const JsObject* obj,
+	const String& path = String::empty(), bool check = false) {
 	    if (!obj)
+		return 0;
+	    if (check) {
+		RecursiveTraceItem* it = find(obj);
+		if (it)
+		    return it;
+	    }
+	    debugTrace(addTrace(obj,m_rootJS == obj,path),true);
+	    return 0;
+	}
+    inline void remove(const GenObject* gen) {
+	    ObjList* o = findHolder(gen);
+	    if (!o)
 		return;
-	    debugTrace(true,obj,path);
-	    addTrace(obj,m_rootJS == obj,path);
+#ifdef JS_DEBUG_RECURSIVE_TRACE
+	    Debug(DebugNote,"%s removing (%p) path='%s'",m_info.c_str(),gen,
+		static_cast<RecursiveTraceItem*>(o->get())->safe());
+#endif
+	    o->remove();
+	    m_append = &m_trace;
 	}
 
 protected:
-    inline void addTrace(const GenObject* obj, bool root, const String& path) {
+    inline ObjList* findHolder(const GenObject* gen) const {
+	    if (!gen)
+		return 0;
+	    for (ObjList* o = m_trace.skipNull(); o; o = o->skipNext()) {
+		if (static_cast<RecursiveTraceItem*>(o->get())->traced() == gen)
+		    return o;
+	    }
+	    return 0;
+	}
+    inline RecursiveTraceItem* addTrace(const GenObject* obj, bool root, const String& path) {
 	    if (root)
 		m_append = m_append->append(new RecursiveTraceItem(obj,"#"));
 	    else if (path)
 		m_append = m_append->append(new RecursiveTraceItem(obj,"#" + path));
 	    else
 		m_append = m_append->append(new RecursiveTraceItem(obj,"#/"));
-	}
-    inline void debugTrace(bool js, const void* ptr, const String& path = String::empty()) {
 #ifdef JS_DEBUG_RECURSIVE_TRACE
-	    if ((js && m_rootJS == ptr) || (!js && ptr == m_root))
-		Debug(DebugNote,"Tracing%s root %p",(js ? " JS" : ""),ptr);
-	    else
-		Debug(DebugNote,"Tracing%s %p path='%s'",(js ? " JS" : ""),ptr,path.safe());
+	    return static_cast<RecursiveTraceItem*>(m_append->get());
+#else
+	    return 0;
+#endif
+	}
+    inline void debugTrace(RecursiveTraceItem* it, bool js) {
+#ifdef JS_DEBUG_RECURSIVE_TRACE
+	    if (!it)
+		return;
+	    if ((js && m_rootJS == it->traced()) || (!js && it->traced() == m_root))
+		Debug(DebugNote,"%s adding%s root (%p)",m_info.c_str(),(js ? " JS" : ""),it->traced());
+	    else if (it)
+		Debug(DebugNote,"%s adding%s (%p) path='%s'",
+		    m_info.c_str(),(js ? " JS" : ""),it->traced(),it->safe());
 #endif
 	}
 
-    bool m_json;
     const GenObject* m_root;
     JsObject* m_rootJS;
     ObjList m_trace;
     ObjList* m_append;
+    String m_info;
 };
 #undef JS_DEBUG_RECURSIVE_TRACE
 
@@ -387,6 +427,16 @@ static void dumpRecursiveObj(const GenObject* obj, String& buf, unsigned int dep
 	//String tmpP; str << tmpP.printf(" (%p)",objRecursed->traced());
 	str.append(*objRecursed," ");
     }
+    else if (0 != (flags & JsObject::DumpInternals)) {
+	const JsObject* jso = YOBJECT(JsObject,obj);
+	String tmp;
+	str << tmp.printf(" OBJ=(%p)",obj);
+	if (jso) {
+	    str << " line=" << jso->lineNo() << tmp.printf(" mtx=(%p)",((JsObject*)jso)->mutex());
+	    if (jso != obj)
+		str << tmp.printf(" ptr=(%p)",jso);
+	}
+    }
     buf.append(str,"\r\n");
     if (objRecursed)
 	return;
@@ -471,7 +521,7 @@ JsObject* JsObject::copy(ScriptMutex* mtx, const ExpOperation& oper) const
 
 void JsObject::dumpRecursive(const GenObject* obj, String& buf, unsigned int flags)
 {
-    RecursiveTrace seen(false,YOBJECT(JsObject,obj),obj);
+    RecursiveTrace seen("dump",YOBJECT(JsObject,obj),obj);
     String path;
     dumpRecursiveObj(obj,buf,0,seen,flags,path);
 }
@@ -526,7 +576,7 @@ ExpOperation* JsObject::toJSON(const ExpOperation* oper, int spaces)
 	spaces = 0;
     else if (spaces > 10)
 	spaces = 10;
-    RecursiveTrace trace(true,YOBJECT(JsObject,oper),0);
+    RecursiveTrace trace("JSON",YOBJECT(JsObject,oper),0);
     ExpOperation* ret = new ExpOperation("","JSON");
     toJSON(oper,*ret,spaces,0,&trace);
     return ret;
@@ -633,7 +683,7 @@ bool JsObject::resolveReferences(ExpOperation* oper)
 #ifdef JS_DEBUG_REPLACE_REFERENCES
     Debugger dbg(DebugInfo,"JsObject::resolveReferences"," %p '%s'",oper,oper->toString().c_str());
 #endif
-    RecursiveTrace trace(true,YOBJECT(JsObject,oper),0);
+    RecursiveTrace trace("JSON",YOBJECT(JsObject,oper),0);
     return internalResolveReferences(oper,0,trace);
 }
 
@@ -713,182 +763,12 @@ static inline GenObject* nextJSONCandidate(const HashList& hash, unsigned int& i
 }
 
 int JsObject::assignProps(JsObject* src, unsigned int flags, ObjList* props,
-    const String& prefix, const String& addPrefix, GenObject* context)
+    const String& prefix, const String& addPrefix, GenObject* context, GenObject* origContext)
 {
-    if (!src)
-	return 0;
-
-    if (props) {
-	props = props->skipNull();
-	if (!props)
-	    return 0;
-    }
-
-    bool skipPref = prefix.length() && (flags & AssignSkipPrefix);
-    bool skipNull = 0 != (flags & AssignSkipNull);
-    bool skipUndef = 0 != (flags & AssignSkipUndefined);
-    bool skipObject = 0 != (flags & AssignSkipObject);
-    bool skipEmptyStr = 0 != (flags & AssignSkipEmpty);
-    JsArray* jsaSrc = YOBJECT(JsArray,src);
-    bool jsaCpIdxOnly = true;
-    if (jsaSrc) {
-	if (0 == (flags & (AssignSkipArrayProps | AssignSkipArrayIndex)))
-	    jsaSrc = 0;
-	else
-	    jsaCpIdxOnly = 0 != (flags & AssignSkipArrayProps);
-    }
-
-#ifdef DEBUG_JsObject_assignProps
-    String extra;
-    if (skipPref)
-	extra.append("prefix",",");
-    if (skipNull)
-	extra.append("null",",");
-    if (skipUndef)
-	extra.append("undefined",",");
-    if (skipObject)
-	extra.append("object",",");
-    if (skipEmptyStr)
-	extra.append("empty-str",",");
-    if (extra)
-	extra = " skip=" + extra;
-    if (jsaSrc)
-	extra << " srcArray=" << (jsaCpIdxOnly ? "indexes" : "properties");
-    Debug(DebugCall,"JsObject::assign '%s' src=(%p) '%s' props=(%p) prefix='%s' addPrefix='%s'"
-	" flags=0x%x%s [%p]",
-	toString().safe(),src,src->toString().safe(),props,prefix.safe(),addPrefix.safe(),
-	flags,extra.safe(),this);
-#endif
-
-    int n = 0;
-    bool native = false;
-    bool checkFrozen = true;
-    while (true) {
-	const HashList* hash = 0;
-	const NamedList* params = 0;
-	if (!native) {
-	    hash = src->getHashListParams();
-	    if (!hash)
-		params = &(src->params());
-	}
-	else {
-	    params = src->nativeParams();
-	    if (!params)
-		break;
-	}
-	unsigned int idx = 0;
-	ObjList* crt = hash ? hash->getList(0) : params->paramList()->skipNull();
-#ifdef DEBUG_JsObject_assignProps
-	Debug(DebugInfo,"JsObject::assign src=(%p) processing %s (%p) crt=(%p) [%p]",
-	    src,(hash ? "hashlist" : (native ? "native params" : "params")),
-	    (hash ? (void*)hash : (void*)params),crt,this);
-#endif
-	while (true) {
-#ifdef DEBUG_JsObject_assignProps
-#define JSOBJECT_ASSIGN_SKIP(reason) { \
-    Debug(DebugAll,"JsObject::assign src=(%p) skipping (%p) '%s': %s [%p]", \
-	src,gen,name.safe(),reason,this); \
-    continue; \
-}
-#else
-#define JSOBJECT_ASSIGN_SKIP(reason) { continue; }
-#endif
-	    GenObject* gen = hash ? nextJSONCandidate(*hash,idx,crt,true) :
-		nextJSONCandidate(crt,true,true);
-	    if (!gen)
-		break;
-	    const String& name = gen->toString();
-	    ExpOperation* op = YOBJECT(ExpOperation,gen);
-	    ExpWrapper* wr = 0;
-	    NamedString* ns = 0;
-	    if (op) {
-		if (skipNull && JsParser::isNull(*op))
-		    JSOBJECT_ASSIGN_SKIP("null value")
-		if (skipUndef && JsParser::isUndefined(*op))
-		    JSOBJECT_ASSIGN_SKIP("undefined value")
-		wr = YOBJECT(ExpWrapper,gen);
-		if (wr) {
-		    if (skipObject && JsParser::objPresent(*op))
-			JSOBJECT_ASSIGN_SKIP("object value")
-		}
-		else if (skipEmptyStr && !*op)
-		    JSOBJECT_ASSIGN_SKIP("empty value")
-	    }
-	    else {
-		ns = YOBJECT(NamedString,gen);
-		if (!ns)
-		    JSOBJECT_ASSIGN_SKIP("not ExpOperation/NamedString")
-		if (skipEmptyStr && !*ns)
-		    JSOBJECT_ASSIGN_SKIP("empty value")
-	    }
-
-	    // Filter name
-	    bool doSkipPref = false;
-	    if (props) {
-		if (!props->find(name))
-		    JSOBJECT_ASSIGN_SKIP("not found in list")
-		doSkipPref = skipPref && name.startsWith(prefix);
-	    }
-	    else if (prefix) {
-		if (!name.startsWith(prefix))
-		    JSOBJECT_ASSIGN_SKIP("not starting with prefix")
-		doSkipPref = skipPref;
-	    }
-
-	    // Array: filter props/indexes
-	    if (jsaSrc) {
-		bool isIndex = (name.toInteger(-1) >= 0);
-		if (isIndex != jsaCpIdxOnly)
-		    JSOBJECT_ASSIGN_SKIP((isIndex ? "is index" : "is property"))
-	    }
-
-	    // Add the property
-	    if (checkFrozen) {
-		if (frozen()) {
-		    Debug(DebugWarn,"Object '%s' is frozen in assign() [%p]",toString().safe(),this);
-		    return -1;
-		}
-		checkFrozen = false;
-	    }
-	    
-	    // Handle name prefix remove / add
-	    String tmp;
-	    const String* newName = &name;
-	    if (doSkipPref || addPrefix) {
-		if (addPrefix)
-		    tmp = addPrefix;
-		if (doSkipPref)
-		    tmp << (name.c_str() + prefix.length());
-		else
-		    tmp << name;
-		newName = &tmp;
-	    }
-
-#ifdef DEBUG_JsObject_assignProps
-	    Debug(DebugAll,"JsObject::assign src=(%p) set param (%p) '%s' old=%s type='%s' [%p]",
-		src,gen,newName->safe(),((newName != &name) ? name.safe() : "same"),
-		(wr ? "ExpWrapper" : (op ? "ExpOperation" : "NamedString")),this);
-#endif
-	    ExpOperation* setOp = op;
-	    if (!op)
-		setOp = new ExpOperation(*ns,*newName);
-	    else if (newName != &name)
-		setOp = op->clone(*newName);
-	    ObjList stack;
-	    if (runAssign(stack,*setOp,context))
-		n++;
-	    if (setOp != op)
-		TelEngine::destruct(setOp);
-	}
-	if (native)
-	    break;
-	native = true;
-#undef JSOBJECT_ASSIGN_SKIP
-    }
-#ifdef DEBUG_JsObject_assignProps
-    Debug(DebugCall,"JsObject::assignProps src=(%p) copied %d [%p]",src,n,this);
-#endif
-    return n;
+    AutoGenObject trace;
+    if (jsCopyNeedRecursiveTrace(src,flags))
+	trace = new RecursiveTrace("assign",src,src,true);
+    return internalAssignProps(this,src,flags,props,prefix,addPrefix,context,origContext,trace);
 }
 
 // Utility used in internalToJSON to handle recursivity
@@ -1273,6 +1153,25 @@ int JsObject::extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& ope
     return (int)oper.number();
 }
 
+// Static method that pops arguments off a stack to a list in proper order
+int JsObject::extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& oper,
+    GenObject* context, ExpOperVector& arguments)
+{
+    if (obj && oper.number()) {
+	arguments.resize(oper.number());
+	for (int i = (int)oper.number() - 1; i >= 0; --i) {
+	    ExpOperation* op = obj->popValue(stack,context);
+	    JsFunction* jsf = YOBJECT(JsFunction,op);
+	    if (jsf)
+		jsf->firstName(op->name());
+	    arguments.set(op,i);
+	}
+    }
+    else
+	arguments.clear();
+    return arguments.length();
+}
+
 // Static helper method that deep copies all parameters
 void JsObject::deepCopyParams(NamedList& dst, const NamedList& src, ScriptMutex* mtx)
 {
@@ -1369,6 +1268,256 @@ bool JsObject::getObjField(const String& name, JsObject*& obj)
         return true;
     }
     return false;
+}
+
+int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int flags, ObjList* props,
+    const String& prefix, const String& addPrefix, GenObject* context, GenObject* origContext,
+    void* data, const String& path)
+{
+    if (!(dest && src))
+	return 0;
+
+    if (props) {
+	props = props->skipNull();
+	if (!props)
+	    return 0;
+    }
+    bool skipPref = prefix.length() && (flags & AssignSkipPrefix);
+    bool skipNull = 0 != (flags & AssignSkipNull);
+    bool skipUndef = 0 != (flags & AssignSkipUndefined);
+    bool skipObject = 0 != (flags & AssignSkipObject);
+    bool skipEmptyStr = 0 != (flags & AssignSkipEmpty);
+    JsArray* jsaSrc = YOBJECT(JsArray,src);
+    bool jsaCpIdxOnly = true;
+    if (jsaSrc) {
+	if (0 == (flags & (AssignSkipArrayProps | AssignSkipArrayIndex)))
+	    jsaSrc = 0;
+	else
+	    jsaCpIdxOnly = 0 != (flags & AssignSkipArrayProps);
+    }
+    bool deepCopy = 0 != (flags & AssignDeepCopy);
+    bool doFreeze = deepCopy && 0 != (flags & AssignFreezeCopy);
+    String nextPath = path;
+    RecursiveTrace* trace = 0;
+    if (deepCopy) {
+	if (!data) {
+	    Debug(DebugFail,"JsObject::internalAssignProps() deep copy called with no trace");
+	    return -15;
+	}
+	trace = (RecursiveTrace*)data;
+    }
+
+#ifdef DEBUG_JsObject_assignProps
+    String extra;
+    if (skipPref)
+	extra.append("prefix",",");
+    if (skipNull)
+	extra.append("null",",");
+    if (skipUndef)
+	extra.append("undefined",",");
+    if (skipObject)
+	extra.append("object",",");
+    if (skipEmptyStr)
+	extra.append("empty-str",",");
+    if (extra)
+	extra = " skip=" + extra;
+    if (jsaSrc)
+	extra << " srcArray=" << (jsaCpIdxOnly ? "indexes" : "properties");
+    if (deepCopy)
+	extra << (doFreeze ? " [COPY+FREEZE]" : " [COPY]");
+    Debug(DebugCall,"JsObject::assign '%s' src=(%p) '%s' props=(%p) prefix='%s' addPrefix='%s'"
+	" flags=0x%x%s [%p]",
+	dest->toString().safe(),src,src->toString().safe(),props,prefix.safe(),addPrefix.safe(),
+	flags,extra.safe(),dest);
+#endif
+
+    int n = 0;
+    bool native = false;
+    bool checkFrozen = true;
+    while (true) {
+	const HashList* hash = 0;
+	const NamedList* params = 0;
+	if (!native) {
+	    hash = src->getHashListParams();
+	    if (!hash)
+		params = &(src->params());
+	}
+	else {
+	    params = src->nativeParams();
+	    if (!params)
+		break;
+	}
+	unsigned int idx = 0;
+	ObjList* crt = hash ? hash->getList(0) : params->paramList()->skipNull();
+#ifdef DEBUG_JsObject_assignProps
+	Debug(DebugInfo,"JsObject::assign src=(%p) processing %s (%p) crt=(%p) [%p]",
+	    src,(hash ? "hashlist" : (native ? "native params" : "params")),
+	    (hash ? (void*)hash : (void*)params),crt,dest);
+#endif
+#ifdef DEBUG_JsObject_assignProps
+#define JSOBJECT_ASSIGN_SKIP(reason) { \
+    Debug(DebugAll,"JsObject::assign src=(%p) skipping (%p) '%s': %s [%p]", \
+	src,gen,name.safe(),reason,dest); \
+    continue; \
+}
+#else
+#define JSOBJECT_ASSIGN_SKIP(reason) { continue; }
+#endif
+	while (true) {
+	    GenObject* gen = hash ? nextJSONCandidate(*hash,idx,crt,true) :
+		nextJSONCandidate(crt,true,true);
+	    if (!gen)
+		break;
+	    const String& name = gen->toString();
+	    ExpOperation* op = YOBJECT(ExpOperation,gen);
+	    ExpWrapper* wr = 0;
+	    NamedString* ns = 0;
+	    if (op) {
+		if (skipNull && JsParser::isNull(*op))
+		    JSOBJECT_ASSIGN_SKIP("null value")
+		if (skipUndef && JsParser::isUndefined(*op))
+		    JSOBJECT_ASSIGN_SKIP("undefined value")
+		wr = YOBJECT(ExpWrapper,gen);
+		if (wr) {
+		    if (skipObject && JsParser::objPresent(*op))
+			JSOBJECT_ASSIGN_SKIP("object value")
+		}
+		else if (skipEmptyStr && !*op)
+		    JSOBJECT_ASSIGN_SKIP("empty value")
+	    }
+	    else {
+		ns = YOBJECT(NamedString,gen);
+		if (!ns)
+		    JSOBJECT_ASSIGN_SKIP("not ExpOperation/NamedString")
+		if (skipEmptyStr && !*ns)
+		    JSOBJECT_ASSIGN_SKIP("empty value")
+	    }
+
+	    // Filter name
+	    bool doSkipPref = false;
+	    if (props) {
+		if (!props->find(name))
+		    JSOBJECT_ASSIGN_SKIP("not found in list")
+		doSkipPref = skipPref && name.startsWith(prefix);
+	    }
+	    else if (prefix) {
+		if (!name.startsWith(prefix))
+		    JSOBJECT_ASSIGN_SKIP("not starting with prefix")
+		doSkipPref = skipPref;
+	    }
+
+	    // Array: filter props/indexes
+	    if (jsaSrc) {
+		bool isIndex = (name.toInteger(-1) >= 0);
+		if (isIndex != jsaCpIdxOnly)
+		    JSOBJECT_ASSIGN_SKIP((isIndex ? "is index" : "is property"))
+	    }
+
+	    // Add the property
+	    if (checkFrozen) {
+		if (dest->frozen()) {
+		    Debug(DebugWarn,"Object '%s' is frozen in assign() [%p]",dest->toString().safe(),dest);
+		    n = -1;
+		    break;
+		}
+		checkFrozen = false;
+	    }
+	    
+	    // Handle name prefix remove / add
+	    String tmp;
+	    const String* newName = &name;
+	    if (doSkipPref || addPrefix) {
+		if (addPrefix)
+		    tmp = addPrefix;
+		if (doSkipPref)
+		    tmp << (name.c_str() + prefix.length());
+		else
+		    tmp << name;
+		newName = &tmp;
+	    }
+
+#ifdef DEBUG_JsObject_assignProps
+	    Debug(DebugAll,"JsObject::assign src=(%p) set param (%p) '%s' old=%s type='%s' [%p]",
+		src,gen,newName->safe(),((newName != &name) ? name.safe() : "same"),
+		(wr ? "ExpWrapper" : (op ? "ExpOperation" : "NamedString")),dest);
+#endif
+	    ExpOperation* setOp = op;
+	    if (!op)
+		setOp = new ExpOperation(*ns,*newName);
+	    else if (deepCopy && wr) {
+		JsObject* jso = JsParser::objPresent(*op);
+		if (jso) {
+		    String nextPath = path;
+		    JPath::addItem(nextPath,name);
+		    RecursiveTraceItem* it = trace->traceJsObj(jso,nextPath,true);
+		    if (it) {
+			String s;
+			ScriptRun* runner = YOBJECT(ScriptRun,(context ? context : origContext));
+			if (runner)
+			    s << " in " << runner->currentFileName(true) << ":" << runner->currentLineNo();
+			// Trace adds a # in front of path (not added yet in nextPath)
+			Debug(DebugWarn,
+			    "JsObject copy recursivity at path='#%s' found_path='%s'%s",
+			    nextPath.c_str(),it->c_str(),s.safe());
+			n = -2;
+			break;
+		    }
+		    int res = 0;
+		    ScriptMutex* mtx = jso->mutex();
+		    JsObject* newObj = jsCopy(res,jso,flags,context,&mtx,jso->lineNo(),
+			origContext,trace,nextPath);
+		    trace->remove(jso);
+		    if (!newObj) {
+			if (res >= 0)
+			    continue;
+			n = res;
+			break;
+		    }
+		    setOp = new ExpWrapper(newObj,*newName);
+		}
+		else if (newName != &name)
+		    setOp = op->clone(*newName);
+	    }
+	    else if (newName != &name)
+		setOp = op->clone(*newName);
+	    ObjList stack;
+	    if (dest->runAssign(stack,*setOp,context))
+		n++;
+	    if (setOp != op)
+		TelEngine::destruct(setOp);
+	}
+	if (native || n < 0)
+	    break;
+	native = true;
+    }
+#undef JSOBJECT_ASSIGN_SKIP
+#ifdef DEBUG_JsObject_assignProps
+    Debug(DebugCall,"JsObject::assignProps src=(%p) result=%d [%p]",src,n,dest);
+#endif
+    if (doFreeze)
+	dest->freeze();
+    return n;
+}
+
+JsObject* JsObject::jsCopy(int& res, JsObject* src, unsigned int flags, GenObject* context,
+    ScriptMutex** mtx, unsigned int line, GenObject* origContext, void* data, const String& path,
+    bool ignoreCloneFail)
+{
+    JsObject* jso = 0;
+    if (src) {
+	jso = src->cloneForCopy(context,mtx,line);
+	if (jso) {
+	    res = internalAssignProps(jso,src,flags,0,String::empty(),String::empty(),
+		context,origContext,data,path);
+	    if (res < 0)
+		TelEngine::destruct(jso);
+	}
+	else if (!ignoreCloneFail)
+	    res = -10;
+    }
+    else
+	res = -11;
+    return jso;
 }
 
 bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
@@ -1499,6 +1648,15 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
     else
 	return JsObject::runNative(stack,oper,context);
     return true;
+}
+
+JsObject* JsObject::copy(int& res, JsObject* src, unsigned int flags, GenObject* context,
+    ScriptMutex** mtx, unsigned int line, GenObject* origContext)
+{
+    AutoGenObject trace;
+    if (jsCopyNeedRecursiveTrace(src,flags))
+	trace = new RecursiveTrace("copy",src,src,true);
+    return jsCopy(res,src,flags,context,mtx,line,origContext,trace);
 }
 
 
@@ -2129,6 +2287,12 @@ bool JsArray::runNativeSort(ObjList& stack, const ExpOperation& oper, GenObject*
 }
 
 
+static inline void initRegexp(JsRegExp& rex)
+{
+    rex.params().addParam("ignoreCase",String::boolText(rex.regexp().isCaseInsensitive()));
+    rex.params().addParam("basicPosix",String::boolText(!rex.regexp().isExtended()));
+}
+
 JsRegExp::JsRegExp(ScriptMutex* mtx)
     : JsObject("RegExp",mtx)
 {
@@ -2142,8 +2306,7 @@ JsRegExp::JsRegExp(ScriptMutex* mtx, const char* name, unsigned int line, const 
 {
     XDebug(DebugAll,"JsRegExp::JsRegExp('%s',%p,%s) [%p]",
 	name,mtx,String::boolText(frozen),this);
-    params().addParam("ignoreCase",String::boolText(insensitive));
-    params().addParam("basicPosix",String::boolText(!extended));
+    initRegexp(*this);
 }
 
 JsRegExp::JsRegExp(ScriptMutex* mtx, unsigned int line, const Regexp& rexp, bool frozen)
@@ -2152,6 +2315,17 @@ JsRegExp::JsRegExp(ScriptMutex* mtx, unsigned int line, const Regexp& rexp, bool
 {
     XDebug(DebugAll,"JsRegExp::JsRegExp('%s',%p,%s) [%p]",
 	toString().c_str(),mtx,String::boolText(frozen),this);
+}
+
+JsRegExp::JsRegExp(const JsRegExp& other, GenObject* context, ScriptMutex* mtx,
+    unsigned int line, bool frozen)
+    : JsObject(mtx,other.toString(),line,frozen),
+    m_regexp(other.regexp().c_str(),other.regexp().isExtended(),other.regexp().isCaseInsensitive())
+{
+    XDebug(DebugAll,"JsRegExp::JsRegExp(%p,%p,%p) [%p]",
+	&other,context,mtx,this);
+    initRegexp(*this);
+    setPrototype(context,YSTRING("RegExp"));
 }
 
 JsObject* JsRegExp::copy(ScriptMutex* mtx, const ExpOperation& oper) const

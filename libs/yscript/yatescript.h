@@ -1357,6 +1357,178 @@ private:
 };
 
 /**
+ * This class implements an ExpOperation vector
+ * @short An ExpOperation vector
+ */
+class YSCRIPT_API ExpOperVector : public String
+{
+    YCLASS(ExpOperVector,String)
+public:
+    /**
+     * Constructor
+     * @param len Initial length
+     * @param name Optional vector name
+     */
+    inline ExpOperVector(unsigned int len = 0, const char* name = 0)
+	: String(name), m_data(len)
+	{}
+
+    /**
+     * Init from other  constructor
+     * Copy references from given vector
+     * @param other Vector to copy
+     */
+    inline ExpOperVector(ExpOperVector& other)
+	: m_data(other.length())
+	{
+	    for (unsigned int i = 0; i < length(); ++i) {
+		ExpOperation* op = other[i];
+		if (op)
+		    set(op->clone(),i);
+	    }
+	}
+
+    /**
+     * Retrieve vector length
+     * @return Vector length
+     */
+    inline unsigned int length() const
+	{ return m_data.length(); }
+
+    /**
+     * Retrieve an item at given index
+     * @param idx Index to retrieve
+     * @return ExpOperation pointer, NULL if not set or index is out of bounds
+     */
+    inline ExpOperation* at(unsigned int idx) const
+	{ return static_cast<ExpOperation*>(m_data.at(idx)); }
+
+    /**
+     * Retrieve an item at given index
+     * @param idx Index to retrieve
+     * @return ExpOperation pointer, NULL if not set or index is out of bounds
+     */
+    inline ExpOperation* operator[](unsigned int idx) const
+	{ return at(idx); }
+
+    /**
+     * Take item at given index
+     * @param idx Index to take
+     * @return ExpOperation pointer, NULL if not set or index is out of bounds
+     */
+    inline ExpOperation* take(unsigned int idx)
+	{ return static_cast<ExpOperation*>(m_data.take(idx)); }
+
+    /**
+     * Replace item at given index
+     * @param op New item to set
+     * @param idx Index to set
+     * @param consume Consume the item if failed to be set
+     * @return ExpOperation pointer, NULL if not set or index is out of bounds
+     */
+    inline void set(ExpOperation* op, unsigned int idx, bool consume = true) {
+	    if (!m_data.set(op,idx) && consume)
+		TelEngine::destruct(op);
+	}
+
+    /**
+     * Clear the vector
+     */
+    inline void clear()
+	{ m_data.clear(); }
+
+    /**
+     * Resize the vector. No changes are made if length is the same as current
+     * @param len New length
+     * @param keepData Keep old data (append). Default: false
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool resize(unsigned int len, bool keepData = false)
+	{ return len == m_data.resize(len,keepData); }
+
+    /**
+     * Clone vector items to ObjList
+     * @param list Destination list
+     */
+    inline void cloneTo(ObjList& list) const {
+	    for (unsigned int i = 0; i < length(); ++i) {
+		ExpOperation* op = at(i);
+		if (op)
+		    list.append(op->clone());
+	    }
+	}
+
+    /**
+     * Move vector items to ObjList. Clear the vector
+     * @param list Destination list
+     */
+    inline void moveTo(ObjList& list) {
+	    for (unsigned int i = 0; i < length(); ++i) {
+		ExpOperation* op = take(i);
+		if (op)
+		    list.append(op);
+	    }
+	    clear();
+	}
+
+    /**
+     * Clone another vector into this one into this vector
+     * @param other Vector to clone
+     * @param offs Offset in input vector to start from
+     * @param keepData Keep old data (append)
+     * @param count Optional number of elements to clone, negative for all available
+     * @return Reference of this vector
+     */
+    inline ExpOperVector& cloneFrom(const ExpOperVector& other, unsigned int offs = 0,
+	bool keepData = false, int count = -1) {
+	    if (!count || offs >= other.length()) {
+		if (!keepData)
+		    clear();
+		return *this;
+	    }
+	    unsigned int start = keepData ? length() : 0;
+	    resize(other.length() - offs,count,start);
+	    for (; start < length(); ++start) {
+		ExpOperation* op = other[offs++];
+		if (op)
+		    set(op->clone(),start);
+	    }
+	    return *this;
+	}
+
+    /**
+     * Take other vector's data into this one into this vector
+     * @param other Vector to clone
+     * @param offs Offset in input vetor to start from
+     * @param keepData Keep old data (append). Default: false
+     * @param count Optional number of elements to clone, negative for all available
+     * @return Reference of this vector
+     */
+    inline ExpOperVector& takeFrom(ExpOperVector& other, unsigned int offs = 0,
+	bool keepData = false, int count = -1) {
+	    if (!count || offs >= other.length()) {
+		if (!keepData)
+		    clear();
+		return *this;
+	    }
+	    unsigned int start = keepData ? length() : 0;
+	    resize(other.length() - offs,count,start);
+	    for (; start < length(); ++start)
+		set(other.take(offs++),start);
+	    return *this;
+	}
+
+protected:
+    inline void resize(unsigned int len, int count, unsigned int keepData = 0) {
+	    if (count < 0 || count > (int)len)
+		resize(keepData + len,0 != keepData);
+	    else
+		resize(keepData + count,0 != keepData);
+	}
+    ObjVector m_data;
+};
+
+/**
  * Small helper class that simplifies declaring native functions
  * @short Helper class to declare a native function
  */
@@ -1589,7 +1761,6 @@ public:
 protected:
     bool m_objTrack;
 };
-
 
 /**
  * A script execution context, holds global variables and objects
@@ -1904,6 +2075,22 @@ private:
 };
 
 /**
+ * A script runner user data to be set by upper layer
+ * @short Script runner upper layer data
+ */
+class YSCRIPT_API ScriptRunData : public RefObject
+{
+    YCLASS(ScriptRunData,RefObject)
+public:
+    /**
+     * Constructor
+     * @param name Name of the context
+     */
+    inline ScriptRunData()
+	{}
+};
+
+/**
  * An instance of script code and data, status machine run by a single thread at a time
  * @short Script runtime execution
  */
@@ -2091,6 +2278,27 @@ public:
     void objDeleted(GenObject* obj)
 	{ if (m_context) m_context->deletedObj(obj); };
 
+    /**
+     * Retrieve runner user data
+     * @return ScriptRunData pointer, NULL if not set
+     */
+    inline ScriptRunData* userData() const
+	{ return m_data; }
+
+    /**
+     * Set runner user data if not already set
+     * The caller still owns the given pointer (runner holds a reference)
+     * @param data Data to set
+     * @return True on success, false otherwise (NULL pointer given or already set)
+     */
+    inline bool userData(ScriptRunData* data) {
+	    if (!data)
+		return false;
+	    if (!m_data)
+		m_data = data;
+	    return data == m_data;
+	}
+
 protected:
     /**
      * Resume script from where it was left, may stop and return Incomplete state
@@ -2105,6 +2313,7 @@ private:
     ObjList m_stack;
     ObjList m_async;
     String m_traceId;
+    RefPointer<ScriptRunData> m_data;
 };
 
 /**
@@ -2241,7 +2450,8 @@ public:
 	DumpRecursive = 0x10,            // Dump recursive (stop on root if not set)
 	DumpType = 0x20,                 // Dump type (apply to functions also),
 	DumpProto = 0x40,                // Dump prototype
-	DumpPropObjType = 0x80,          // Dump non basic type for DumpPropOnly whithout DumpType 
+	DumpPropObjType = 0x80,          // Dump non basic type for DumpPropOnly whithout DumpType
+	DumpInternals = 0x1000,
 	// Masks
 	DumpFuncOnly = DumpRecursive | DumpProto | DumpFunc,
 	DumpPropOnly = DumpRecursive | DumpPropObjType | DumpProp,
@@ -2258,6 +2468,8 @@ public:
 	AssignSkipObject = 0x10,           // Do not copy Object properties
 	AssignSkipArrayProps = 0x20,       // Do not copy Array properties
 	AssignSkipArrayIndex = 0x40,       // Do not copy Array indexes
+	AssignDeepCopy = 0x80,             // Make a deep copy of objects
+	AssignFreezeCopy = 0x100,          // Freeze destination after copy
 	// Masks
 	AssignFilled = AssignSkipNull | AssignSkipUndefined | AssignSkipEmpty,
 	AssignFilledSkipObject = AssignFilled | AssignSkipObject,
@@ -2317,6 +2529,17 @@ public:
      */
     inline JsObject* clone(const ExpOperation& oper) const
 	{ return clone(toString(),oper); }
+
+    /**
+     * Clone and rename method. Used to prepare a new object for copy
+     * @param context Script context from which Object prototype is obtained
+     * @param mtx Optional mutex, use our mutex if not given
+     * @param line Line number
+     * @return New object instance
+     */
+    virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
+	unsigned int line = 0) const
+	{ return new JsObject(context,line,mtx ? *mtx : m_mutex); }
 
     /**
      * Set the object prototype
@@ -2548,11 +2771,14 @@ public:
      *   'props' not given: Copy only properties starting with it. Skip this prefix if requested in flags
      * @param addPrefix Optional prefix to add to properties when copied
      * @param context Pointer to an execution context
-     * @return Number of copied properties, negative on error (object is frozen on first assign attempt)
+     * @param origContext Optional original context
+     *  (used for debug purposes when object is not copied using a context, i.e. when given context is NULL)
+     * @return Number of copied properties, negative on error (object is frozen on first assign attempt or
+     *  recursivity found during copy)
      */
     int assignProps(JsObject* src, unsigned int flags = 0, ObjList* props = 0,
 	const String& prefix = String::empty(), const String& addPrefix = String::empty(),
-	GenObject* context = 0);
+	GenObject* context = 0, GenObject* origContext = 0);
 
     /**
      * Helper static method that adds an object to a parent
@@ -2583,6 +2809,19 @@ public:
 	GenObject* context, ObjList& arguments);
 
     /**
+     * Helper static method that pops arguments off a stack to a list in proper order
+     * @param obj Pointer to the object to use when popping each argument
+     * @param stack Evaluation stack in use, parameters are popped off this stack
+     * @param oper Function that is being evaluated
+     * @param context Pointer to arbitrary object passed from evaluation methods
+     * @param arguments List where the arguments are set in proper order
+     *   Will be reset to reflect the number of arguments
+     * @return Number of arguments popped off stack
+     */
+    static int extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& oper,
+	GenObject* context, ExpOperVector& arguments);
+
+    /**
      * Helper method that pops arguments off a stack to a list in proper order
      * @param stack Evaluation stack in use, parameters are popped off this stack
      * @param oper Function that is being evaluated
@@ -2590,7 +2829,21 @@ public:
      * @param arguments List where the arguments are added in proper order
      * @return Number of arguments popped off stack
      */
-    inline int extractArgs(ObjList& stack, const ExpOperation& oper, GenObject* context, ObjList& arguments)
+    inline int extractArgs(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	ObjList& arguments)
+	{ return extractArgs(this,stack,oper,context,arguments); }
+
+    /**
+     * Helper static method that pops arguments off a stack to a list in proper order
+     * @param stack Evaluation stack in use, parameters are popped off this stack
+     * @param oper Function that is being evaluated
+     * @param context Pointer to arbitrary object passed from evaluation methods
+     * @param arguments List where the arguments are set in proper order
+     *   Will be reset to reflect the number of arguments
+     * @return Number of arguments popped off stack
+     */
+    inline int extractArgs(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	ExpOperVector& arguments)
 	{ return extractArgs(this,stack,oper,context,arguments); }
 
     /**
@@ -2636,14 +2889,14 @@ public:
      * @param buf String to which the structure is added
      * @param flags Flags indicating what to dump
      */
-    static void dumpRecursive(const GenObject* obj, String& buf, unsigned int flags = 0xffffffff);
+    static void dumpRecursive(const GenObject* obj, String& buf, unsigned int flags = 0xffffffff & ~DumpInternals);
 
     /**
      * Helper method to display the hierarchical structure of an object
      * @param obj Object to display
      * @param flags Flags indicating what to dump (display)
      */
-    static void printRecursive(const GenObject* obj, unsigned int flags = 0xffffffff);
+    static void printRecursive(const GenObject* obj, unsigned int flags = 0xffffffff & ~DumpInternals);
 
     /**
      * Static method to obtain a JSON representation of the given object
@@ -2667,6 +2920,21 @@ public:
      * @return Found property value, NULL if not found
      */
     static ExpOperation* find(ExpOperation* oper, const JPath& path);
+
+    /**
+     * Copy an object
+     * @param res Number of copied properties, negative on error (NULL pointr returned)
+     * @param src Object to copy, returns error if missing/null/undefined
+     * @param flags Flags for properties assign
+     * @param context Context owning the prototypes of the new object
+     * @param mtx Optional mutex, use our mutex if not given
+     * @param line Line number
+     * @param origContext Optional original context
+     *  (used for debug purposes when object is not copied using a context, i.e. when given context is NULL)
+     * @return JsObject pointer, NULL on failure
+     */
+    static JsObject* copy(int& res, JsObject* src, unsigned int flags, GenObject* context = 0,
+	ScriptMutex** mtx = 0, unsigned int line = 0, GenObject* origContext = 0);
 
 protected:
     /**
@@ -2720,6 +2988,15 @@ private:
     static void internalToJSON(const GenObject* obj, bool isStr, String& buf, int spaces,
 	int indent = 0, void* data = 0, const String& path = String::empty(),
 	const String& crtProp = String::empty());
+    static int internalAssignProps(JsObject* dest, JsObject* src, unsigned int flags, ObjList* props = 0,
+	const String& prefix = String::empty(), const String& addPrefix = String::empty(),
+	GenObject* context = 0, GenObject* origContext = 0,
+	void* data = 0, const String& path = String::empty());
+    static inline JsObject* jsCopy(int& res, JsObject* src, unsigned int flags, GenObject* context,
+	ScriptMutex** mtx, unsigned int line, GenObject* origContext = 0,
+	void* data = 0, const String& path = String::empty(),
+	bool ignoreCloneFail = false);
+
     static const String s_protoName;
     bool m_frozen;
     ScriptMutex* m_mutex;
@@ -2963,6 +3240,17 @@ protected:
 	{ return new JsArray(mutex(),name,oper.lineNumber()); }
 
     /**
+     * Clone and rename method. Used to prepare a new object for copy
+     * @param context Script context from which Array prototype is obtained
+     * @param mtx Optional mutex, use our mutex if not given
+     * @param line Line number
+     * @return New object instance
+     */
+    virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
+	unsigned int line = 0) const
+	{ return new JsArray(context,line,mtx ? *mtx : mutex()); }
+
+    /**
      * Try to evaluate a single native method
      * @param stack Evaluation stack in use, parameters are popped off this stack
      *  and results are pushed back on stack
@@ -3064,6 +3352,17 @@ public:
 
 protected:
     /**
+     * Constructor for a RegExp object
+     * @param other RegExp to copy
+     * @param context Context containing the prototype
+     * @param mtx Script mutex to use
+     * @param line Code line where this object was created
+     * @param frozen True to create an initially frozen object
+     */
+    JsRegExp(const JsRegExp& other, GenObject* context, ScriptMutex* mtx,
+	unsigned int line = 0, bool frozen = false);
+
+    /**
      * Clone and rename method
      * @param name Name of the cloned object
      * @param oper ExpOperation that required the clone
@@ -3072,6 +3371,17 @@ protected:
     virtual JsObject* clone(const char* name, const ExpOperation& oper) const
 	{ return new JsRegExp(mutex(),name,oper.lineNumber(),m_regexp.c_str(),
 	    m_regexp.isCaseInsensitive(),m_regexp.isExtended()); }
+
+    /**
+     * Clone and rename method. Used to prepare a new object for copy
+     * @param context Script context from which RegExp prototype is obtained
+     * @param mtx Optional mutex, use our mutex if not given
+     * @param line Line number
+     * @return New object instance
+     */
+    virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
+	unsigned int line = 0) const
+	{ return new JsRegExp(*this,context,mtx ? *mtx : mutex(),line); }
 
     /**
      * Try to evaluate a single native method
@@ -3155,6 +3465,20 @@ protected:
 	{ }
 
     /**
+     * Constructor for a JPath object
+     * @param path Path to copy
+     * @param context Context containing the prototype
+     * @param mtx Script mutex to use
+     * @param line Code line where this object was created
+     * @param frozen True to create an initially frozen object
+     */
+    inline JsJPath(const JPath& path, GenObject* context, ScriptMutex* mtx,
+	unsigned int line = 0, bool frozen = false)
+	: JsObject(mtx,path,line,frozen),
+	  m_path(path)
+	{ setPrototype(context,YSTRING("JPath")); }
+
+    /**
      * Clone and rename method
      * @param name Name of the cloned object
      * @param oper ExpOperation that required the clone
@@ -3162,6 +3486,17 @@ protected:
      */
     virtual JsObject* clone(const char* name, const ExpOperation& oper) const
 	{ return new JsJPath(mutex(),name,oper.lineNumber(),m_path); }
+
+    /**
+     * Clone and rename method. Used to prepare a new object for copy
+     * @param context Script context from which JsPath prototype is obtained
+     * @param mtx Optional mutex, use our mutex if not given
+     * @param line Line number
+     * @return New object instance
+     */
+    virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
+	unsigned int line = 0) const
+	{ return new JsJPath(path(),context,mtx ? *mtx : mutex(),line); }
 
     /**
      * Try to evaluate a single native method
