@@ -45,9 +45,13 @@
 #endif
 #ifdef XDEBUG
 #define JS_DEBUG_SharedJsObject
+#define JS_DEBUG_EVENT_NON_TIME
+#define JS_DEBUG_EVENT_TIME
 #else
 //#define JS_DEBUG_SharedJsObject
 //#define JS_DEBUG_ScriptInfo
+//#define JS_DEBUG_EVENT_NON_TIME
+//#define JS_DEBUG_EVENT_TIME
 #endif
 
 using namespace TelEngine;
@@ -467,6 +471,14 @@ public:
     unsigned int runMain();
     inline ScriptContext* context()
 	{ return m_context; }
+    inline void setInstanceCount(unsigned int n) {
+	    if (!n || n == m_instanceCount)
+		return;
+	    m_instanceCount = n;
+	    if (m_context) 
+		m_context->setInstance(m_instance,m_instanceCount);
+	}
+    void scheduleInitEvent();
     const String& toString() const
 	{ return m_name; }
 private:
@@ -474,6 +486,8 @@ private:
     RefPointer<ScriptContext> m_context;
     String m_name;
     unsigned int m_instance;
+    unsigned int m_instanceCount;
+    bool m_reinitEvent;
 };
 
 class JsGlobal : public NamedString, public ScriptInfoHolder
@@ -635,30 +649,95 @@ private:
     String m_owner;
 };
 
-class JsTimeEvent : public RefObject
+class JsEvent : public RefObject
 {
 public:
-    JsTimeEvent(JsEngineWorker* worker, const ExpFunction& callback, unsigned int interval,bool repeatable, unsigned int id,
-	    ObjList* args = 0);
-    ~JsTimeEvent()
-	{ TelEngine::destruct(m_args); }
-    void processTimeout(const Time& when);
-    inline bool repeatable() const
-	{ return m_repeat; }
-    inline u_int64_t fireTime() const
-	{ return m_fire; }
-    inline bool timeout(const Time& when) const
-	{ return when.msec() >= m_fire; }
-    inline unsigned int getId() const
+    // Event type
+    // Keep non time event in ascending order of reverse priority
+    // I.e. type with less value will be sent to script before other events
+    enum Type {
+	EvTime = 0,
+	EvReInit,
+    };
+    // Time event to be called on script
+    inline JsEvent(unsigned int id, unsigned int interval, bool repeat,
+	const ExpFunction& callback, ExpOperVector& args)
+	: m_type(EvTime), m_id(id), m_repeat(repeat), m_fire(0), m_interval(interval),
+	m_callback(callback.name(),1)
+	{
+	    m_args.takeFrom(args);
+	    XDebug(&__plugin,DebugAll,"JsEvent(%u,%u,%s,%s) %d %s [%p]",
+		m_id,m_interval,String::boolText(m_repeat),m_callback.name().c_str(),
+		m_type,typeName(),this);
+	}
+    // Non time event to be called on script
+    inline JsEvent(JsEvent* ev)
+	: m_type(ev->type()), m_id(ev->id()), m_repeat(false), m_fire(0), m_interval(0),
+	m_callback(ev->m_callback.name(),1)
+	{
+	    m_args.cloneFrom(ev->m_args);
+	    XDebug(&__plugin,DebugAll,"JsEvent(%p) %d %s [%p]",ev,type(),typeName(),this);
+	}
+    // Non time event: set in a list waiting for event to occur
+    inline JsEvent(unsigned int id, int type, bool repeat, const ExpFunction& callback,
+	ExpOperVector& args)
+	: m_type(type), m_id(id), m_repeat(repeat), m_fire(0), m_interval(0),
+	m_callback(callback.name(),1)
+	{
+	    m_args.takeFrom(args);
+	    XDebug(&__plugin,DebugAll,"JsEvent(%d,%u,%s) name=%s [%p]",
+		m_id,m_type,String::boolText(m_repeat),typeName(),this);
+	}
+    ~JsEvent()
+	{ XDebug(&__plugin,DebugAll,"~JsEvent %d %s [%p]",type(),typeName(),this); }
+    inline int type() const
+	{ return m_type; }
+    inline bool isTimeEvent() const
+	{ return EvTime == type(); }
+    inline unsigned int id() const
 	{ return m_id; }
+    inline bool repeat() const
+	{ return m_repeat; }
+    inline const char* typeName() const
+	{ return typeName(type()); }
+    inline uint64_t fireTime() const
+	{ return m_fire; }
+    inline void fireTime(uint64_t now)
+	{ m_fire = (now ? now : Time::msecNow()) + m_interval; }
+    inline bool timeout(uint64_t& whenMs) const
+	{ return whenMs >= m_fire; }
+    inline void process(ScriptRun* runner) {
+	    if (!runner)
+		return;
+	    ObjList args;
+	    if (m_repeat)
+		m_args.cloneTo(args);
+	    else
+		m_args.moveTo(args);
+	    runner->call(m_callback.name(),args);
+	}
+
+    static inline ObjList* findHolder(unsigned int id, ObjList& list) {
+	    for (ObjList* o = list.skipNull(); o; o = o->skipNext()) {
+		if (static_cast<JsEvent*>(o->get())->id() == id)
+		    return o;
+	    }
+	    return 0;
+	}
+    static inline bool canRepeat(int type)
+	{ return type == EvTime || type == EvReInit; }
+    static inline const char* typeName(int type)
+	{ return lookup(type,s_evName); }
+    static const TokenDict s_evName[];
+
 private:
-    JsEngineWorker* m_worker;
-    ExpFunction m_callbackFunction;
-    unsigned int m_interval;
-    u_int64_t m_fire;
-    bool m_repeat;
-    unsigned int m_id;
-    ObjList* m_args;
+    int m_type;                          // Event type
+    unsigned int m_id;                   // Event ID
+    bool m_repeat;                       // Repeat event
+    uint64_t m_fire;                     // Time event fire time
+    unsigned int m_interval;             // Time event interval
+    ExpFunction m_callback;              // Callback function
+    ExpOperVector m_args;                // Callback arguments
 };
 
 class JsEngineWorker : public Thread, public ScriptInfoHolder
@@ -666,14 +745,18 @@ class JsEngineWorker : public Thread, public ScriptInfoHolder
 public:
     JsEngineWorker(JsEngine* engine, ScriptContext* context, ScriptCode* code);
     ~JsEngineWorker();
-    unsigned int addEvent(const ExpFunction& callback, unsigned int interval, bool repeat, ObjList* args = 0);
-    bool removeEvent(unsigned int id, bool repeatable);
-    ScriptRun* getRunner();
+    unsigned int addEvent(const ExpFunction& callback, int type, bool repeat, ExpOperVector& args,
+	unsigned int interval = 0);
+    bool removeEvent(unsigned int id, bool time, bool repeat);
+    static void scheduleEvent(GenObject* context, int ev);
+
 protected:
     virtual void run();
-    void postponeEvent(JsTimeEvent* ev);
+    unsigned int postponeEvent(JsEvent* ev, uint64_t now = 0);
+
 private:
     ObjList m_events;
+    ObjList m_installedEvents;           // Installed non time events
     Mutex m_eventsMutex;
     unsigned int m_id;
     ScriptRun* m_runner;
@@ -800,6 +883,7 @@ private:
 #define MKTIME(typ) params().addParam(new ExpOperation((int64_t)SysUsage:: typ ## Time,# typ "Time"))
 #define MKDUMP(typ) params().addParam(new ExpOperation((int64_t)JsObject:: Dump ## typ,"Dump" # typ))
 #define MKSCRIPTYPE(typ) params().addParam(new ExpOperation((int64_t)ScriptInfo:: typ, "ScriptType" # typ))
+#define MKEVENT(typ) params().addParam(new ExpOperation((int64_t)JsEvent:: Ev ## typ,"Event" # typ))
 class JsEngine : public JsObject, public DebugEnabler
 {
     YCLASS(JsEngine,JsObject)
@@ -837,6 +921,7 @@ public:
 	    MKDUMP(Type),
 	    MKDUMP(Proto),
 	    MKDUMP(PropObjType),
+	    MKEVENT(ReInit),
 	    params().addParam(new ExpFunction("output"));
 	    params().addParam(new ExpFunction("debug"));
 	    params().addParam(new ExpFunction("traceDebug"));
@@ -886,6 +971,8 @@ public:
 	    params().addParam(new ExpFunction("clearInterval"));
 	    params().addParam(new ExpFunction("setTimeout"));
 	    params().addParam(new ExpFunction("clearTimeout"));
+	    params().addParam(new ExpFunction("setEvent"));
+	    params().addParam(new ExpFunction("clearEvent"));
 	    params().addParam(new ExpFunction("loadLibrary"));
 	    params().addParam(new ExpFunction("loadObject"));
 	    params().addParam(new ExpFunction("replaceParams"));
@@ -917,9 +1004,12 @@ public:
 	{ m_worker = 0; }
     inline const String& id() const
 	{ return m_id; }
+    inline JsEngineWorker* worker()
+	{ return m_worker; }
     inline const String& schedName() const
 	{ return m_schedName; }
     void setDebug(String str);
+
     // Retrieve JsEngine object held by running context
     // 'eng' given: unsafe, lock context, return reference
     static inline JsEngine* get(GenObject* context, RefPointer<JsEngine>* eng = 0) {
@@ -936,6 +1026,11 @@ public:
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
     virtual void destroyed();
+    bool setEvent(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	bool time, bool repeat = false);
+    bool clearEvent(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	bool time, bool repeat = false);
+
 private:
     JsEngineWorker* m_worker;
     String m_debugName;
@@ -946,6 +1041,7 @@ private:
 #undef MKTIME
 #undef MKDUMP
 #undef MKSCRIPTYPE
+#undef MKEVENT
 
 class JsMessage : public JsObject
 {
@@ -1707,6 +1803,12 @@ const TokenDict ScriptInfo::s_type[] = {
     {0,0}
 };
 
+const TokenDict JsEvent::s_evName[] = {
+    {"time",   EvTime},
+    {"reinit", EvReInit},
+    {0,0}
+};
+
 UNLOAD_PLUGIN(unloadNow)
 {
     if (unloadNow) {
@@ -2137,15 +2239,6 @@ static void copyObjParams(NamedList& dest, const NamedList* src)
 	const NamedString* p = static_cast<const NamedString*>(o->get());
 	if (!(p->name().startsWith("__") || YOBJECT(ExpWrapper,p)))
 	    dest.setParam(p->name(),*p);
-    }
-}
-
-static void copyArgList(ObjList& dst, ObjList& args)
-{
-    for (ObjList* o = &args; o; o = o->next()) {
-	ExpOperation* param = static_cast<ExpOperation*>(o->get());
-	if (param)
-	    dst.append(param->clone());
     }
 }
 
@@ -2629,49 +2722,18 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		return false;
 	}
     }
-    else if (oper.name() == YSTRING("setInterval") || oper.name() == YSTRING("setTimeout")) {
-	ObjList args;
-	if (extractArgs(stack,oper,context,args) < 2)
-	    return false;
-	const ExpFunction* callback = YOBJECT(ExpFunction,args[0]);
-	if (!callback) {
-	    JsFunction* jsf = YOBJECT(JsFunction,args[0]);
-	    if (jsf)
-		callback = jsf->getFunc();
-	}
-	if (!callback)
-	    return false;
-	ExpOperation* interval = static_cast<ExpOperation*>(args[1]);
-	if (!m_worker) {
-	    ScriptRun* runner = YOBJECT(ScriptRun,context);
-	    if (!runner)
-		return false;
-	    ScriptContext* scontext = runner->context();
-	    ScriptCode* scode = runner->code();
-	    if (!(scontext && scode))
-		return false;
-	    m_worker = new JsEngineWorker(this,scontext,scode);
-	    m_worker->startup();
-	}
-	ObjList* cbkArgs = 0;
-	if (args.length() > 2) {
-	    cbkArgs = new ObjList;
-	    copyArgList(*cbkArgs,*(args + 2));
-	}
-	unsigned int id = m_worker->addEvent(*callback,interval->toInteger(),
-		oper.name() == YSTRING("setInterval"),cbkArgs);
-	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)id));
-    }
-    else if (oper.name() == YSTRING("clearInterval") || oper.name() == YSTRING("clearTimeout")) {
-	if (!m_worker)
-	    return false;
-	ObjList args;
-	if (!extractArgs(stack,oper,context,args))
-	    return false;
-	ExpOperation* id = static_cast<ExpOperation*>(args[0]);
-	bool ret = m_worker->removeEvent((unsigned int)id->valInteger(),oper.name() == YSTRING("clearInterval"));
-	ExpEvaluator::pushOne(stack,new ExpOperation(ret));
-    }
+    else if (oper.name() == YSTRING("setInterval"))
+	return setEvent(stack,oper,context,true,true);
+    else if (oper.name() == YSTRING("setTimeout"))
+	return setEvent(stack,oper,context,true,false);
+    else if (oper.name() == YSTRING("setEvent"))
+	return setEvent(stack,oper,context,false);
+    else if (oper.name() == YSTRING("clearInterval"))
+	return clearEvent(stack,oper,context,true,true);
+    else if (oper.name() == YSTRING("clearTimeout"))
+	return clearEvent(stack,oper,context,true,false);
+    else if (oper.name() == YSTRING("clearEvent"))
+	return clearEvent(stack,oper,context,false);
     else if (oper.name() == YSTRING("loadLibrary") || oper.name() == YSTRING("loadObject")) {
 	bool obj = oper.name() == YSTRING("loadObject");
 	bool ok = false;
@@ -2974,6 +3036,75 @@ void JsEngine::destroyed()
     m_worker->cancel();
     while (m_worker)
 	Thread::idle();
+}
+
+bool JsEngine::setEvent(ObjList& stack, const ExpOperation& oper, GenObject* context,
+    bool time, bool repeat)
+{
+    // setInterval / setTimeout (func,interval[,callback_args ...])
+    // setEvent(func,type[,params[,callback_args...])
+    ExpOperVector args;
+    if (!extractStackArgs(2,0,args,this,stack,oper,context))
+	return false;
+    const ExpFunction* callback = getFunction(args[0]);
+    if (!callback)
+	return false;
+    unsigned int interval = args[1]->toInteger();
+    int type = time ? JsEvent::EvTime : interval;
+    if (!time) {
+	if (type == JsEvent::EvTime || !lookup(type,JsEvent::s_evName))
+	    return false;
+    }
+    if (!time) {
+	// We can notify reinit to tracked scripts only
+	ScriptInfo* si = ScriptInfo::get(context);
+	if (!(si && (si->type() == ScriptInfo::Static || si->type() == ScriptInfo::Dynamic))) {
+	    ExpEvaluator::pushOne(stack,new ExpOperation(false));
+	    return true;
+	}
+    }
+
+    // Start worker
+    if (!m_worker) {
+	ScriptRun* runner = YOBJECT(ScriptRun,context);
+	if (!(runner && runner->context() && runner->code()))
+	    return false;
+	m_worker = new JsEngineWorker(this,runner->context(),runner->code());
+	if (!m_worker->startup()) {
+	    Debug(this,DebugWarn,"JsEngine failed to start worker thread [%p]",this);
+	    m_worker = 0;
+	    delete m_worker;
+	    return false;
+	}
+    }
+    if (!time) {
+	repeat = JsEvent::canRepeat(type);
+	JsObject* jso = YOBJECT(JsObject,args[2]);
+	if (jso) {
+	    if (repeat)
+		jso->getBoolField(YSTRING("repeat"),repeat);
+	}
+    }    
+    ExpOperVector cbArgs;
+    unsigned int id = m_worker->addEvent(*callback,type,repeat,
+	cbArgs.cloneFrom(args,time ? 2 : 3),interval);
+    ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)id));
+    return true;
+}
+
+bool JsEngine::clearEvent(ObjList& stack, const ExpOperation& oper, GenObject* context,
+    bool time, bool repeat)
+{
+    // clearInterval / clearTimeout / clearEvent (id)
+    if (!m_worker)
+	return false;
+    ExpOperVector args;
+    if (!extractStackArgs(1,0,args,this,stack,oper,context))
+	return false;
+    ExpOperation* id = static_cast<ExpOperation*>(args[0]);
+    bool ret = m_worker->removeEvent((unsigned int)id->valInteger(),time,repeat);
+    ExpEvaluator::pushOne(stack,new ExpOperation(ret));
+    return true;
 }
 
 void JsEngine::initialize(ScriptContext* context, const char* name)
@@ -6430,33 +6561,6 @@ void JsDNS::initialize(ScriptContext* context)
 
 
 /**
- * class JsTimeEvent
- */
-
-JsTimeEvent::JsTimeEvent(JsEngineWorker* worker, const ExpFunction& callback,
-	unsigned int interval,bool repeatable, unsigned int id, ObjList* args)
-    : m_worker(worker), m_callbackFunction(callback.name(),1),
-    m_interval(interval), m_repeat(repeatable), m_id(id), m_args(args)
-{
-    XDebug(&__plugin,DebugAll,"Created new JsTimeEvent(%u,%s) [%p]",interval,
-	   String::boolText(repeatable),this);
-    m_fire = Time::msecNow() + m_interval;
-}
-
-void JsTimeEvent::processTimeout(const Time& when)
-{
-    if (m_repeat)
-	m_fire = when.msec() + m_interval;
-    ScriptRun* runner = m_worker->getRunner();
-    if (!runner)
-	return;
-    ObjList args;
-    if (m_args)
-	copyArgList(args,*m_args);
-    runner->call(m_callbackFunction.name(),args);
-}
-
-/**
  * class JsEngineWorker
  */
 
@@ -6472,35 +6576,60 @@ JsEngineWorker::~JsEngineWorker()
 {
     DDebug(&__plugin,DebugAll,"Destroying JsEngineWorker engine=%p [%p]",(void*)m_engine,this);
     m_events.clear();
+    m_installedEvents.clear();
     if (m_engine)
 	m_engine->resetWorker();
     m_engine = 0;
     TelEngine::destruct(m_runner);
 }
 
-unsigned int JsEngineWorker::addEvent(const ExpFunction& callback, unsigned int interval, bool repeat, ObjList* args)
+unsigned int JsEngineWorker::addEvent(const ExpFunction& callback, int type, bool repeat,
+    ExpOperVector& args, unsigned int interval)
 {
-    Lock myLock(m_eventsMutex);
-    if (interval < MIN_CALLBACK_INTERVAL)
-	interval = MIN_CALLBACK_INTERVAL;
+    Lock lck(m_eventsMutex);
     // TODO find a better way to generate the id's
-    postponeEvent(new JsTimeEvent(this,callback,interval,repeat,++m_id,args));
-    return m_id;
-}
-
-bool JsEngineWorker::removeEvent(unsigned int id, bool repeatable)
-{
-    Lock myLock(m_eventsMutex);
-    for (ObjList* o = m_events.skipNull();o ; o = o->skipNext()) {
-	JsTimeEvent* ev = static_cast<JsTimeEvent*>(o->get());
-	if (ev->getId() != id)
-	    continue;
-	if (ev->repeatable() != repeatable)
-	    return false;
-	o->remove();
-	return true;
+    unsigned int id = ++m_id;
+    if (type == JsEvent::EvTime) {
+	if (interval < MIN_CALLBACK_INTERVAL)
+	    interval = MIN_CALLBACK_INTERVAL;
+	return postponeEvent(new JsEvent(id,interval,repeat,callback,args));
     }
-    return false;
+#ifdef JS_DEBUG_EVENT_NON_TIME
+    Debug(m_engine,DebugInfo,"JsEngine adding event %u type=%s repeat=%s [%p]",
+	id,JsEvent::typeName(type),String::boolText(repeat),(void*)m_engine);
+#endif
+    m_installedEvents.append(new JsEvent(id,type,repeat,callback,args));
+    return id;
+}
+    
+bool JsEngineWorker::removeEvent(unsigned int id, bool time, bool repeat)
+{
+    Lock lck(m_eventsMutex);
+    ObjList* foundInstalled = 0;
+    if (!time) {
+	// Remove from installed list
+	foundInstalled = JsEvent::findHolder(id,m_installedEvents);
+	if (foundInstalled) {
+#ifdef JS_DEBUG_EVENT_NON_TIME
+	    Debug(m_engine,DebugInfo,"JsEngine removing %s event %u [%p]",
+		static_cast<JsEvent*>(foundInstalled->get())->typeName(),id,(void*)m_engine);
+#endif
+	    foundInstalled->remove();
+	}
+    }
+    // Remove from postponed list
+    ObjList* postponed = JsEvent::findHolder(id,m_events);
+    if (!postponed)
+	return time ? false : (0 != foundInstalled);
+    JsEvent* ev = static_cast<JsEvent*>(postponed->get());
+    if (time) {
+	if (!ev->isTimeEvent() || ev->repeat() != repeat)
+	    return false;
+    }
+    else if (ev->isTimeEvent())
+	return foundInstalled;
+    postponed->remove();
+    return true;
 }
 
 void JsEngineWorker::run()
@@ -6514,44 +6643,102 @@ void JsEngineWorker::run()
 	ObjList* o = m_events.skipNull();
 	if (!o) {
 	    myLock.drop();
-	    Thread::idle(true);
+	    Thread::idle();
 	    continue;
 	}
-	RefPointer<JsTimeEvent> ev = static_cast<JsTimeEvent*>(o->get());
-	Time t;
-	if (!ev->timeout(t)) {
-	    myLock.drop();
-	    ev = 0;
-	    Thread::idle(true);
-	    continue;
+	RefPointer<JsEvent> ev = static_cast<JsEvent*>(o->get());
+	if (ev->isTimeEvent()) {
+	    uint64_t now = Time::msecNow();
+	    if (!ev->timeout(now)) {
+		myLock.drop();
+		ev = 0;
+		Thread::idle();
+		continue;
+	    }
+	    if (o->remove(!ev->repeat()))
+		postponeEvent(ev,now);
 	}
-	if (o->remove(!ev->repeatable()))
-	    postponeEvent(ev);
+	else
+	    o->remove();
 	myLock.drop();
-	ev->processTimeout(t);
+	if (m_runner)
+	    m_runner->reset();
+	ev->process(m_runner);
 	ev = 0;
     }
 }
 
-void JsEngineWorker::postponeEvent(JsTimeEvent* evnt)
+unsigned int JsEngineWorker::postponeEvent(JsEvent* ev, uint64_t now)
 {
-    if (!evnt)
-	return;
-    for (ObjList* o = m_events.skipNull();o;o = o->skipNext()) {
-	JsTimeEvent* ev = static_cast<JsTimeEvent*>(o->get());
-	if (ev->fireTime() <= evnt->fireTime())
-	    continue;
-	o->insert(evnt);
-	return;
+    if (!ev)
+	return 0;
+    if (ev->isTimeEvent()) {
+	if (!now)
+	    now = Time::msecNow();
+	ev->fireTime(now);
+#ifdef JS_DEBUG_EVENT_TIME
+	Debug(m_engine,DebugAll,"JsEngine scheduling %s event %u fire in %ums [%p]",
+	    ev->typeName(),ev->id(),(unsigned int)(ev->fireTime() - now),(void*)m_engine);
+#endif
+	for (ObjList* o = m_events.skipNull(); o; o = o->skipNext()) {
+	    JsEvent* crt = static_cast<JsEvent*>(o->get());
+	    if (!crt->isTimeEvent() || crt->fireTime() <= ev->fireTime())
+		continue;
+	    o->insert(ev);
+	    return ev->id();
+	}
     }
-    m_events.append(evnt);
+    else {
+	// Non time event
+#ifdef JS_DEBUG_EVENT_NON_TIME
+	Debug(m_engine,DebugAll,"JsEngine scheduling %s event %u [%p]",
+	    ev->typeName(),ev->id(),(void*)m_engine);
+#endif
+	for (ObjList* o = m_events.skipNull(); o; o = o->skipNext()) {
+	    JsEvent* crt = static_cast<JsEvent*>(o->get());
+	    // Insert event before any other time event or non time event with lower priority
+	    // Same id: replace
+	    // Not same id + same type: continue (schedule after last event with same type)
+	    if (crt->isTimeEvent() || crt->type() > ev->type())
+		o->insert(ev);
+	    else if (ev->id() == crt->id())
+		o->set(ev);
+	    else
+		continue;
+	    return ev->id();
+	}
+    }
+    m_events.append(ev);
+    return ev->id();
 }
 
-ScriptRun* JsEngineWorker::getRunner()
+void JsEngineWorker::scheduleEvent(GenObject* context, int type)
 {
-    if (m_runner)
-	m_runner->reset();
-    return m_runner;
+    if (!context)
+	return;
+    // Find Engine in given context
+    RefPointer<JsEngine> eng;
+    JsEngine::get(context,&eng);
+    JsEngineWorker* worker = eng ? eng->worker() : 0;
+    if (!worker)
+	return;
+    Lock lck(worker->m_eventsMutex);
+    for (ObjList* o = worker->m_installedEvents.skipNull(); o;) {
+	JsEvent* ev = static_cast<JsEvent*>(o->get());
+	if (ev->type() != type) {
+	    o = o->skipNext();
+	    continue;
+	}
+	if (ev->repeat()) {
+	    ev = new JsEvent(ev);
+	    o = o->skipNext();
+	}
+	else {
+	    o->remove(false);
+	    o = o->skipNull();
+	}
+	worker->postponeEvent(ev);
+    }
 }
 
 
@@ -7090,7 +7277,7 @@ void JsAssist::msgPostExecute(const Message& msg, bool handled)
 
 JsGlobalInstance::JsGlobalInstance(JsGlobal* owner, unsigned int index)
     : ScriptInfoHolder(owner->scriptInfo()),
-    m_owner(owner), m_instance(index)
+    m_owner(owner), m_instance(index), m_instanceCount(0), m_reinitEvent(false)
 {
     m_name << owner->toString();
     if (index)
@@ -7121,7 +7308,8 @@ JsGlobalInstance::~JsGlobalInstance()
 unsigned int JsGlobalInstance::runMain()
 {
     DDebug(&__plugin,DebugInfo,"JsGlobalInstance::runMain() %s",m_name.c_str());
-    ScriptRun* runner = m_owner->parser().createRunner(m_context,0,m_instance,m_owner->instances());
+    m_instanceCount = m_owner->instances();
+    ScriptRun* runner = m_owner->parser().createRunner(m_context,0,m_instance,m_instanceCount);
     if (!runner)
 	return ScriptRun::Failed;
     attachScriptInfo(runner);
@@ -7133,6 +7321,15 @@ unsigned int JsGlobalInstance::runMain()
     TelEngine::destruct(runner);
     return st;
 }
+
+void JsGlobalInstance::scheduleInitEvent()
+{
+    if (m_reinitEvent)
+	JsEngineWorker::scheduleEvent(m_context,JsEvent::EvReInit);
+    else
+	m_reinitEvent = true;
+}
+
 
 ObjList JsGlobal::s_globals;
 ObjList JsGlobal::s_handlers;
@@ -7180,8 +7377,17 @@ bool JsGlobal::updateInstances(unsigned int instances)
 {
     // 0 means that it was called from some place where config was not read, so no change
     // or no change in number of instances
-    if (!instances || instances == m_instanceCount)
+    if (!instances || instances == m_instanceCount) {
+	// Re-init instances
+	for (unsigned int i = 0; i <= m_instanceCount; ++i) {
+	    JsGlobalInstance* inst = getInstance(i);
+	    if (inst) {
+		inst->scheduleInitEvent();
+		TelEngine::destruct(inst);
+	    }
+	}
 	return true;
+    }
     // we already now that current instance is different from what is requested
     // so if instances is 1 => m_instance count > 1, m_instanceCount == 1 => instance = 1
     // so we need to completely reload the script
@@ -7371,11 +7577,12 @@ bool JsGlobal::runMain()
 	name().c_str(),m_instanceCount,m_instances.count());
     if (m_instanceCount <= 1) {
 	JsGlobalInstance* inst = new JsGlobalInstance(this,0);
-	if(ScriptRun::Succeeded != inst->runMain()) {
+	if (ScriptRun::Succeeded != inst->runMain()) {
 	    TelEngine::destruct(inst);
 	    return false;
 	}
 	m_instances.append(inst);
+	inst->scheduleInitEvent();
     }
     else {
 	unsigned int lCount = m_instances.count();
@@ -7384,16 +7591,18 @@ bool JsGlobal::runMain()
 	    JsGlobalInstance* inst = getInstance(i + 1);
 	    // get instance returns a refcounted instance
 	    if (inst) {
+		inst->setInstanceCount(m_instanceCount);
+		inst->scheduleInitEvent();
 		TelEngine::destruct(inst);
 		continue;
 	    }
 	    inst = new JsGlobalInstance(this,i + 1);
-	    if(ScriptRun::Succeeded != inst->runMain()) {
+	    if (ScriptRun::Succeeded != inst->runMain()) {
 		TelEngine::destruct(inst);
 		return false;
 	    }
 	    m_instances.append(inst);
-
+	    inst->scheduleInitEvent();
 	}
 	// remove instances if m_instances was decreased
 	for (unsigned int i = m_instanceCount; i < lCount; i++) {
