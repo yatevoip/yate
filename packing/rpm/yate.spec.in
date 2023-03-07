@@ -40,8 +40,8 @@
 %define debug_package ${nil}
 %endif
 
-%if "%{revision}" == "svn"
-%define revision @PACKAGE_REVISION@svn
+%if "%{revision}" == "git"
+%define revision @PACKAGE_REVISION@git
 %endif
 
 %if "%{dist}" == ""
@@ -90,6 +90,7 @@ BuildRequires:	gcc-c++
 %description
 Yate is a telephony engine designed to implement PBX and IVR solutions
 for small to large scale projects.
+(GIT commit: @PACKAGE_GIT_HASH@)
 
 %files
 %defattr(-, root, root)

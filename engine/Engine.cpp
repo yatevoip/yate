@@ -549,6 +549,7 @@ bool EngineStatusHandler::received(Message &msg)
     msg.retValue() << "name=engine,type=system";
     msg.retValue() << ",version=" << YATE_VERSION;
     msg.retValue() << ",revision=" << YATE_REVISION;
+    msg.retValue() << ",githash=" << YATE_GIT_HASH;
     msg.retValue() << ",nodename=" << Engine::nodeName();
     msg.retValue() << ";plugins=" << plugins.count();
     msg.retValue() << ",inuse=" << Engine::self()->usedPlugins();

@@ -1,5 +1,7 @@
 revision.txt
+git_commit.txt
 core*
 *.orig
 *~
 .*.swp
+

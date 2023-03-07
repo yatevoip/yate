@@ -9,8 +9,11 @@ fi
 
 PACKAGE_RELEASE="1"
 PACKAGE_STATUS="devel"
-PACKAGE_REVISION=`cd "$srcdir"; LANG=C LC_MESSAGES=C svn info 2>/dev/null | sed -n 's,^Last Changed Rev: *,,p'`
+PACKAGE_REVISION=`cd "$srcdir"; LANG=C LC_MESSAGES=C git rev-list -n 1 HEAD 2>/dev/null`
 test -z "$PACKAGE_REVISION" && PACKAGE_REVISION=`cat "$srcdir/packing/revision.txt" 2>/dev/null`
+test -z "$PACKAGE_REVISION" && PACKAGE_REVISION=`cat "$srcdir/packing/git_commit.txt" 2>/dev/null`
+PACKAGE_GIT_HASH=`cd "$srcdir"; LANG=C LC_MESSAGES=C git rev-list -n 1 HEAD 2>/dev/null`
+test -z "$PACKAGE_REVISION" && PACKAGE_REVISION=`cat "$srcdir/packing/git_commit.txt" 2>/dev/null`
 AC_ARG_WITH(status,AC_HELP_STRING([--with-status=NAME],[use NAME as package status]),[PACKAGE_STATUS=$withval])
 
 PACKAGE_VERSION_MAJOR="${PACKAGE_VERSION%%.*}"
@@ -25,6 +28,7 @@ AC_SUBST(PACKAGE_VERSION_RELEASE)
 AC_SUBST(PACKAGE_RELEASE)
 AC_SUBST(PACKAGE_STATUS)
 AC_SUBST(PACKAGE_REVISION)
+AC_SUBST(PACKAGE_GIT_HASH)
 
 # We may need the host OS type but avoid the overhead of AC_CANONICAL_SYSTEM
 AC_MSG_CHECKING([for local operating system type])
