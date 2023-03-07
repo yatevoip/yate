@@ -81,7 +81,7 @@ DOCGEN := $(DOCGEN_D)
 APIDOCS := apidocs
 endif
 
-GIT_TAG := $(shell LANG=C LC_MESSAGES=C git tag  2>/dev/nul | tail -1)
+GIT_TAG := $(shell LANG=C LC_MESSAGES=C git tag  2>/dev/null | tail -1)
 GIT_HASH := $(shell LANG=C LC_MESSAGES=C git rev-list -n1 HEAD 2>/dev/null)
 
 
@@ -337,10 +337,10 @@ srpm: check-gittag tarball
 
 
 #build rpm/srpm with tag in revision number
-rpm-tag:
+rpm-tag: check-gittag tarball
 	rpmbuild -tb --define 'revision $(GIT_TAG)git' $(RPMOPT) packing/tarballs/@PACKAGE_TARNAME@-@PACKAGE_VERSION@-@PACKAGE_STATUS@@PACKAGE_RELEASE@.tar.gz
 
-srpm-tag:
+srpm-tag: check-gittag tarball
 	rpmbuild -ta --define 'revision $(GIT_TAG)git' $(RPMOPT) packing/tarballs/@PACKAGE_TARNAME@-@PACKAGE_VERSION@-@PACKAGE_STATUS@@PACKAGE_RELEASE@.tar.gz
 
 
@@ -351,7 +351,6 @@ rpm-head: tarball
 srpm-head: tarball
 	rpmbuild -ta --define 'revision $(GIT_HASH)git' $(RPMOPT) packing/tarballs/@PACKAGE_TARNAME@-@PACKAGE_VERSION@-@PACKAGE_STATUS@@PACKAGE_RELEASE@.tar.gz
 
-#	tag=`LANG=C LC_MESSAGES=C git tag  2>/dev/nul | tail -1`; \
 
 check-gittag revision: check-topdir
 	@tag_hash=""; \
