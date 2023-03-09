@@ -312,6 +312,7 @@ snapshot tarball: check-topdir revision clean windows apidocs
 	    find $$wd -name CVS >>$$wd/tar-exclude; \
 	    find $$wd -name .cvsignore >>$$wd/tar-exclude; \
 	    find $$wd -name .gitignore >>$$wd/tar-exclude; \
+	    find $$wd -name .git >>$$wd/tar-exclude; \
 	else \
 	    echo "$$wd/packing/rpm/yate.spec" >>$$wd/tar-exclude; \
 	fi ; \
@@ -368,7 +369,7 @@ check-gittag revision: check-topdir
 	    tag=""; \
 	fi; \
 	test -z "$(GIT_TAG)" || echo "$(GIT_TAG)" > packing/revision.txt ; \
-	test -z "$(GIT_HASH)" || echo "$$GIT_HASH" > packing/git_commit.txt
+	test -z "$(GIT_HASH)" || echo "$(GIT_HASH)" > packing/git_commit.txt
 
 %.o: @srcdir@/%.cpp $(MKDEPS) @srcdir@/yatengine.h
 	$(COMPILE) -c $<
