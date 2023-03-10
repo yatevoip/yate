@@ -21,9 +21,13 @@
 ; If empty it will match all messages
 ; Example for a filter matching all chan.Anything messages and engine.halt:
 ; filter=^\(chan\.\|engine\.halt$\)
-;filter
+;filter=
 
+; timer: boolean: True to sniff engine.timer messages, false otherwise
+;timer=false
 
-
-
+; max_buf_size: integer: Maximum admitted length of an encoded message.
+; If encoded message length exceeds this length, message will not be sniffed
+; Acceptable range is 2048 .. 65507
+;max_buf_size=2048
 
