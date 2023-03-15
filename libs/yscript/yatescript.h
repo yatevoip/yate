@@ -1396,6 +1396,13 @@ public:
 	{ return m_data.length(); }
 
     /**
+     * Retrieve the number of non NULL objects in vector
+     * @return The number of non NULL objects in vector
+     */
+    inline unsigned int count() const
+	{ return m_data.count(); }
+
+    /**
      * Retrieve an item at given index
      * @param idx Index to retrieve
      * @return ExpOperation pointer, NULL if not set or index is out of bounds
@@ -1774,7 +1781,7 @@ public:
      * @param name Name of the context
      */
     inline explicit ScriptContext(const char* name = 0)
-	: m_params(name), m_instIdx(0), m_instCount(1)
+	: m_params(name), m_instIdx(0), m_instCount(1), m_terminated(false)
 	{ }
 
     /**
@@ -1959,10 +1966,26 @@ public:
     virtual unsigned int instanceCount() const
         { return m_instCount; }
 
+    /**
+     * Cleanup the context. Remove variables
+     */
+    virtual void cleanup() {
+	    Lock lck(mutex());
+	    m_terminated = true;
+	    params().clearParams();
+	}
+
+    /**
+     * Check if the context was terminated
+     */
+    inline bool terminated() const
+	{ return m_terminated; }
+
 private:
     NamedList m_params;
     unsigned int m_instIdx; // instance index
     unsigned int m_instCount; // total number of instances
+    bool m_terminated;                   // Context was terminated. Variables were cleared
 };
 
 /**

@@ -259,6 +259,74 @@ private:
     RefPointer<ScriptInfo> m_scriptInfo;
 };
 
+class JsScriptRunBuild : public GenObject
+{
+public:
+    inline JsScriptRunBuild()
+	{}
+    inline JsScriptRunBuild(GenObject* ctx, const ExpFunction* func = 0,
+	ExpOperVector* args = 0, unsigned int argsOffs = 0)
+	{ set(ctx,func,args,argsOffs); }
+    ~JsScriptRunBuild()
+	{ clear(); }
+    inline bool valid() const
+	{ return m_context && m_code; }
+    inline bool set(GenObject* ctx, const ExpFunction* func = 0,
+	ExpOperVector* args = 0, unsigned int argsOffs = 0) {
+	    ScriptRun* runner = YOBJECT(ScriptRun,ctx);
+	    if (runner) {
+		m_context = runner->context();
+		m_code = runner->code();
+		m_scriptInfo = YOBJECT(ScriptInfo,runner->userData());
+		clearFunc();
+		if (func) {
+		    m_func = func->name();
+		    if (args)
+			m_args.takeFrom(*args,argsOffs);
+		}
+		if (valid())
+		    return true;
+	    }
+	    clear();
+	    return false;
+	}
+    inline void clear() {
+	    clearFunc();
+	    m_context = 0;
+	}
+    inline ScriptRun* createRunner() {
+	    if (!m_context || m_context->terminated())
+		return 0;
+	    ScriptRun* runner = m_code ? m_code->createRunner(m_context,NATIVE_TITLE) : 0;
+	    if (runner)
+		runner->userData(m_scriptInfo);
+	    return runner;
+	}
+    inline int callFunction(ScriptRun* runner, ObjList& args, bool fin = false) {
+	    int ret = ScriptRun::Failed;
+	    if (m_func && runner) {
+		if (fin)
+		    m_args.moveTo(args);
+		else
+		    m_args.cloneTo(args);
+		ret = runner->call(m_func,args);
+	    }
+	    args.clear();
+	    return ret;
+	}
+
+protected:
+    inline void clearFunc() {
+	    m_func.clear();
+	    m_args.clear();
+	}
+    RefPointer<ScriptContext> m_context;
+    RefPointer<ScriptCode> m_code;
+    RefPointer<ScriptInfo> m_scriptInfo;
+    String m_func;
+    ExpOperVector m_args;
+};
+
 class JsMessage;
 
 class JsAssist : public ChanAssist, public ScriptInfoHolder
@@ -745,6 +813,7 @@ class JsEngineWorker : public Thread, public ScriptInfoHolder
 public:
     JsEngineWorker(JsEngine* engine, ScriptContext* context, ScriptCode* code);
     ~JsEngineWorker();
+    bool init();
     unsigned int addEvent(const ExpFunction& callback, int type, bool repeat, ExpOperVector& args,
 	unsigned int interval = 0);
     bool removeEvent(unsigned int id, bool time, bool repeat);
@@ -1126,6 +1195,16 @@ public:
 	{ m_message = message; m_owned = false; m_dispatch = false; setTrace(); }
     static void initialize(ScriptContext* context, bool allowSingleton = false);
     void runAsync(ObjList& stack, Message* msg, bool owned);
+    static inline JsMessage* build(Message* message, ScriptContext* ctx, unsigned int line,
+	bool disp, bool owned = false) {
+	    JsMessage* jm = new JsMessage(message,ctx->mutex(),line,disp,owned);
+	    jm->setPrototype(ctx,YSTRING("Message"));
+	    return jm;
+	}
+    static inline void build(ObjList& args, Message* message, ScriptContext* ctx, unsigned int line,
+	bool disp, bool owned = false)
+	{ args.append(new ExpWrapper(build(message,ctx,line,disp,owned),"message")); }
+
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
     void getColumn(ObjList& stack, const ExpOperation* col, GenObject* context, unsigned int lineNo);
@@ -1154,6 +1233,47 @@ protected:
     int m_traceLvl;
     ObjList* m_traceLst;
     bool m_allowSingleton;
+};
+
+class JsModuleMessage : public Message
+{
+    YCLASS(JsModuleMessage,Message)
+public:
+    inline JsModuleMessage(const char* name, bool broadcast = false)
+	: Message(name,0,broadcast), m_dispatchedCb(0)
+	{}
+    virtual ~JsModuleMessage()
+	{ TelEngine::destruct(m_dispatchedCb); }
+    inline bool setDispatchedCallback(const ExpFunction& func, GenObject* context,
+	ExpOperVector& args, unsigned int argsOffs) {
+	    TelEngine::destruct(m_dispatchedCb);
+	    m_dispatchedCb = new JsScriptRunBuild(context,&func,&args,argsOffs);
+	    if (!m_dispatchedCb->valid())
+		TelEngine::destruct(m_dispatchedCb);
+	    return 0 != m_dispatchedCb;
+	}
+
+protected:
+    virtual void dispatched(bool accepted) {
+	    JsScriptRunBuild* d = m_dispatchedCb;
+	    m_dispatchedCb = 0;
+	    if (!d) {
+		Message::dispatched(accepted);
+		return;
+	    }
+	    ScriptRun* runner = d->createRunner();
+	    if (runner) {
+		ObjList args;
+		JsMessage::build(args,this,runner->context(),0,false);
+		args.append(new ExpOperation(accepted));
+		d->callFunction(runner,args,true);
+		TelEngine::destruct(runner);
+	    }
+	    TelEngine::destruct(d);
+	}
+
+protected:
+    JsScriptRunBuild* m_dispatchedCb;    // Callback for message dispatched
 };
 
 class JsHandler : public MessageHandler, public ScriptInfoHolder
@@ -3070,8 +3190,7 @@ bool JsEngine::setEvent(ObjList& stack, const ExpOperation& oper, GenObject* con
 	if (!(runner && runner->context() && runner->code()))
 	    return false;
 	m_worker = new JsEngineWorker(this,runner->context(),runner->code());
-	if (!m_worker->startup()) {
-	    Debug(this,DebugWarn,"JsEngine failed to start worker thread [%p]",this);
+	if (!m_worker->init()) {
 	    m_worker = 0;
 	    delete m_worker;
 	    return false;
@@ -3587,11 +3706,19 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    *static_cast<ExpOperation*>(args[1]),context);
     }
     else if (oper.name() == YSTRING("enqueue")) {
-	if (oper.number() != 0)
+	// enqueue([callback[,reserved[,callback_params...]])
+	ExpOperVector args;
+	if (!extractStackArgs(0,0,args,this,stack,oper,context))
 	    return false;
 	bool ok = false;
 	if (m_owned && !frozen()) {
 	    Message* m = m_message;
+	    if (m && args[0]) {
+		const ExpFunction* func = getFunction(args[0]);
+		JsModuleMessage* cb = func ? YOBJECT(JsModuleMessage,m) : 0;
+		if (!(cb && cb->setDispatchedCallback(*func,context,args,2)))
+		    return false;
+	    }
 	    clearMsg();
 	    if (m)
 		freeze();
@@ -4237,7 +4364,7 @@ JsObject* JsMessage::runConstructor(ObjList& stack, const ExpOperation& oper, Ge
 	return 0;
     if (!ref())
 	return 0;
-    Message* m = new Message(*name,0,broad && broad->valBoolean());
+    Message* m = new JsModuleMessage(*name,broad && broad->valBoolean());
     if (objParams) {
 	copyObjParams(*m,&objParams->params());
 	if (objParams->nativeParams())
@@ -4284,7 +4411,8 @@ bool JsHandler::receivedInternal(Message& msg)
 #endif
     String dbg, loadExt;
     ScriptRun* runner = 0;
-    if (regular()) {
+    bool regularHandler = regular();
+    if (regularHandler) {
 	runner = m_code->createRunner(m_context,NATIVE_TITLE);
 	attachScriptInfo(runner);
     }
@@ -4310,7 +4438,7 @@ bool JsHandler::receivedInternal(Message& msg)
 	return false;
     }
     
-    if (!regular()) {
+    if (!regularHandler) {
 	// TODO: Track object creation if we implement a mechanism to investigate it
 	//       It is useless to enable tracking for now: the context will be destroyed on return
 	//runner->context()->trackObjs(s_trackCreation);
@@ -4342,13 +4470,13 @@ bool JsHandler::receivedInternal(Message& msg)
 
     ObjList args;
     args.append(new ExpWrapper(jm,"message"));
-    if (handlerCtx || !regular())
+    if (handlerCtx || !regularHandler)
 	args.append(new ExpOperation(handlerCtx));
 #ifdef JS_DEBUG_JsMessage_received
     uint64_t run = Time::now();
 #endif
     ScriptRun::Status rval = ScriptRun::Succeeded;
-    if (regular())
+    if (regularHandler)
 	rval = runner->call(name,args);
     else {
 	// Init globals and call the function handling the message
@@ -4369,6 +4497,11 @@ bool JsHandler::receivedInternal(Message& msg)
 	}
     }
     TelEngine::destruct(jm);
+    // Clear now the arguments list: the context may be destroyed
+    args.clear();
+    // Using a singleton context: cleanup the context
+    if (!regularHandler)
+	runner->context()->cleanup();
     TelEngine::destruct(runner);
 
 #ifdef JS_DEBUG_JsMessage_received
@@ -6583,6 +6716,18 @@ JsEngineWorker::~JsEngineWorker()
     TelEngine::destruct(m_runner);
 }
 
+bool JsEngineWorker::init()
+{
+    if (m_runner) {
+	if (startup())
+	    return true;
+	Debug(m_engine,DebugWarn,"JsEngine failed to start worker thread [%p]",(void*)m_engine);
+    }
+    else
+	Debug(m_engine,DebugWarn,"JsEngine failed to create runner [%p]",(void*)m_engine);
+    return false;
+}
+
 unsigned int JsEngineWorker::addEvent(const ExpFunction& callback, int type, bool repeat,
     ExpOperVector& args, unsigned int interval)
 {
@@ -7299,10 +7444,8 @@ JsGlobalInstance::~JsGlobalInstance()
 	    TelEngine::destruct(runner);
 	}
     }
-    if (m_context) {
-	Lock mylock(m_context->mutex());
-	m_context->params().clearParams();
-    }
+    if (m_context)
+	m_context->cleanup();
 }
   
 unsigned int JsGlobalInstance::runMain()
@@ -7950,6 +8093,9 @@ bool JsModule::evalContext(String& retVal, const String& cmd, ScriptContext* con
     }
     else
 	retVal << ScriptRun::textState(st) << "\r\n";
+    // Not called in script context: cleanup the context
+    if (!context)
+	runner->context()->cleanup();
     TelEngine::destruct(runner);
     return true;
 }
