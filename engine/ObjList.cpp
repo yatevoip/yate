@@ -520,7 +520,7 @@ unsigned int ObjVector::resize(unsigned int len, bool keepData)
 	::memcpy(buf,m_objects,length() * sizeof(GenObject*));
 	::memset(m_objects,0,length() * sizeof(GenObject*));
 	if (len > length())
-	    ::memset(buf + length(),0,(length() - len) * sizeof(GenObject*));
+	    ::memset(buf + length(),0,(len - length()) * sizeof(GenObject*));
     }
     clear();
     m_objects = buf;
