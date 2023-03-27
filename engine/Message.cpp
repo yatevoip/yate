@@ -238,7 +238,7 @@ MessageHandler::MessageHandler(const char* name, unsigned priority,
 	const char* trackName, bool addPriority)
     : String(name),
       m_trackName(trackName), m_priority(priority),
-      m_unsafe(0), m_dispatcher(0), m_filter(0), m_filterRegexp(0), m_counter(0)
+      m_unsafe(0), m_dispatcher(0), m_filter(0), m_counter(0)
 {
     DDebug(DebugAll,"MessageHandler::MessageHandler('%s',%u,'%s',%s) [%p]",
 	name,priority,trackName,String::boolText(addPriority),this);
@@ -285,19 +285,23 @@ bool MessageHandler::receivedInternal(Message& msg)
 
 void MessageHandler::setFilter(NamedString* filter)
 {
-    clearFilter();
-    m_filter = filter;
-    m_filterRegexp = YOBJECT(Regexp,filter);
+    Regexp* r = YOBJECT(Regexp,filter);
+    if (r)
+	setFilter(new MatchingItemRegexp(filter->name(),*r));
+    else if (filter)
+	setFilter(new MatchingItemString(filter->name(),*filter));
+    else
+	clearFilter();
+    TelEngine::destruct(filter);
 }
 
 void MessageHandler::clearFilter()
 {
-    if (m_filter) {
-	NamedString* tmp = m_filter;
-	m_filter = 0;
-	m_filterRegexp = 0;
-	delete tmp;
-    }
+    if (!m_filter)
+	return;
+    MatchingItemBase* tmp = m_filter;
+    m_filter = 0;
+    TelEngine::destruct(tmp);
 }
 
 
@@ -421,14 +425,8 @@ bool MessageDispatcher::dispatch(Message& msg)
     for (; l; l=l->next()) {
 	MessageHandler *h = static_cast<MessageHandler*>(l->get());
 	if (h && (h->null() || *h == msg)) {
-	    if (h->filter()) {
-		if (h->filterRegexp()) {
-		    if (!h->filterRegexp()->matches(msg.getValue(h->filter()->name())))
-			continue;
-		}
-		else if (*(h->filter()) != msg[h->filter()->name()])
-		    continue;
-	    }
+	    if (h->filter() && !h->filter()->matchListParam(msg))
+		continue;
 	    if (counting)
 		Thread::setCurrentObjCounter(h->objectsCounter());
 

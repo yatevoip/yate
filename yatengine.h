@@ -656,15 +656,22 @@ public:
 
     /**
      * Retrieve the filter (if installed) associated to this handler
+     * @return MatchingItemBase pointer, NULL if not set
      */
-    inline const NamedString* filter() const
+    inline const MatchingItemBase* filter() const
 	{ return m_filter; }
 
     /**
-     * Retrieve the Regexp filter (if installed) associated to this handler
+     * Set a filters list associated to this handler
+     * @param filter Pointer to the filters list to install, will be owned and
+     *  destroyed by the handler
      */
-    inline const Regexp* filterRegexp() const
-	{ return m_filterRegexp; }
+    inline void setFilter(MatchingItemBase* filter) {
+	    if (filter == m_filter)
+		return;
+	    clearFilter();
+	    m_filter = filter;
+	}
 
     /**
      * Set a filter for this handler
@@ -679,7 +686,7 @@ public:
      * @param value Value of the parameter to filter
      */
     inline void setFilter(const char* name, const char* value)
-	{ setFilter(new NamedString(name,value)); }
+	{ setFilter(new MatchingItemString(name,value)); }
 
     /**
      * Remove and destroy any filter associated to this handler
@@ -710,8 +717,7 @@ private:
     unsigned m_priority;
     int m_unsafe;
     MessageDispatcher* m_dispatcher;
-    NamedString* m_filter;
-    Regexp* m_filterRegexp;
+    MatchingItemBase* m_filter;
     NamedCounter* m_counter;
 };
 

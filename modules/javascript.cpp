@@ -65,6 +65,14 @@ static inline void pushStackResNull(ObjList& stack, ExpOperation* oper)
 	ExpEvaluator::pushOne(stack,JsParser::nullClone());
 }
 
+static inline void pushStackObjNull(ObjList& stack, JsObject* jso, const char* name = 0)
+{
+    if (jso)
+	ExpEvaluator::pushOne(stack,new ExpWrapper(jso,name));
+    else
+	ExpEvaluator::pushOne(stack,JsParser::nullClone());
+}
+
 static inline ScriptContext* getScriptContext(GenObject* gen)
 {
     ScriptRun* runner = YOBJECT(ScriptRun,gen);
@@ -82,7 +90,7 @@ static inline const ExpFunction* getFunction(ExpOperation* op)
     return jsf ? jsf->getFunc() : 0;
 }
 
-static inline const NamedList* getObjParams(ExpOperation* op)
+static inline const NamedList* getObjParams(GenObject* op)
 {
     JsObject* jso = YOBJECT(JsObject,op);
     return jso ? (jso->nativeParams() ? jso->nativeParams() : &jso->params()) : 0;
@@ -137,6 +145,12 @@ static inline void dumpTraceToMsg(Message* msg, ObjList* lst)
 	msg->setParam(s_tracePref + String(count++),*s);
     }
     msg->setParam(YSTRING("trace_msg_count"),String(count));
+}
+
+#define YCLASS_ENCLOSED(type,base,enclosed) \
+public: virtual void* getObject(const String& name) const { \
+    void* o = (name == YATOM(#type)) ? const_cast<type*>(this) : base::getObject(name); \
+    return o ? o : ((enclosed) ? (enclosed)->getObject(name) : 0); \
 }
 
 class ScriptInfo;
@@ -417,7 +431,7 @@ public:
 		    return 0;
 		int ok = 0;
 		ScriptMutex* mtx = ctx->mutex();
-		jso = JsObject::copy(ok,m_object,JsObject::AssignDeepCopy,context,&mtx,line);
+		jso = JsObject::copy(ok,m_object,JsObject::AssignDeepCopy,ctx,&mtx,line);
 	    }
 	    else if (m_object && m_object->ref())
 		jso = m_object;
@@ -654,7 +668,6 @@ public:
 	: JsObject(mtx,"[object SharedVars]",line)
 	{ setVars(varsName); }
     virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
-    static void initialize(ScriptContext* context);
     static inline uint64_t modulo(ExpOperation* mod) {
 	    if (!(mod && mod->isInteger()))
 		return 0;
@@ -698,8 +711,7 @@ public:
 	    params().addParam(new ExpFunction("description"));
 	}
     inline JsSharedObjects(const String& owner, ScriptMutex* mtx, unsigned int line, const char* name = 0)
-	: JsObject(mtx,name ? name : "[object JsSharedObjects]",line,false),
-	  m_owner(owner)
+	: JsObject(mtx,name ? name : "[object JsSharedObjects]",line,false), m_owner(owner)
 	{
 	    XDebug(DebugAll,"~JsSharedObjects('%s') [%p]",TelEngine::c_safe(name),this);
 	}
@@ -707,7 +719,6 @@ public:
 	{
 	    XDebug(DebugAll,"~JsSharedObjects() [%p]",this);
 	}
-    static void initialize(ScriptContext* context);
     virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -948,6 +959,56 @@ private:
     URI m_uri;
 };
 
+class JsMatchingItem : public JsObject
+{
+    YCLASS_ENCLOSED(JsMatchingItem,JsObject,m_match)
+public:
+    inline JsMatchingItem(ScriptMutex* mtx)
+	: JsObject("MatchingItem",mtx,true), m_match(0)
+	{
+	    XDebug(DebugAll,"JsMatchingItem() [%p]",this);
+	    params().addParam(new ExpFunction("matches"));
+	    params().addParam(new ExpFunction("getDesc"));
+	}
+    inline JsMatchingItem(MatchingItemBase* match, ScriptMutex* mtx, unsigned int line,
+	const char* name = 0)
+	: JsObject(mtx,name ? name : "[object MatchingItem]",line,false), m_match(match)
+	{
+	    XDebug(DebugAll,"JsMatchingItem(%p) [%p]",m_match,this);
+	}
+    virtual ~JsMatchingItem()
+	{
+	    XDebug(DebugAll,"~JsMatchingItem() [%p]",this);
+	    TelEngine::destruct(m_match);
+	}
+    inline MatchingItemBase* copyMatching(bool optimize = false) const {
+	    MatchingItemBase* ret = m_match ? m_match->copy(): 0;
+	    if (ret && optimize && ret->itemList())
+		return MatchingItemList::optimize(static_cast<MatchingItemList*>(ret));
+	    return ret;
+	}
+    virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    virtual void initConstructor(JsFunction* construct) {
+	    construct->params().addParam(new ExpFunction("validate"));
+	}
+    virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
+	unsigned int line = 0) const;
+    MatchingItemBase* buildItemFromArgs(ExpOperVector& args, const char** reason = 0);
+    static MatchingItemBase* buildItem(GenObject* value, const String* name,
+	const NamedList* params, bool optimize,
+	const char** reason = 0, bool allowObjValue = true);
+    static JsObject* buildJsObj(const MatchingItemBase* item,
+	GenObject* context, unsigned int line, ScriptMutex* mutex, bool forceBoolProps = false);
+
+protected:
+    bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    virtual JsObject* clone(const char* name, const ExpOperation& oper) const
+	{ return new JsMatchingItem(copyMatching(),mutex(),oper.lineNumber(),name); }
+
+private:
+    MatchingItemBase* m_match;
+};
+
 #define MKDEBUG(lvl) params().addParam(new ExpOperation((int64_t)Debug ## lvl,"Debug" # lvl))
 #define MKTIME(typ) params().addParam(new ExpOperation((int64_t)SysUsage:: typ ## Time,# typ "Time"))
 #define MKDUMP(typ) params().addParam(new ExpOperation((int64_t)JsObject:: Dump ## typ,"Dump" # typ))
@@ -1059,6 +1120,7 @@ public:
 	    addConstructor(params(),"URI",new JsURI(mtx));
 	    addConstructor(params(),"SharedVars",new JsShared(mtx));
 	    addConstructor(params(),"SharedObjects",new JsSharedObjects(mtx));
+	    addConstructor(params(),"MatchingItem",new JsMatchingItem(mtx));
 	    MKSCRIPTYPE(Unknown);
 	    MKSCRIPTYPE(Static);
 	    MKSCRIPTYPE(Dynamic);
@@ -1078,6 +1140,15 @@ public:
     inline const String& schedName() const
 	{ return m_schedName; }
     void setDebug(String str);
+    inline void setConstructorPrototype(JsObject* jso, const String& name) {
+	    if (!jso)
+		return;
+	    JsObject* proto = YOBJECT(JsObject,params().getParam(name));
+	    if (proto)
+		proto = YOBJECT(JsObject,proto->params().getParam(YSTRING("prototype")));
+	    if (proto && proto->ref())
+		jso->params().setParam(new ExpWrapper(proto,protoName()));
+	}
 
     // Retrieve JsEngine object held by running context
     // 'eng' given: unsafe, lock context, return reference
@@ -1090,6 +1161,15 @@ public:
 	    Lock lck(ctx->mutex());
 	    *eng = YOBJECT(JsEngine,ctx->params().getParam(YSTRING("Engine")));
 	    return *eng;
+	}
+    // Retrieve a contructor prototype from Engine object held by running context
+    static inline void setConstructorPrototype(GenObject* context, JsObject* jso, const String& name) {
+	    if (!(context && jso))
+		return;
+	    ScriptContext* ctx = getScriptContext(context);
+	    JsEngine* eng = ctx ? YOBJECT(JsEngine,ctx->params().getParam(YSTRING("Engine"))) : 0;
+	    if (eng)
+		eng->setConstructorPrototype(jso,name);
 	}
 
 protected:
@@ -1359,20 +1439,20 @@ public:
 	const String& scriptFile = String::empty(), const String& prefix = String::empty());
     virtual bool received(Message& msg)
 	{ return false; }
-    inline void setFilter(const String& param, GenObject* val) {
+    inline void setHandlerFilter(const String& param, GenObject* val) {
 	    if (!(param && val))
 		return;
 	    if (YOBJECT(ExpOperation,val)) {
 		JsRegExp* rexp = YOBJECT(JsRegExp,val);
 		if (rexp)
-		    MessageHandler::setFilter(new NamedPointer(param,new Regexp(rexp->regexp())));
+		    MessageHandler::setFilter(new MatchingItemRegexp(param,rexp->regexp()));
 		else
-		    MessageHandler::setFilter(param,*static_cast<ExpOperation*>(val));
+		    MessageHandler::setFilter(param,static_cast<ExpOperation*>(val)->c_str());
 	    }
 	    else {
 		const String& s = val->toString();
 		if (s.startsWith("regexp:"))
-		    MessageHandler::setFilter(new NamedPointer(param,new Regexp(s.substr(7))));
+		    MessageHandler::setFilter(new MatchingItemRegexp(param,s.substr(7)));
 		else
 		    MessageHandler::setFilter(param,s);
 	    }
@@ -1392,7 +1472,7 @@ public:
 		    return o;
 	    return 0;
 	}
-	
+
 protected:
     virtual bool receivedInternal(Message& msg);
     inline void setFromContext(GenObject* context) {
@@ -1994,8 +2074,6 @@ static void contextInit(ScriptRun* runner, const char* name = 0, bool autoExt = 
     JsHasher::initialize(ctx);
     JsJSON::initialize(ctx);
     JsDNS::initialize(ctx);
-    JsShared::initialize(ctx);
-    JsSharedObjects::initialize(ctx);
     JsXPath::initialize(ctx);
     if (autoExt)
 	contextLoad(ctx,name);
@@ -3418,17 +3496,6 @@ JsObject* JsShared::runConstructor(ObjList& stack, const ExpOperation& oper, Gen
     return obj;
 }
 
-void JsShared::initialize(ScriptContext* context)
-{
-    if (!context)
-	return;
-    ScriptMutex* mtx = context->mutex();
-    Lock mylock(mtx);
-    NamedList& params = context->params();
-    if (!params.getParam(YSTRING("SharedVars")))
-	addObject(params,"SharedVars",new JsShared(mtx));
-}
-
 
 bool JsSharedObjects::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
@@ -3515,17 +3582,6 @@ JsObject* JsSharedObjects::runConstructor(ObjList& stack, const ExpOperation& op
     else
 	TelEngine::destruct(obj);
     return obj;
-}
-
-void JsSharedObjects::initialize(ScriptContext* context)
-{
-    if (!context)
-	return;
-    ScriptMutex* mtx = context->mutex();
-    Lock mylock(mtx);
-    NamedList& params = context->params();
-    if (!params.getParam(YSTRING("SharedObjects")))
-	addObject(params,"SharedObjects",new JsSharedObjects(mtx));
 }
 
 
@@ -4029,8 +4085,13 @@ bool JsMessage::install(ObjList& stack, const ExpOperation& oper, GenObject* con
 	new JsHandler(*name,prio,func->name(),context,oper.lineNumber(),params) :
 	new JsHandler(context,*handlerContext,func->name(),*name,prio,*handlerContext,
 	    oper.lineNumber(),params);
-    if (filterName)
-	h->setFilter(*filterName,filterValue);
+    if (filterName) {
+	JsMatchingItem* mi = YOBJECT(JsMatchingItem,filterName);
+	if (mi)
+	    h->setFilter(mi->copyMatching(true));
+	else
+	    h->setHandlerFilter(*filterName,filterValue);
+    }
     h->setTrackName(m_trackName,m_trackPrio);
     Engine::install(h);
     ObjList& lst = h->regular() ? m_handlers: m_handlersSingleton;
@@ -4093,15 +4154,9 @@ bool JsMessage::listHandlers(ObjList& stack, const ExpOperation& oper, GenObject
 	JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
 	jso->params().setParam(new ExpOperation(*h,"name"));
 	jso->params().setParam(new ExpOperation((int64_t)h->priority(),"priority"));
-	const NamedString* f = h->filter();
-	if (f) {
-	    jso->params().setParam(new ExpOperation(f->name(),"filterName"));
-	    if (h->filterRegexp())
-		jso->params().setParam(new ExpWrapper(new JsRegExp(mutex(),
-		    *(h->filterRegexp()),oper.lineNumber()),"filterValue"));
-	    else
-		jso->params().setParam(new ExpOperation(*f,"filterValue"));
-	}
+	JsObject* f = JsMatchingItem::buildJsObj(h->filter(),context,oper.lineNumber(),mutex());
+	if (f)
+	    jso->setObjField("filter",f);
 	if (h->trackName())
 	    jso->params().setParam(new ExpOperation(h->trackName(),"trackName"));
 	if (h->regular())
@@ -6357,6 +6412,204 @@ bool JsURI::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
     return JsObject::runNative(stack,oper,context);
 }
 
+
+//
+// JsMatchingItem
+//
+JsObject* JsMatchingItem::runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    // new MatchingItem(value[,name[,params]])
+    ExpOperVector args;
+    if (!extractStackArgs(1,0,args,this,stack,oper,context))
+	return 0;
+    JsMatchingItem* cp = YOBJECT(JsMatchingItem,args[0]);
+    MatchingItemBase* mi = cp ? cp->copyMatching() : buildItemFromArgs(args);
+    if (mi && ref()) {
+	JsMatchingItem* obj = new JsMatchingItem(mi,mutex(),oper.lineNumber());
+	obj->params().addParam(new ExpWrapper(this,protoName()));
+	return obj;
+    }
+    TelEngine::destruct(mi);
+    return 0;
+}
+
+bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
+{
+    ExpOperVector args;
+    if (oper.name() == YSTRING("matches")) {
+	// matches(val)
+	if (!extractStackArgs(1,0,args,this,stack,oper,context))
+	    return false;
+	bool ok = false;
+	if (m_match) {
+	    ExpOperation& val = *args[0];
+	    JsObject* jso = JsParser::objPresent(val);
+	    if (jso) {
+		const NamedList* list = getObjParams(&val);
+		ok = m_match->matchListParam(list ? *list : NamedList::empty());
+	    }
+	    else if (JsParser::isEmpty(val))
+		ok = m_match->matchString(String::empty());
+	    else
+		ok = m_match->matchString(val);
+	}
+	ExpEvaluator::pushOne(stack,new ExpOperation(ok));
+    }
+    else if (oper.name() == YSTRING("getDesc")) {
+	// getDesc([params])
+	if (!extractStackArgs(0,0,args,this,stack,oper,context))
+	    return false;
+	const NamedList* params = getObjParams(args[0]);
+	JsObject* jso = buildJsObj(m_match,context,oper.lineNumber(),mutex(),
+	    params && params->getBoolValue(YSTRING("force_bool_props")));
+	pushStackObjNull(stack,jso,"desc");
+    }
+    else if (oper.name() == YSTRING("validate")) {
+	// validate(value[,name[,params]])
+	// Return: Object (success), null/undefined (empty optimized matching), string (error)
+	if (!extractStackArgs(1,0,args,this,stack,oper,context))
+	    return false;
+	const char* reason = 0;
+	MatchingItemBase* mi = buildItemFromArgs(args,&reason);
+	if (mi) {
+	    JsObject* jso = buildJsObj(mi,context,oper.lineNumber(),mutex());
+	    TelEngine::destruct(mi);
+	    pushStackObjNull(stack,jso,"match");
+	}
+	else if (TelEngine::null(reason))
+	    ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
+	else
+	    ExpEvaluator::pushOne(stack,new ExpOperation(reason,"reason"));
+    }
+    else
+	return JsObject::runNative(stack,oper,context);
+    return true;
+}
+
+JsObject* JsMatchingItem::cloneForCopy(GenObject* context, ScriptMutex** mtx,
+    unsigned int line) const
+{
+    JsMatchingItem* mi = new JsMatchingItem(copyMatching(),mtx ? *mtx : mutex(),line);
+    JsEngine::setConstructorPrototype(context,mi,YSTRING("MatchingItem"));
+    return mi;
+}
+
+MatchingItemBase* JsMatchingItem::buildItemFromArgs(ExpOperVector& args, const char** reason)
+{
+    const NamedList* params = getObjParams(args[2]);
+    bool optimize = !(params && params->getBoolValue(YSTRING("nooptimize")));
+    return buildItem(args[0],args[1],params,optimize,reason);
+}
+
+MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name,
+    const NamedList* params, bool optimize, const char** reason, bool allowObjValue)
+{
+    bool negated = params && params->getBoolValue(YSTRING("negated"));
+    JsObject* jso = YOBJECT(JsObject,value);
+    if (jso) {
+	// Array of items
+	JsArray* jsa = YOBJECT(JsArray,jso);
+	if (jsa) {
+	    MatchingItemList* list = new MatchingItemList(TelEngine::c_safe(name),
+		!(params && params->getBoolValue(YSTRING("any"))),negated);
+	    for (int32_t i = 0; i < jsa->length(); ++i) {
+		value = jsa->params().getParam(String(i));
+		if (!value)
+		    continue;
+		MatchingItemBase* it = buildItem(value,0,0,optimize,reason);
+		if (it)
+		    list->append(it);
+		else if (reason && !TelEngine::null(*reason)) {
+		    TelEngine::destruct(list);
+		    return 0;
+		}
+	    }
+	    return optimize ? MatchingItemList::optimize(list) : (MatchingItemBase*)list;
+	}
+	// Regexp
+	JsRegExp* rex = YOBJECT(JsRegExp,jso);
+	if (rex) {
+	    const Regexp& r = rex->regexp();
+	    if (params) {
+		bool rBasic = !r.isExtended();
+		bool ic = params->getBoolValue(YSTRING("ignoreCase"),r.isCaseInsensitive());
+		bool basic = params->getBoolValue(YSTRING("basicPosix"),rBasic);
+		if (ic != r.isCaseInsensitive() || basic != rBasic) {
+		    Regexp tmp(r);
+		    tmp.setFlags(!basic,ic);
+		    return new MatchingItemRegexp(TelEngine::c_safe(name),tmp,negated);
+		}
+	    }
+	    return new MatchingItemRegexp(TelEngine::c_safe(name),r,negated);
+	}
+	if (!allowObjValue || YOBJECT(JsMatchingItem,jso)) {
+	    if (reason)
+		*reason = "object-not-allowed";
+	    return 0;
+	}
+	// Build from object: {name:"", value:???, params:{}}
+	// 'value' is no longer allowed to be a non handled object
+	// Retrieve params from 'params' property or object itself
+	GenObject* gen = jso->params().getParam(YSTRING("params"));
+	value = jso->params().getParam(YSTRING("value"));
+	params = gen ? getObjParams(gen) : getObjParams(jso);
+	name = jso->params().getParam(YSTRING("name"));
+	return buildItem(value,name,params,optimize,reason,false);
+    }
+    // Build string match
+    ExpOperation* oper = YOBJECT(ExpOperation,value);
+    if (JsParser::isMissing(oper))
+	oper = 0;
+    return new MatchingItemString(TelEngine::c_safe(name),oper ? oper->safe() : "",
+	params && params->getBoolValue(YSTRING("ignoreCase")),negated);
+}
+
+JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
+    GenObject* context, unsigned int line, ScriptMutex* mtx, bool forceBoolProps)
+{
+    if (!item)
+	return 0;
+    JsObject* jso = new JsObject(context,line,mtx);
+    jso->setStringField("name",item->name());
+    if (item->itemString()) {
+	const MatchingItemString* tmp = item->itemString();
+	jso->setStringField("value",tmp->value());
+	if (forceBoolProps || tmp->caseInsensitive())
+	    jso->setBoolField("ignoreCase",tmp->caseInsensitive());
+    }
+    else {
+	const MatchingItemList* list = 0;
+	JsObject* val = 0;
+	if (item->itemRegexp()) {
+	    val = new JsRegExp(mtx,item->itemRegexp()->value(),line);
+	    val->setPrototype(context,YSTRING("RegExp"));
+	}
+	else if (item->itemList()) {
+	    JsArray* jsa = new JsArray(context,line,mtx);
+	    list = static_cast<const MatchingItemList*>(item);
+	    for (unsigned int i = 0; i < list->length(); ++i) {
+		JsObject* jso = buildJsObj(list->at(i),context,line,mtx,forceBoolProps);
+		if (jso)
+		    jsa->push(new ExpWrapper(jso));
+	    }
+	    val = jsa;
+	}
+	if (val) {
+	    jso->setObjField("value",val);
+	    if (list && (forceBoolProps || !list->matchAll()))
+		jso->setBoolField("any",!list->matchAll());
+	}
+	else {
+	    jso->params().setParam(JsParser::nullClone("value"));
+	    item = 0;
+	}
+    }
+    if (item && (forceBoolProps || item->negated()))
+	jso->setBoolField("negated",item->negated());
+    return jso;
+}
+
+
 bool JsJSON::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
     ObjList args;
@@ -7692,7 +7945,7 @@ void JsGlobal::loadHandlers(const NamedList* sect)
 		}
 	    }
 	    h = new JsHandler(id,callback,desc,ns->name(),prio,context);
-	    h->setFilter(filterName,&filterValue);
+	    h->setHandlerFilter(filterName,&filterValue);
 	    h->setTrackName(trackName,
 		!prefix ? true : sect->getBoolValue(prefix + "track_priority",true));
 	}
