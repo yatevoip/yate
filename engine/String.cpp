@@ -2342,4 +2342,82 @@ String& String::changeStringData(char* data, unsigned int len)
     return *this;
 }
 
+
+//
+// MatchingItemList
+//
+bool MatchingItemList::append(MatchingItemBase* item, unsigned int overAlloc)
+{
+    if (!item)
+	return false;
+    unsigned int pos = 0;
+    while (m_value.at(pos))
+	pos++;
+    if (pos == m_value.length())
+	m_value.resize(m_value.length() + 1 + overAlloc,true);
+    if (pos < length()) {
+	m_value.set(item,pos);
+	return true;
+    }
+    TelEngine::destruct(item);
+    return false;
+}
+
+MatchingItemBase* MatchingItemList::copy() const
+{
+    MatchingItemList* lst = new MatchingItemList(name(),matchAll(),negated());
+    if (length()) {
+	unsigned int overAlloc = length() - 1;
+	for (unsigned int i = 0; i < length(); ++i) {
+	    const MatchingItemBase* it = at(i);
+	    MatchingItemBase* item = it ? it->copy() : 0;
+	    if (item) {
+		lst->append(item,overAlloc);
+		overAlloc = 0;
+	    }
+	}
+    }
+    return lst;
+}
+
+#define MatchingItemList_RUN_LIST(func,param) { \
+    int pos = -1; \
+    while (true) { \
+	MatchingItemBase* item = static_cast<MatchingItemBase*>(m_value.at(++pos)); \
+	if (!item) \
+	    break; \
+	if (item->func(param)) { \
+	    if (!m_matchAll) \
+		return true; \
+	} \
+	else if (m_matchAll) \
+	    return false; \
+    } \
+    return pos ? m_matchAll : false; \
+}
+
+bool MatchingItemList::runMatchString(const String& str) const
+{
+    MatchingItemList_RUN_LIST(matchString,str)
+}
+
+bool MatchingItemList::runMatchListParam(const NamedList& list) const
+{
+    MatchingItemList_RUN_LIST(matchListParam,list)
+}
+
+#undef MatchingItemList_RUN_LIST
+
+MatchingItemBase* MatchingItemList::optimize(MatchingItemList* list)
+{
+    if (!list || list->at(1))
+	return list;
+    MatchingItemBase* ret = static_cast<MatchingItemBase*>(list->m_value.take(0));
+    // Reverse item (not)negated flag if list is negated to keep the same matching behaviour
+    if (list->negated())
+	ret->m_notNegated = !ret->m_notNegated;
+    TelEngine::destruct(list);
+    return ret;
+}
+
 /* vi: set ts=8 sw=4 sts=4 noet: */

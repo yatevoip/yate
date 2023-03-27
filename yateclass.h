@@ -6565,6 +6565,331 @@ protected:
     mutable int m_port;
 };
 
+class MatchingItemString;
+class MatchingItemRegexp;
+class MatchingItemList;
+
+/**
+ * Base class for all matching items
+ * @short Matching item common interface
+ */
+class YATE_API MatchingItemBase : public GenObject
+{
+    YCLASS(MatchingItemBase,GenObject)
+    friend class MatchingItemList;
+public:
+    /**
+     * Constructor
+     * @param name Item name
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     */
+    inline MatchingItemBase(const char* name, bool negated = false)
+	: m_name(name), m_notNegated(!negated)
+	{}
+
+    /**
+     * Retrieve the name of this item
+     * @return Item name
+     */
+    inline const String& name() const
+	{ return m_name; }
+
+    /**
+     * Check if this item is negated when testing
+     * @return True if negated, false otherwise
+     */
+    inline bool negated() const
+	{ return !m_notNegated; }
+
+    /**
+     * String match. Handles matching result negation
+     * @param str String to match
+     * @return True if matches, false otherwise
+     */
+    inline bool matchString(const String& str) const
+	{ return m_notNegated == runMatchString(str); }
+
+    /**
+     * NamedList parameter match. Handles matching result negation
+     * @param list List to search for parameter match
+     * @return True if matches, false otherwise
+     */
+    inline bool matchListParam(const NamedList& list) const
+	{ return m_notNegated == runMatchListParam(list); }
+
+    /**
+     * String match to be implemented by descendants
+     * @param str String to match
+     * @return False
+     */
+    virtual bool runMatchString(const String& str) const
+	{ return false; }
+
+    /**
+     * NamedList parameter match
+     * @param list List to search for parameter match
+     * @return True if matches, false otherwise
+     */
+    virtual bool runMatchListParam(const NamedList& list) const
+	{ return runMatchString(list[name()]); }
+
+    /**
+     * Copy this item
+     * @return MatchingItemBase pointer, NULL if not implemented
+     */
+    virtual MatchingItemBase* copy() const
+	{ return 0; }
+
+    /**
+     * Check if this item is a MatchingItemString one
+     * @return MatchingItemString pointer, NULL if this item is not a MatchingItemString
+     */
+    virtual const MatchingItemString* itemString() const
+	{ return 0; }
+
+    /**
+     * Check if this item is a MatchingItemRegexp one
+     * @return MatchingItemRegexp pointer, NULL if this item is not a MatchingItemRegexp
+     */
+    virtual const MatchingItemRegexp* itemRegexp() const
+	{ return 0; }
+
+    /**
+     * Check if this item is a MatchingItemList one
+     * @return MatchingItemList pointer, NULL if this item is not a MatchingItemList
+     */
+    virtual const MatchingItemList* itemList() const
+	{ return 0; }
+
+private:
+    String m_name;                       // Item name
+    bool m_notNegated;                   // Item is not negated
+};
+
+/**
+ * Match using a string comparison
+ * @short String comparison matching item
+ */
+class YATE_API MatchingItemString : public MatchingItemBase
+{
+    YCLASS(MatchingItemString,MatchingItemBase)
+public:
+    /**
+     * Constructor
+     * @param name Item name
+     * @param value String to match
+     * @param caseInsensitive Set it to true to do a case insensitive match
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     */
+    inline MatchingItemString(const char* name, const char* value, bool caseInsensitive = false,
+	bool negated = false)
+	: MatchingItemBase(name,negated), m_value(value), m_caseMatch(!caseInsensitive)
+	{}
+
+    /**
+     * Retrieve the string to match
+     * @return String to match
+     */
+    inline const String& value() const
+	{ return m_value; }
+
+    /**
+     * Check if this item is using a case insensitive comparison
+     * @return True if this item is using a case insensitive comparison
+     */
+    inline bool caseInsensitive() const
+	{ return !m_caseMatch; }
+
+    /**
+     * String match
+     * @param str String to match
+     * @return True if matched, false otherwise
+     */
+    virtual bool runMatchString(const String& str) const
+	{ return m_caseMatch ? (str == m_value) : (str &= m_value); }
+
+    /**
+     * Copy this item
+     * @return MatchingItemBase pointer
+     */
+    virtual MatchingItemBase* copy() const
+	{ return new MatchingItemString(name(),value(),caseInsensitive(),negated()); }
+
+    /**
+     * Check if this item is a MatchingItemString one
+     * @return MatchingItemString pointer
+     */
+    virtual const MatchingItemString* itemString() const
+	{ return this; }
+
+private:
+    String m_value;                      // String to match
+    bool m_caseMatch;                    // Non case insensitive match
+};
+
+/**
+ * Match using a regular expression
+ * @short A matching item using a regular expression
+ */
+class YATE_API MatchingItemRegexp : public MatchingItemBase
+{
+    YCLASS(MatchingItemRegexp,MatchingItemBase)
+public:
+    /**
+     * Constructor
+     * @param name Item name
+     * @param value Regular expression
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     */
+    inline MatchingItemRegexp(const char* name, const char* value, bool negated = false)
+	: MatchingItemBase(name,negated), m_value(value)
+	{}
+
+    /**
+     * Constructor
+     * @param name Item name
+     * @param value Regular expression
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     */
+    inline MatchingItemRegexp(const char* name, const Regexp& value, bool negated = false)
+	: MatchingItemBase(name,negated), m_value(value)
+	{}
+
+    /**
+     * Retrieve the regular expression used to match
+     * @return Regular expression used to match
+     */
+    inline const Regexp& value() const
+	{ return m_value; }
+
+    /**
+     * String match
+     * @param str String to match
+     * @return True if matched, false otherwise
+     */
+    virtual bool runMatchString(const String& str) const
+	{ return m_value.matches(str); }
+
+    /**
+     * Copy this item
+     * @return MatchingItemBase pointer
+     */
+    virtual MatchingItemBase* copy() const
+	{ return new MatchingItemRegexp(name(),value(),negated()); }
+
+    /**
+     * Check if this item is a MatchingItemRegexp one
+     * @return MatchingItemRegexp pointer
+     */
+    virtual const MatchingItemRegexp* itemRegexp() const
+	{ return this; }
+
+private:
+    Regexp m_value;                      // Regexp used for matching
+};
+
+/**
+ * List of matching items
+ * @short A list of matching items
+ */
+class YATE_API MatchingItemList : public MatchingItemBase
+{
+    YCLASS(MatchingItemList,MatchingItemBase)
+public:
+    /**
+     * Constructor
+     * @param name Item name
+     * @param matchAll True to match all items (logical AND), false to match any item (logical OR)
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     */
+    inline MatchingItemList(const char* name, bool matchAll = true, bool negated = false)
+	: MatchingItemBase(name,negated), m_matchAll(matchAll)
+	{}
+
+    /**
+     * Check if all items must match
+     * @return True if all items must match (logical AND), false if any item matches (logical OR)
+     */
+    inline bool matchAll() const
+	{ return m_matchAll; }
+
+    /**
+     * Retrieve the list length
+     * @return List length
+     */
+    inline unsigned int length() const
+	{ return m_value.length(); }
+
+    /**
+     * Retrieve the number of non empty items in list
+     * @return The number of non empty items in list
+     */
+    inline unsigned int count() const
+	{ return m_value.count(); }
+
+    /**
+     * Retrieve a pointer to item at given index
+     * @param index Index to retrieve
+     * @return MatchingItemBase pointer, NULL if not set or index is out of bounds
+     */
+    inline const MatchingItemBase* at(unsigned int index) const
+	{ return static_cast<MatchingItemBase*>(m_value.at(index)); }
+
+    /**
+     * Append an item to the list
+     * @param item Item to append, pointer will be consumed
+     * @param overAlloc Optional number of items to over allocate
+     *  This parameter is ignored if there is enough space in the list set append the item
+     * @return True on success, false on failure (memory allocation error or NULL pointer given)
+     */
+    bool append(MatchingItemBase* item, unsigned int overAlloc = 1);
+
+    /**
+     * String match
+     * @param str String to match
+     * @return True if matched, false otherwise
+     */
+    virtual bool runMatchString(const String& str) const;
+
+    /**
+     * NamedList parameter match
+     * @param list List to search for parameter match
+     * @return True if matches, false otherwise
+     */
+    virtual bool runMatchListParam(const NamedList& list) const;
+
+    /**
+     * Copy this item
+     * @return MatchingItemBase pointer
+     */
+    virtual MatchingItemBase* copy() const;
+
+    /**
+     * Check if this item is a MatchingItemList one
+     * @return MatchingItemList pointer
+     */
+    virtual const MatchingItemList* itemList() const
+	{ return this; }
+
+    /**
+     * Optimize a MatchingItemList
+     * Delete list if empty or there is only one item in it, return the first item in it any
+     * @param list List to optimize
+     * @return MatchingItemBase pointer, may be the list itself if not optimized
+     *  May be NULL if list is empty
+     */
+    static MatchingItemBase* optimize(MatchingItemList* list);
+
+private:
+    ObjVector m_value;                   // List of items to match
+    bool m_matchAll;                     // Match all/any item(s)
+};
+
 class MutexPrivate;
 class SemaphorePrivate;
 class ThreadPrivate;
