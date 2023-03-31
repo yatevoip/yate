@@ -995,7 +995,7 @@ public:
 	unsigned int line = 0) const;
     MatchingItemBase* buildItemFromArgs(ExpOperVector& args, const char** reason = 0);
     static MatchingItemBase* buildItem(GenObject* value, const String* name,
-	const NamedList* params, bool optimize,
+	const NamedList* params, unsigned int flags,
 	const char** reason = 0, bool allowObjValue = true);
     static JsObject* buildJsObj(const MatchingItemBase* item,
 	GenObject* context, unsigned int line, ScriptMutex* mutex, bool forceBoolProps = false);
@@ -6497,16 +6497,33 @@ JsObject* JsMatchingItem::cloneForCopy(GenObject* context, ScriptMutex** mtx,
 MatchingItemBase* JsMatchingItem::buildItemFromArgs(ExpOperVector& args, const char** reason)
 {
     const NamedList* params = getObjParams(args[2]);
-    bool optimize = !(params && params->getBoolValue(YSTRING("nooptimize")));
-    return buildItem(args[0],args[1],params,optimize,reason);
+    unsigned int flags = 0;
+    if (params) {
+	if (params->getBoolValue(YSTRING("nooptimize")))
+	    flags |= 0x01;
+	if (params->getBoolValue(YSTRING("name_required_simple")))
+	    flags |= 0x02;
+	if (params->getBoolValue(YSTRING("name_required_list")))
+	    flags |= 0x04;
+    }
+    return buildItem(args[0],args[1],0,flags,reason);
 }
 
 MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name,
-    const NamedList* params, bool optimize, const char** reason, bool allowObjValue)
+    const NamedList* params, unsigned int flags, const char** reason, bool allowObjValue)
 {
-    bool negated = params && params->getBoolValue(YSTRING("negated"));
-    JsObject* jso = YOBJECT(JsObject,value);
-    if (jso) {
+    MatchingItemBase* ret = 0;
+    while (true) {
+	bool negated = params && params->getBoolValue(YSTRING("negated"));
+	JsObject* jso = YOBJECT(JsObject,value);
+	// String
+	if (!jso) {
+	    ExpOperation* oper = YOBJECT(ExpOperation,value);
+	    const char* v = JsParser::isMissing(oper) ? "" : oper->safe();
+	    bool ic = params && params->getBoolValue(YSTRING("ignoreCase"));
+	    ret = new MatchingItemString(TelEngine::c_safe(name),v,ic,negated);
+	    break;
+	}
 	// Array of items
 	JsArray* jsa = YOBJECT(JsArray,jso);
 	if (jsa) {
@@ -6516,7 +6533,7 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 		value = jsa->params().getParam(String(i));
 		if (!value)
 		    continue;
-		MatchingItemBase* it = buildItem(value,0,0,optimize,reason);
+		MatchingItemBase* it = buildItem(value,0,0,flags,reason);
 		if (it)
 		    list->append(it);
 		else if (reason && !TelEngine::null(*reason)) {
@@ -6524,7 +6541,8 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 		    return 0;
 		}
 	    }
-	    return optimize ? MatchingItemList::optimize(list) : (MatchingItemBase*)list;
+	    ret = list;
+	    break;
 	}
 	// Regexp
 	JsRegExp* rex = YOBJECT(JsRegExp,jso);
@@ -6537,10 +6555,12 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 		if (ic != r.isCaseInsensitive() || basic != rBasic) {
 		    Regexp tmp(r);
 		    tmp.setFlags(!basic,ic);
-		    return new MatchingItemRegexp(TelEngine::c_safe(name),tmp,negated);
+		    ret = new MatchingItemRegexp(TelEngine::c_safe(name),tmp,negated);
+		    break;
 		}
 	    }
-	    return new MatchingItemRegexp(TelEngine::c_safe(name),r,negated);
+	    ret = new MatchingItemRegexp(TelEngine::c_safe(name),r,negated);
+	    break;
 	}
 	if (!allowObjValue || YOBJECT(JsMatchingItem,jso)) {
 	    if (reason)
@@ -6554,14 +6574,23 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 	value = jso->params().getParam(YSTRING("value"));
 	params = gen ? getObjParams(gen) : getObjParams(jso);
 	name = jso->params().getParam(YSTRING("name"));
-	return buildItem(value,name,params,optimize,reason,false);
+	ret = buildItem(value,name,params,flags,reason,false);
+	break; 
     }
-    // Build string match
-    ExpOperation* oper = YOBJECT(ExpOperation,value);
-    if (JsParser::isMissing(oper))
-	oper = 0;
-    return new MatchingItemString(TelEngine::c_safe(name),oper ? oper->safe() : "",
-	params && params->getBoolValue(YSTRING("ignoreCase")),negated);
+    if (!ret)
+	return 0;
+    MatchingItemList* list = (MatchingItemList*)ret->itemList();
+    if (!ret->name()) {
+	if (0 != (flags & (list ? 0x04 : 0x02))) {
+	    if (reason)
+		*reason = list ? "empty-list-name" : "empty-item-name";
+	    TelEngine::destruct(ret);
+	    return 0;
+	}
+    }
+    if (list && 0 == (flags & 0x01))
+	return MatchingItemList::optimize(list);
+    return ret;
 }
 
 JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
@@ -6581,7 +6610,8 @@ JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
 	const MatchingItemList* list = 0;
 	JsObject* val = 0;
 	if (item->itemRegexp()) {
-	    val = new JsRegExp(mtx,item->itemRegexp()->value(),line);
+	    const Regexp& rex = item->itemRegexp()->value();
+	    val = new JsRegExp(mtx,rex.safe(),line,rex.safe(),rex.isCaseInsensitive(),rex.isExtended());
 	    val->setPrototype(context,YSTRING("RegExp"));
 	}
 	else if (item->itemList()) {
