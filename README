@@ -22,6 +22,7 @@ YATE have been tested on Linux and Windows and was ported to FreeBSD.
 Please report bugs at bugs@voip.null.ro
 
 To build Yate the quick way is:
+  ./autogen.sh
   ./configure
   make
   make install
