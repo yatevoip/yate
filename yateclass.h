@@ -8491,7 +8491,19 @@ public:
      * @param adrlen Length of the valid data in address structure
      * @return True if this filter claimed the data
      */
-    virtual bool received(void* buffer, int length, int flags, const struct sockaddr* addr, socklen_t adrlen) = 0;
+    virtual bool received(const void* buffer, int length, int flags, const struct sockaddr* addr, socklen_t adrlen) = 0;
+
+    /**
+     * Notify this filter about a sent block of data
+     * @param buffer Buffer with sent data
+     * @param length Length of the data in buffer
+     * @param flags Operating system specific bit flags of the operation
+     * @param addr Address where the data was sent, may be NULL
+     * @param adrlen Length of the valid data in address structure
+     * @return True if this filter claimed the data
+     */
+    virtual bool sent(const void* buffer, int length, int flags, const struct sockaddr* addr, socklen_t adrlen)
+	{ return false; }
 
     /**
      * Get the socket to which the filter is currently attached
@@ -9547,8 +9559,9 @@ public:
 
     /**
      * Removes and destroys all packet filters
+     * @param del True to delete packet filters
      */
-    void clearFilters();
+    void clearFilters(bool del = true);
 
     /**
      * Run whatever actions required on idle thread runs.
@@ -9596,9 +9609,11 @@ protected:
      * @param flags Operating system specific bit flags of the operation
      * @param addr Address of the incoming data, may be NULL
      * @param adrlen Length of the valid data in address structure
+     * @param rx True if data was received, false if data was transmitted
      * @return True if one of the filters claimed the data
      */
-    bool applyFilters(void* buffer, int length, int flags, const struct sockaddr* addr = 0, socklen_t adrlen = 0);
+    bool applyFilters(const void* buffer, int length, int flags, const struct sockaddr* addr = 0,
+	socklen_t adrlen = 0, bool rx = true);
 
     SOCKET m_handle;
     ObjList m_filters;
@@ -10467,6 +10482,124 @@ public:
      */
     static double runTime(Type type = WallTime);
 
+};
+
+/**
+ * CaptureInfo class allows passing information about a captured packet
+ * @short Data associated with a captured packet
+ */
+class YATE_API CaptureInfo
+{
+public:
+    /**
+     * Constructor
+     * @param ts Timestamp when packet was captures/created in microseconds
+     * @param srcAddr Source address of the packet
+     * @param dstAddr Destination address of the packet
+     * @param extra Extra parameters
+     */
+    CaptureInfo(uint64_t ts = Time::now(), SocketAddr* srcAddr = 0,
+	    SocketAddr* dstAddr = 0, const NamedList& extra = NamedList::empty())
+	: m_ts(ts), m_srcAddr(srcAddr), m_dstAddr(dstAddr), m_extraInfo(extra)
+	{ }
+
+    /**
+     * Retrieve the source address
+     * @return The source address of the packet
+     */
+    inline SocketAddr* srcAddr() const
+	{ return m_srcAddr; }
+
+    /**
+     * Retrieve the destination address of this packet
+     * @return The destination address of the packet
+     */
+    inline SocketAddr* dstAddr() const
+	{ return m_dstAddr; }
+
+    /**
+     * Get the extra information parameters
+     * @return The extra information parameters
+     */
+    inline const NamedList& extraInfo() const
+	{ return m_extraInfo; }
+
+    /**
+     * Timestamp in microseconds when this packet was captured
+     * @return The timestamp of this packet
+     */
+    inline uint64_t ts() const
+	{ return m_ts; }
+
+    /**
+     * Source port of this packet
+     * @return Source port of this packet, 0 if not known
+     */
+    inline uint16_t srcPort() const
+	{ return srcAddr() ? srcAddr()->port() : 0; }
+
+    /**
+     * Destination port of this packet
+     * @return Destination port of this packet, 0 if not known
+     */
+    inline uint16_t dstPort() const
+	{ return dstAddr() ? dstAddr()->port() : 0; }
+
+private:
+    uint64_t m_ts;
+    SocketAddr* m_srcAddr;
+    SocketAddr* m_dstAddr;
+    NamedList m_extraInfo;
+};
+
+/**
+ * Capture class allows implementing capturing of packets
+ * @short Packet capture class
+ */
+class YATE_API Capture : public RefObject
+{
+    YCLASS(Capture,RefObject);
+
+public:
+    /**
+     * Constructor
+     * @param name Name of capture
+     */
+    Capture(const char* name)
+    : m_name(name)
+	{ }
+
+    /**
+     * Initialize this capture
+     * @param params Parameters for initializing this capture
+     * @return True on succesful initialization, false otherwise
+     */
+    virtual bool initialize(const NamedList& params) = 0;
+
+    /**
+     * Write to capture a packet
+     * @param data Packet data
+     * @param len Length of packet data
+     * @param info Captured packet associated information
+     * @return True if written in capture, false otherwise
+     */
+    virtual bool write(const uint8_t* data, unsigned int len, const CaptureInfo& info) = 0;
+
+    /**
+     * Check if capture is still valid
+     * @return True if still valid, false otherwise
+     */
+    virtual bool valid() const = 0;
+
+    /**
+     * Get the name of the capture
+     * @return Name of the capture
+     */
+    virtual const String& name() const
+	{ return m_name; }
+
+private:
+    String m_name;
 };
 
 }; // namespace TelEngine

@@ -2000,6 +2000,7 @@ int Socket::sendTo(const void* buffer, int length, const struct sockaddr* addr, 
 	length = 0;
     int res = ::sendto(m_handle,(const char*)buffer,length,flags,addr,adrlen);
     checkError(res,true);
+    applyFilters(buffer,res,flags,addr,adrlen,false);
     return res;
 }
 
@@ -2009,6 +2010,7 @@ int Socket::send(const void* buffer, int length, int flags)
 	length = 0;
     int res = ::send(m_handle,(const char*)buffer,length,flags);
     checkError(res,true);
+    applyFilters(buffer,res,flags,0,0,false);
     return res;
 }
 
@@ -2021,6 +2023,7 @@ int Socket::writeData(const void* buffer, int length)
 	length = 0;
     int res = ::write(m_handle,buffer,length);
     checkError(res,true);
+    applyFilters(buffer,res,0,0,0,false);
     return res;
 #endif
 }
@@ -2070,6 +2073,7 @@ int Socket::readData(void* buffer, int length)
 	length = 0;
     int res = ::read(m_handle,buffer,length);
     checkError(res,true);
+    applyFilters(buffer,res,0);
     return res;
 #endif
 }
@@ -2329,12 +2333,18 @@ void Socket::removeFilter(SocketFilter* filter, bool delobj)
 	filter->m_socket = 0;
 }
 
-void Socket::clearFilters()
+void Socket::clearFilters(bool del)
 {
+    for (ObjList* l = m_filters.skipNull(); l; l = l->skipNext()) {
+	SocketFilter* filter = static_cast<SocketFilter*>(l->get());
+	filter->m_socket = 0;
+    }
+    m_filters.setDelete(del);
     m_filters.clear();
 }
 
-bool Socket::applyFilters(void* buffer, int length, int flags, const struct sockaddr* addr, socklen_t adrlen)
+bool Socket::applyFilters(const void* buffer, int length, int flags, const struct sockaddr* addr,
+	socklen_t adrlen, bool rx)
 {
     if ((length <= 0) || !buffer)
 	return false;
@@ -2342,7 +2352,9 @@ bool Socket::applyFilters(void* buffer, int length, int flags, const struct sock
 	adrlen = 0;
     for (ObjList* l = &m_filters; l; l = l->next()) {
 	SocketFilter* filter = static_cast<SocketFilter*>(l->get());
-	if (filter && filter->received(buffer,length,flags,addr,adrlen))
+	if (filter &&
+		(rx ? filter->received(buffer, length, flags, addr, adrlen)
+		    : filter->sent(buffer, length, flags, addr, adrlen)))
 	    return true;
     }
     return false;

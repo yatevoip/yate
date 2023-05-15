@@ -381,7 +381,7 @@ public:
     YStunSocketFilter();
     virtual ~YStunSocketFilter();
     // Received: call by the socket
-    virtual bool received(void* buffer, int length, int flags,
+    virtual bool received(const void* buffer, int length, int flags,
 	const struct sockaddr* addr, socklen_t addrlen);
     // Timer handler: Handle retransmission for binding request
     virtual void timerTick(const Time& when);
@@ -953,7 +953,7 @@ YStunSocketFilter::~YStunSocketFilter()
     DDebug(&iplugin,DebugAll,"~YStunSocketFilter. [%p]",this);
 }
 
-bool YStunSocketFilter::received(void* buffer, int length, int flags,
+bool YStunSocketFilter::received(const void* buffer, int length, int flags,
 	const struct sockaddr* addr, socklen_t addrlen)
 {
     bool isStun = false;
