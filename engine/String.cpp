@@ -1376,6 +1376,33 @@ String& String::printf(const char* format, ...)
     return *this;
 }
 
+String& String::printfAppend(unsigned int length, const char* format,  ...)
+{
+    va_list va;
+    va_start(va,format);
+    char* buf = string_printf(length,format,va);
+    va_end(va);
+    if (buf) {
+	*this << buf;
+	::free(buf);
+    }
+    return *this;
+}
+
+String& String::printfAppend(const char* format, ...)
+{
+    va_list va;
+    va_start(va,format);
+    unsigned int len = TelEngine::null(format) ? 0 : (128 + ::strlen(format));
+    char* buf = string_printf(len,format,va);
+    va_end(va);
+    if (buf) {
+	*this << buf;
+	::free(buf);
+    }
+    return *this;
+}
+
 String& String::appendFixed(unsigned int fixedLength, const char* str, unsigned int len, char fill, int align)
 {
     if (len == (unsigned int)-1)
@@ -2093,6 +2120,90 @@ const String* String::atom(const String*& str, const char* val)
     return str;
 }
 
+static unsigned int c_find_str(bool start, const char* str, const char* what,
+    int lenStr, int lenWhat, bool caseInsensitive)
+{
+    if (!lenStr || !lenWhat || TelEngine::null(str) || TelEngine::null(what))
+	return 0;
+    if (lenStr < 0)
+    	lenStr = ::strlen(str);
+    if (lenWhat < 0)
+    	lenWhat = ::strlen(what);
+    if (lenStr < lenWhat)
+	return 0;
+    if (!start)
+	str += lenStr - lenWhat - 1;
+    if (caseInsensitive) {
+	if (::strncasecmp(str,what,lenWhat))
+	    return 0;
+    }
+    else if (::strncmp(str,what,lenWhat))
+	return 0;
+    return lenWhat;
+}
+
+unsigned int String::c_starts_with(const char* str, const char* what, int lenStr, int lenWhat,
+    bool caseInsensitive)
+{
+    return c_find_str(true,str,what,lenStr,lenWhat,caseInsensitive);
+}
+
+unsigned int String::c_ends_with(const char* str, const char* what, int lenStr, int lenWhat,
+    bool caseInsensitive)
+{
+    return c_find_str(false,str,what,lenStr,lenWhat,caseInsensitive);
+}
+
+unsigned int String::c_skip_chars(const char*& str, const char* what, int len, bool skipFound)
+{
+    if (!len || TelEngine::null(str) || TelEngine::null(what))
+	return 0;
+    const char* orig = str;
+    if (skipFound) {
+	if (len < 0) {
+	    if (what[1])
+		while (*str) {
+		    if (!::strchr(what,*str))
+			break;
+		    str++;
+		}
+	    else
+		while (*str == *what)
+		    str++;
+	}
+	else if (what[1])
+	    while (len-- && *str) {
+		if (!::strchr(what,*str))
+		    break;
+		str++;
+	    }
+	else
+	    while (len-- && *str == *what)
+		str++;
+    }
+    else if (len < 0) {
+	if (what[1])
+	    while (*str) {
+		if (::strchr(what,*str))
+		    break;
+		str++;
+	    }
+	else
+	    while (*str && *str != *what)
+		str++;
+    }
+    else if (what[1])
+	while (len-- && *str) {
+	    if (::strchr(what,*str))
+		break;
+	    str++;
+	}
+    else
+	while (len-- && *str && *str != *what)
+	    str++;
+    return (unsigned int)(str - orig);
+}
+
 
 Regexp::Regexp()
     : m_regexp(0), m_compile(true), m_flags(0)
@@ -2344,23 +2455,236 @@ String& String::changeStringData(char* data, unsigned int len)
 
 
 //
-// MatchingItemList
+// MatchingItemDump
 //
-bool MatchingItemList::append(MatchingItemBase* item, unsigned int overAlloc)
+static inline void addFlags(String& buf, const String& flags)
+{
+    if (flags)
+	buf << '[' << flags << "] ";
+}
+
+static inline const char* miType(const MatchingItemBase* item)
 {
     if (!item)
-	return false;
-    unsigned int pos = 0;
-    while (m_value.at(pos))
-	pos++;
-    if (pos == m_value.length())
-	m_value.resize(m_value.length() + 1 + overAlloc,true);
-    if (pos < length()) {
-	m_value.set(item,pos);
+	return "";
+    if (item->itemList())
+	return "list";
+    if (item->itemString())
+	return "string";
+    if (item->itemRegexp())
+	return "regexp";
+    if (item->itemRandom())
+	return "random";
+    if (item->itemCustom())
+	return item->itemCustom()->type().safe("custom");
+    return "unknown";
+}
+
+static const TokenDict s_miDumpFlags[] = {
+    {"no_initial_list_desc", MatchingItemDump::NoInitialListDesc},
+    {0,0}
+};
+
+void MatchingItemDump::init(const NamedList& params)
+{
+    for (ObjList* o = params.paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* ns = static_cast<NamedString*>(o->get());
+	if (ns->name() == YSTRING("flags"))
+	    m_flags = ns->encodeFlags(s_miDumpFlags);
+	else if (ns->name() == YSTRING("rex_enclose"))
+	    m_rexEnclose = (*ns)[0];
+	else if (ns->name() == YSTRING("str_enclose"))
+	    m_strEnclose = (*ns)[0];
+	else if (ns->name() == YSTRING("name_value_sep"))
+	    m_nameValueSep = *ns;
+	else if (ns->name() == YSTRING("prop_negated"))
+	    m_negated = (*ns)[0];
+	else if (ns->name() == YSTRING("prop_caseinsensitive"))
+	    m_caseInsentive = (*ns)[0];
+	else if (ns->name() == YSTRING("prop_rex_basic"))
+	    m_regexpBasic = (*ns)[0];
+	else if (ns->name() == YSTRING("prop_rex_extended"))
+	    m_regexpExtended = (*ns)[0];
+    }
+}
+
+String& MatchingItemDump::dumpValue(const MatchingItemBase* item, String& buf,
+    const String& indent, const String& origIndent, unsigned int depth) const
+{
+    if (!item)
+	return buf;
+    String tmp;
+    // Done if already dumped (item implements dumpValue())
+    if (item->dumpValue(tmp,this,indent,origIndent,depth))
+	return buf << tmp;
+    XDebug("MatchingItemDump",DebugAll,"dumpValue (%p) %s '%s' indent='%s' origIndent='%s'",
+	item,miType(item),item->name().safe(),indent.safe(),origIndent.safe());
+    if (item->itemList()) {
+	for (unsigned int i = 0; i < item->itemList()->length(); ++i) {
+	    String tmp;
+	    buf << dump(item->itemList()->at(i),tmp,indent,origIndent,depth);
+	}
+    }
+    else {
+	const MatchingItemString* str = item->itemString();
+	const MatchingItemRegexp* rex = str ? 0 : item->itemRegexp();
+	String flags;
+	if (item->negated())
+	    flags << m_negated;
+	if (str) {
+	    if (str->caseInsensitive())
+		flags << m_caseInsentive;
+	    addFlags(buf,flags);
+	    buf << m_strEnclose << item->itemString()->value() << m_strEnclose;
+	}
+	else if (rex) {
+	    if (rex->value().isCaseInsensitive())
+		flags << m_caseInsentive;
+	    if (rex->value().isExtended())
+		flags << m_regexpExtended;
+	    else
+		flags << m_regexpBasic;
+	    addFlags(buf,flags);
+	    buf << m_rexEnclose << item->itemRegexp()->value() << m_rexEnclose;
+	}
+	else {
+	    addFlags(buf,flags);
+	    if (item->itemRandom()) {
+		buf << "RANDOM " << item->itemRandom()->value();
+		if (item->itemRandom()->maxValue() == 100)
+		    buf << '%';
+		else
+		    buf << '/' << item->itemRandom()->maxValue();
+	    }
+	    else if (item->itemCustom())
+		buf << "<CUSTOM " << item->itemCustom()->type() << '>';
+	    else
+		buf << "<UNKNOWN>";
+	}
+    }
+    XDebug("MatchingItemDump",DebugAll,"Dumped value (%p) '%s'\r\n-----\r\n%s\r\n-----",
+	item,item->name().safe(),buf.safe());
+    return buf;
+}
+
+String& MatchingItemDump::dump(const MatchingItemBase* item, String& buf,
+    const String& indent, const String& origIndent, unsigned int depth) const
+{
+    if (!item)
+	return buf;
+
+    XDebug("MatchingItemDump",DebugAll,"dump (%p) %s '%s' indent='%s' origIndent='%s'",
+	item,miType(item),item->name().safe(),indent.safe(),origIndent.safe());
+    unsigned int oLen = buf.length();
+    item->dump(buf,this,indent,origIndent,depth);
+    // Done if already dumped (item implements dump())
+    if (oLen != buf.length())
+	return buf;
+
+    const MatchingItemList* list = item->itemList();
+    if (list) {
+	String newIndent = indent;
+	if (depth || 0 == (m_flags & NoInitialListDesc)) {
+	    String flags;
+	    if (list->negated())
+		flags.append("negated",",");
+	    if (!list->matchAll())
+		flags.append("any",",");
+	    if (flags)
+		flags.printf(" [%s]",flags.safe());
+	    if (flags || depth || item->name()) {
+		buf << indent << item->name().safe("List") << ':' << flags;
+		if (depth)
+		    newIndent += origIndent;
+	    }
+	}
+	for (unsigned int i = 0; i < list->length(); ++i) {
+	    String tmp;
+	    buf << dump(list->at(i),tmp,newIndent,origIndent,depth + 1);
+	}
+    }
+    else {
+	String val;
+	dumpValue(item,val);
+	if (item->name() || val) {
+	    buf << indent << origIndent;
+	    if (item->name())
+		buf << item->name() << m_nameValueSep.safe("=");
+	    buf << val;
+	}
+    }
+    XDebug("MatchingItemDump",DebugAll,"Dumped (%p) '%s'\r\n-----\r\n%s\r\n-----",
+	item,item->name().safe(),buf.safe());
+    return buf;
+}
+
+//
+// MatchingItemRegexp
+//
+MatchingItemRegexp* MatchingItemRegexp::build(const char* name, const String& str,
+    int negated, bool insensitive, bool extended, int fail)
+{
+    Regexp rex(0,extended,insensitive);
+    if (str) {
+	if (negated >= 0)
+	    rex.assign(str);
+	else {
+	    unsigned int pos = str.length() - 1;
+	    negated = (str[pos] == '^') ? 1 : 0;
+	    if (negated)
+		rex.assign(str.substr(0,pos));
+	    else
+		rex.assign(str);
+	}
+    }
+    else if (negated < 0)
+	negated = 0;
+    if (fail > 1) {
+	if (!rex.compile())
+	    return 0;
+    }
+    else if (fail < 0 && !rex.c_str())
+	return 0;
+    return new MatchingItemRegexp(name,rex,negated);
+}
+
+
+//
+// MatchingItemList
+//
+bool MatchingItemList::change(MatchingItemBase* item, int pos, bool ins, unsigned int overAlloc)
+{
+    if (!item) {
+	unsigned int n = count();
+	if (ins || pos < 0 || pos >= (int)n)
+	    return false;
+	// Remove
+	GenObject* gen = m_value.take(pos);
+	if (gen) {
+	    for (; pos < (int)n; ++pos)
+		m_value.set(m_value.take(pos + 1),pos);
+	    TelEngine::destruct(gen);
+	}
 	return true;
     }
-    TelEngine::destruct(item);
-    return false;
+    // Detect first free position
+    unsigned int firstFree = 0;
+    while (m_value.at(firstFree))
+	firstFree++;
+    if (firstFree >= m_value.length()) {
+	if (firstFree >= m_value.resize(m_value.length() + 1 + overAlloc,true)) {
+	    TelEngine::destruct(item);
+	    return false;
+	}
+    }
+    if (pos < 0 || pos >= (int)firstFree)
+	pos = firstFree;
+    else if (ins) {
+	for (; (int)firstFree > pos; --firstFree)
+	    m_value.set(m_value.take(firstFree - 1),firstFree);
+    }
+    m_value.set(item,pos);
+    return true;
 }
 
 MatchingItemBase* MatchingItemList::copy() const
@@ -2380,30 +2704,39 @@ MatchingItemBase* MatchingItemList::copy() const
     return lst;
 }
 
-#define MatchingItemList_RUN_LIST(func,param) { \
-    int pos = -1; \
-    while (true) { \
-	MatchingItemBase* item = static_cast<MatchingItemBase*>(m_value.at(++pos)); \
-	if (!item) \
-	    break; \
-	if (item->func(param)) { \
-	    if (!m_matchAll) \
-		return true; \
-	} \
-	else if (m_matchAll) \
-	    return false; \
-    } \
-    return pos ? m_matchAll : false; \
+static inline bool matchingListRun(const MatchingItemList& mil, MatchingParams* params,
+    const NamedList* list, const String& str = String::empty())
+{
+    int pos = -1;
+    bool allMatch = mil.matchAll();
+    while (true) {
+	const MatchingItemBase* item = const_cast<MatchingItemBase*>(mil.at(++pos));
+	if (!item)
+	    break;
+	bool ok = list ? item->matchListParam(*list,params) : item->matchString(str,params);
+	// Matched: done if not all match (any match)
+	// Not matched: done if all match is required
+	if (ok) {
+	    if (!allMatch)
+		return true;
+	}
+	else if (allMatch)
+	    return false;
+    }
+    // End of list reached
+    // Empty list or match any: not matched
+    // Otherwise: matched
+    return pos && allMatch;
 }
 
-bool MatchingItemList::runMatchString(const String& str) const
+bool MatchingItemList::runMatchString(const String& str, MatchingParams* params) const
 {
-    MatchingItemList_RUN_LIST(matchString,str)
+    return matchingListRun(*this,params,0,str);
 }
 
-bool MatchingItemList::runMatchListParam(const NamedList& list) const
+bool MatchingItemList::runMatchListParam(const NamedList& list, MatchingParams* params) const
 {
-    MatchingItemList_RUN_LIST(matchListParam,list)
+    return matchingListRun(*this,params,&list);
 }
 
 #undef MatchingItemList_RUN_LIST
@@ -2413,9 +2746,11 @@ MatchingItemBase* MatchingItemList::optimize(MatchingItemList* list)
     if (!list || list->at(1))
 	return list;
     MatchingItemBase* ret = static_cast<MatchingItemBase*>(list->m_value.take(0));
-    // Reverse item (not)negated flag if list is negated to keep the same matching behaviour
-    if (list->negated())
-	ret->m_notNegated = !ret->m_notNegated;
+    if (ret) {
+	// Reverse item (not)negated flag if list is negated to keep the same matching behaviour
+	if (list->negated())
+	    ret->m_notNegated = !ret->m_notNegated;
+    }
     TelEngine::destruct(list);
     return ret;
 }

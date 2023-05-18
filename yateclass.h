@@ -931,6 +931,36 @@ void YCLASS2(class type,class base1,class base2);
 void YCLASS3(class type,class base1,class base2,class base3);
 
 /**
+ * Macro to create a GenObject class from a base class and implement @ref GenObject::getObject
+ * Try to obtain something from a data member first
+ * @param dataPtr Pointer to member data variable
+ * @param type Class that is declared
+ * @param base Base class that is inherited
+ */
+void YCLASS_DATA(var dataPtr,class type,class base);
+
+/**
+ * Macro to create a GenObject class from two base classes and implement @ref GenObject::getObject
+ * Try to obtain something from a data member first
+ * @param dataPtr Pointer to member data variable
+ * @param type Class that is declared
+ * @param base1 First base class that is inherited
+ * @param base2 Second base class that is inherited
+ */
+void YCLASS2_DATA(var dataPtr,class type,class base1,class base2);
+
+/**
+ * Macro to create a GenObject class from three base classes and implement @ref GenObject::getObject
+ * Try to obtain something from a data member first
+ * @param dataPtr Pointer to member data variable
+ * @param type Class that is declared
+ * @param base1 First base class that is inherited
+ * @param base2 Second base class that is inherited
+ * @param base3 Third base class that is inherited
+ */
+void YCLASS3_DATA(var dataPtr,class type,class base1,class base2,class base3);
+
+/**
  * Macro to implement @ref GenObject::getObject in a derived class
  * @param type Class that is declared
  * @param base Base class that is inherited
@@ -986,6 +1016,32 @@ public: virtual void* getObject(const String& name) const \
   if (tmp) return tmp; \
   tmp = base2::getObject(name); \
   return tmp ? tmp : base3::getObject(name); }
+
+#define YCLASS_CALL(res) { void* tmp = res; if (tmp) return tmp; }
+#define YCLASS_CALL_LAST(base1,base2) { void* tmp = base1::getObject(name); return tmp ? tmp : base2::getObject(name); }
+#define YCLASS_DATA_CHECK_PTR(dataPtr,type) { \
+    if (dataPtr) YCLASS_CALL((dataPtr)->getObject(name)) \
+    if (name == YATOM(#type)) return const_cast<type*>(this); \
+}
+
+#define YCLASS_DATA(dataPtr,type,base) \
+public: virtual void* getObject(const String& name) const { \
+    YCLASS_DATA_CHECK_PTR(dataPtr,type) \
+    return base::getObject(name); \
+}
+
+#define YCLASS2_DATA(dataPtr,type,base1,base2) \
+public: virtual void* getObject(const String& name) const { \
+    YCLASS_DATA_CHECK_PTR(dataPtr,type) \
+    YCLASS_CALL_LAST(base,base2) \
+}
+
+#define YCLASS3_DATA(dataPtr,type,base1,base2,base3) \
+public: virtual void* getObject(const String& name) const { \
+    YCLASS_DATA_CHECK_PTR(dataPtr,type) \
+    YCLASS_CALL(base1::getObject(name)) \
+    YCLASS_CALL_LAST(base2,base3) \
+}
 
 #define YCLASSIMP(type,base) \
 void* type::getObject(const String& name) const \
@@ -1170,75 +1226,6 @@ inline void destruct(GenObject* obj)
  */
 template <class Obj> void destruct(Obj*& obj)
     { if (obj) { obj->destruct(); obj = 0; } }
-
-/**
- * This class holds an automatic (owned) GenObject pointer
- * @short GenObject pointer holder (owned)
- */
-class YATE_API AutoGenObject
-{
-    YNOCOPY(AutoGenObject); // no automatic copies please
-public:
-    /**
-     * Constructor
-     * @param gen Optional pointer to object
-     */
-    inline AutoGenObject(GenObject* gen = 0)
-	: m_pointer(gen)
-	{}
-
-    /**
-     * Destructor
-     */
-    inline ~AutoGenObject()
-	{ set(); }
-
-    /**
-     * Take the pointer. Caller retains ownership
-     * @return GenObject pointer, NULL if not set
-     */
-    inline GenObject* take() {
-	    GenObject* gen = m_pointer;
-	    m_pointer = 0;
-	    return gen;
-	}
-
-    /**
-     * Assignment from pointer
-     * @param gen New pointer value
-     */
-    inline AutoGenObject& operator=(GenObject* gen)
-	{ set(gen); return *this; }
-
-    /**
-     * Conversion to regular pointer operator
-     * @return The stored pointer
-     */
-    inline operator GenObject*() const
-	{ return m_pointer; }
-
-    /**
-     * Member access operator
-     */
-    inline GenObject* operator->() const
-	{ return m_pointer; }
-
-    /**
-     * Dereferencing operator
-     */
-    inline GenObject& operator*() const
-	{ return *m_pointer; }
-
-private:
-    inline void set(GenObject* gen = 0) {
-	    if (m_pointer == gen)
-		return;
-	    GenObject* tmp = m_pointer;
-	    m_pointer = gen;
-	    TelEngine::destruct(tmp);
-	}
-    GenObject* m_pointer;
-};
 
 /**
  * A reference counted object.
@@ -2951,6 +2938,20 @@ public:
     String& printf(unsigned int length, const char* format,  ...) FORMAT_CHECK(3);
 
     /**
+     * Append a String in a printf style.
+     * @param format The output format.
+     * NOTE: The length of added string will be at most 128 + length of format
+     */
+    String& printfAppend(const char* format, ...) FORMAT_CHECK(2);
+
+    /**
+     * Append a String in a printf style.
+     * @param length maximum length of the resulting string
+     * @param format The output format.
+     */
+    String& printfAppend(unsigned int length, const char* format,  ...) FORMAT_CHECK(3);
+
+    /**
      * Build a fixed aligned string from str and append it.
      * @param fixedLength The fixed length in which the 'str' will be aligned.
      * @param str The string to align
@@ -3315,6 +3316,57 @@ public:
      */
     static const String* atom(const String*& str, const char* val);
 
+    /**
+     * Checks if a string starts with a substring
+     * @param str String to search in
+     * @param what Substring to check
+     * @param lenStr String length, negative to detect
+     * @param lenWhat Substring length, negative to detect
+     * @param caseInsensitive Compare case-insensitive if set
+     * @return The length of substring if string starts with it
+     */
+    static unsigned int c_starts_with(const char* str, const char* what, int lenStr = -1,
+	int lenWhat = -1, bool caseInsensitive = false);
+
+    /**
+     * Checks if a string ends with a substring
+     * @param str String to search in
+     * @param what Substring to check
+     * @param lenStr String length, negative to detect
+     * @param lenWhat Substring length, negative to detect
+     * @param caseInsensitive Compare case-insensitive if set
+     * @return The length of substring if string ends with it
+     */
+    static unsigned int c_ends_with(const char* str, const char* what, int lenStr = -1,
+	int lenWhat = -1, bool caseInsensitive = false);
+
+    /**
+     * Skip substring in string if matches
+     * @param str String to search in. Will be advanced by skipped chars
+     * @param what Substring to match
+     * @param lenStr String length, negative to detect
+     * @param lenWhat Substring length, negative to detect
+     * @param caseInsensitive Compare case-insensitive if set
+     * @return The number of skipped chars (length of substring), 0 if not matched
+     */
+    static inline unsigned int c_skip(const char*& str, const char* what, int lenStr = -1,
+	int lenWhat = -1, bool caseInsensitive = false) {
+	    unsigned int n = c_starts_with(str,what,lenStr,lenWhat,caseInsensitive);
+	    str += n;
+	    return n;
+	}
+
+    /**
+     * Skip chars in string
+     * @param str String to skip in. Will be advanced by skipped chars
+     * @param what Characters to match
+     * @param len Optional maximum length to search in string, negative to use the whole string
+     * @param skipFound Set it to false to skip while NOT match (until first match character)
+     * @return Number of skipped chars
+     */
+    static unsigned int c_skip_chars(const char*& str, const char* what,
+	int len = -1, bool skipFound = true);
+
 protected:
     /**
      * Called whenever the value changed (except in constructors).
@@ -3329,6 +3381,95 @@ private:
     // I hope every C++ compiler now knows about mutable...
     mutable unsigned int m_hash;
     StringMatchPrivate* m_matches;
+};
+
+/**
+ * This class holds an automatic (owned) GenObject pointer
+ * Ownership may be reset to avoid releasing the held pointer when destroyed
+ * @short GenObject pointer holder
+ */
+class YATE_API AutoGenObject : public String
+{
+    YCLASS_DATA(m_pointer,AutoGenObject,String)
+    YNOCOPY(AutoGenObject); // no automatic copies please
+public:
+    /**
+     * Constructor
+     * @param gen Optional pointer to object
+     * @param name Optional name
+     * @param owned True if held object is owned
+     */
+    inline AutoGenObject(GenObject* gen = 0, const char* name = 0, bool owned = true)
+	: String(name), m_pointer(gen), m_owned(owned)
+	{}
+
+    /**
+     * Destructor
+     */
+    inline ~AutoGenObject()
+	{ set(); }
+
+    /**
+     * Retrieve the held data
+     * @return The stored pointer
+     */
+    inline GenObject* data() const
+	{ return m_pointer; }
+
+    /**
+     * Take the pointer. Caller retains ownership
+     * @return GenObject pointer, NULL if not set
+     */
+    inline GenObject* take() {
+	    GenObject* gen = m_pointer;
+	    m_pointer = 0;
+	    return gen;
+	}
+
+    /**
+     * Replace data
+     * @param gen Optional pointer to object
+     * @param owned True if held object is owned
+     */
+    inline void set(GenObject* gen = 0, bool owned = true) {
+	    if (m_pointer == gen)
+		return;
+	    GenObject* tmp = m_pointer;
+	    m_pointer = gen;
+	    if (m_owned)
+		TelEngine::destruct(tmp);
+	    m_owned = owned;
+	}
+
+    /**
+     * Assignment from pointer
+     * @param gen New pointer value
+     */
+    inline AutoGenObject& operator=(GenObject* gen)
+	{ set(gen); return *this; }
+
+    /**
+     * Conversion to regular pointer operator
+     * @return The stored pointer
+     */
+    inline operator GenObject*() const
+	{ return m_pointer; }
+
+    /**
+     * Member access operator
+     */
+    inline GenObject* operator->() const
+	{ return m_pointer; }
+
+    /**
+     * Dereferencing operator
+     */
+    inline GenObject& operator*() const
+	{ return *m_pointer; }
+
+private:
+    GenObject* m_pointer;
+    bool m_owned;
 };
 
 /**
@@ -6565,9 +6706,119 @@ protected:
     mutable int m_port;
 };
 
+class MatchingItemBase;
 class MatchingItemString;
 class MatchingItemRegexp;
+class MatchingItemRandom;
 class MatchingItemList;
+class MatchingItemCustom;
+
+/**
+ * This class holds matching parameters to be passed when matching in item
+ * @short Matching item match parameters
+ */
+class YATE_API MatchingParams : public String
+{
+    YCLASS(MatchingParams,String)
+public:
+    /**
+     * Constructor
+     * @param name Item name
+     */
+    inline MatchingParams(const char* name = 0)
+	: String(name), m_now(0)
+	{}
+
+    uint64_t m_now;                      // Current time to be set when needed
+    ObjList m_params;                    // Arbitray parameters. May be set during matching
+};
+
+/**
+ * This class holds dump matching item parameters
+ * @short Matching item dump parameters
+ */
+class YATE_API MatchingItemDump : public String
+{
+    YCLASS(MatchingItemDump,String)
+public:
+    /**
+     * Dump behaviour flags
+     */
+    enum DumpFlags {
+	NoInitialListDesc = 0x00000001,  // Do not dump list description at depth 0
+    };
+
+    /**
+     * Constructor
+     * @param params Optional parameters
+     * @param name Optional name
+     */
+    inline MatchingItemDump(const NamedList* params = 0, const char* name = 0)
+	: String(name), m_flags(0), m_rexEnclose('/'), m_strEnclose('\''),
+	m_nameValueSep(": "), m_negated('!'), m_caseInsentive('i'),
+	m_regexpBasic(0), m_regexpExtended(0)
+	{
+	    if (params)
+		init(*params);
+	}
+
+    /**
+     * Initialize dumper data
+     * @param params Parameters list
+     */
+    virtual void init(const NamedList& params);
+
+    /**
+     * Dump an item
+     * @param mi Item to dump
+     * @param buf Destination buffer
+     * @param indent Spaces for output
+     * @param origIndent Original indent
+     * @param depth Re-enter depth
+     * @return Destination buffer reference
+     */
+    virtual String& dump(const MatchingItemBase* mi, String& buf,
+	const String& indent = String::empty(), const String& origIndent = String::empty(),
+	unsigned int depth = 0) const;
+
+    /**
+     * Dump an item's value
+     * @param mi Item to dump
+     * @param buf Destination buffer
+     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
+     * @param origIndent Original indent
+     * @param depth Re-enter depth
+     * @return Destination buffer reference
+     */
+    virtual String& dumpValue(const MatchingItemBase* mi, String& buf,
+	const String& indent = String::empty(), const String& origIndent = String::empty(),
+	unsigned int depth = 0) const;
+
+    /**
+     * Dump an item
+     * @param mi Item to dump
+     * @param buf Destination buffer
+     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
+     * @param origIndent Original indent
+     * @param params Optional dumper parameters parameters
+     * @return Destination buffer reference
+     */
+    static inline String& dumpItem(const MatchingItemBase* mi, String& buf,
+	const String& indent = String::empty(), const String& origIndent = String::empty(),
+	const NamedList* params = 0) {
+	    MatchingItemDump tmp(params);
+	    return tmp.dump(mi,buf,indent,origIndent);
+	}
+
+    unsigned int m_flags;                // Dump flags
+    char m_rexEnclose;                   // Regexp enclose char
+    char m_strEnclose;                   // String enclose char
+    String m_nameValueSep;               // Separator to be set between name and value
+    char m_negated;                      // Negated match value
+    char m_caseInsentive;                // Case insensitive match value
+    char m_regexpBasic;                  // Basic POSIX regexp value
+    char m_regexpExtended;               // Extended POSIX regexp value
+};
 
 /**
  * Base class for all matching items
@@ -6605,33 +6856,37 @@ public:
     /**
      * String match. Handles matching result negation
      * @param str String to match
+     * @param params Optional parameters used during match
      * @return True if matches, false otherwise
      */
-    inline bool matchString(const String& str) const
-	{ return m_notNegated == runMatchString(str); }
+    inline bool matchString(const String& str, MatchingParams* params = 0) const
+	{ return m_notNegated == runMatchString(str,params); }
 
     /**
      * NamedList parameter match. Handles matching result negation
      * @param list List to search for parameter match
+     * @param params Optional parameters used during match
      * @return True if matches, false otherwise
      */
-    inline bool matchListParam(const NamedList& list) const
-	{ return m_notNegated == runMatchListParam(list); }
+    inline bool matchListParam(const NamedList& list, MatchingParams* params = 0) const
+	{ return m_notNegated == runMatchListParam(list,params); }
 
     /**
      * String match to be implemented by descendants
      * @param str String to match
+     * @param params Optional parameters used during match
      * @return False
      */
-    virtual bool runMatchString(const String& str) const
+    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
 	{ return false; }
 
     /**
      * NamedList parameter match
      * @param list List to search for parameter match
+     * @param params Optional parameters used during match
      * @return True if matches, false otherwise
      */
-    virtual bool runMatchListParam(const NamedList& list) const
+    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const
 	{ return runMatchString(list[name()]); }
 
     /**
@@ -6656,11 +6911,60 @@ public:
 	{ return 0; }
 
     /**
+     * Check if this item is a MatchingItemRandom one
+     * @return MatchingItemRandom pointer
+     */
+    virtual const MatchingItemRandom* itemRandom() const
+	{ return 0; }
+
+    /**
      * Check if this item is a MatchingItemList one
      * @return MatchingItemList pointer, NULL if this item is not a MatchingItemList
      */
     virtual const MatchingItemList* itemList() const
 	{ return 0; }
+
+    /**
+     * Check if this item is a MatchingItemCustom one
+     * @return MatchingItemCustom pointer
+     */
+    virtual const MatchingItemCustom* itemCustom() const
+	{ return 0; }
+
+    /**
+     * Dump this item
+     * @param buf Destination buffer
+     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
+     * @param origIndent Original indent
+     * @param dump Optional dumper
+     * @param depth Re-enter depth
+     * @return Destination buffer reference
+     */
+    virtual String& dump(String& buf, const MatchingItemDump* dump = 0,
+	const String& indent = String::empty(), const String& origIndent = String::empty(),
+	unsigned int depth = 0) const
+	{ return buf; }
+
+    /**
+     * Dump this item's value
+     * @param buf Destination buffer
+     * @param dump Optional dumper
+     * @param indent Indent for each item (line). Increased by 'origIndent' when depth advances
+     * @param origIndent Original indent
+     * @param depth Re-enter depth
+     * @return Destination buffer reference
+     */
+    virtual String& dumpValue(String& buf, const MatchingItemDump* dump = 0,
+	const String& indent = String::empty(), const String& origIndent = String::empty(),
+	unsigned int depth = 0) const
+	{ return buf; }
+
+    /**
+     * Retrieve item name (suitable for list retrieval)
+     * @return Item name
+     */
+    virtual const String& toString() const
+	{ return name(); }
 
 private:
     String m_name;                       // Item name
@@ -6705,9 +7009,10 @@ public:
     /**
      * String match
      * @param str String to match
+     * @param params Optional parameters used during match
      * @return True if matched, false otherwise
      */
-    virtual bool runMatchString(const String& str) const
+    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
 	{ return m_caseMatch ? (str == m_value) : (str &= m_value); }
 
     /**
@@ -6769,9 +7074,10 @@ public:
     /**
      * String match
      * @param str String to match
+     * @param params Optional parameters used during match
      * @return True if matched, false otherwise
      */
-    virtual bool runMatchString(const String& str) const
+    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
 	{ return m_value.matches(str); }
 
     /**
@@ -6788,8 +7094,111 @@ public:
     virtual const MatchingItemRegexp* itemRegexp() const
 	{ return this; }
 
+    /**
+     * Build a MatchingItemRegexp from string
+     * @param name Item name
+     * @param str Regexp string
+     * @param negated Greater than 0: build a negated match, 0: buid a non negated match,
+     *  negative: build a negated match if str ends with ^
+     * @param insensitive Build a case insensitive regexp
+     * @param extended Build a regexp using extended POSIX
+     * @param fail positive: fail if regexp compile fails, negative fail if empty (do not check the regexp)
+     *   Remember: failed regexp never matches
+     * @return MatchingItemRegexp pointer, NULL on failure
+     */
+    static MatchingItemRegexp* build(const char* name, const String& str, int negated = 0,
+	bool insensitive = false, bool extended = false, int fail = 1);
+
 private:
     Regexp m_value;                      // Regexp used for matching
+};
+
+/**
+ * Match using a random number
+ * Implements a matching of a reference value greater than RANDOM[0..MAX - 1]
+ * List match and item name set:
+ * Parameter present: use random match
+ * Parameter not present: no match (return false)
+ * @short Random number matching
+ */
+class YATE_API MatchingItemRandom : public MatchingItemBase
+{
+    YCLASS(MatchingItemRandom,MatchingItemBase)
+public:
+    /**
+     * Constructor
+     * Random percent match: val=[PERCENT] maxVal=100
+     * @param val Reference value. 0: never match, 'maxVal' is ignored
+     * @param maxVal Upper interval value. 0, 1, less than / equal to 'val': always match
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     * @param name Item name
+     */
+    inline MatchingItemRandom(uint32_t val, uint32_t maxVal, bool negated = false,
+	const char* name = 0)
+	: MatchingItemBase(name,negated), m_value(val), m_maxVal(maxVal) {
+	    if (!m_value) // Never match
+		m_maxVal = 100;
+	    else if (m_maxVal < 2) // Always match. Avoid division by 0
+		m_value = m_maxVal = 100;
+	}
+
+    /**
+     * Retrieve the reference value used to make a decision
+     * @return The reference value used to make a decision
+     */
+    inline uint32_t value() const
+	{ return m_value; }
+
+    /**
+     * Retrieve the maximum value for random number
+     * @return The maximum value for random number
+     */
+    inline uint32_t maxValue() const
+	{ return m_maxVal; }
+
+    /**
+     * Run the match. Ignore the 'negated' property
+     * @return True if matched, false otherwise
+     */
+    inline bool randomMatch() const
+	{ return value() > (Random::random() % maxValue()); }
+
+    /**
+     * String match
+     * @param str String to match
+     * @param params Optional parameters used during match
+     * @return True if matched, false otherwise
+     */
+    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const
+	{ return randomMatch(); }
+
+    /**
+     * NamedList parameter match
+     * @param list List to search for parameter match
+     * @param params Optional parameters used during match
+     * @return True if matches, false otherwise
+     */
+    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const
+	{ return (!name() || list.getParam(name())) ? randomMatch() : false; }
+
+    /**
+     * Copy this item
+     * @return MatchingItemBase pointer
+     */
+    virtual MatchingItemBase* copy() const
+	{ return new MatchingItemRandom(value(),maxValue(),negated(),name()); }
+
+    /**
+     * Check if this item is a MatchingItemRandom one
+     * @return MatchingItemRandom pointer
+     */
+    virtual const MatchingItemRandom* itemRandom() const
+	{ return this; }
+
+private:
+    uint32_t m_value;                    // Reference value
+    uint32_t m_maxVal;                   // Max value
 };
 
 /**
@@ -6841,27 +7250,83 @@ public:
 	{ return static_cast<MatchingItemBase*>(m_value.at(index)); }
 
     /**
+     * Retrieve the index of an item found by name
+     * @param name Item name
+     * @return Index of found item, negative if not found
+     */
+    inline int indexOf(const String& name) const
+	{ return m_value.index(name); }
+
+    /**
+     * Find an item by name
+     * @param name Item name
+     * @return MatchingItemBase pointer, NULL if not found
+     */
+    inline const MatchingItemBase* find(const String& name) const {
+	    int idx = indexOf(name);
+	    return idx >= 0 ? at(idx) : 0;
+	}
+
+    /**
+     * Change list (append,insert,replace,remove)
+     * Item is removed if given pointer is NULL, position is valid and 'ins' is false
+     * @param item Item to set, pointer will be consumed
+     * @param pos Item position. Append if negative or past list length
+     * @param ins Set it to true to insert, false to replace or append
+     * @param overAlloc Optional number of items to over allocate
+     *  This parameter is ignored if there is enough space in the list set append the item
+     * @return True on success, false on failure (memory allocation error or NULL pointer given)
+     */
+    bool change(MatchingItemBase* item, int pos = -1, bool ins = false, unsigned int overAlloc = 1);
+
+    /**
      * Append an item to the list
      * @param item Item to append, pointer will be consumed
      * @param overAlloc Optional number of items to over allocate
      *  This parameter is ignored if there is enough space in the list set append the item
      * @return True on success, false on failure (memory allocation error or NULL pointer given)
      */
-    bool append(MatchingItemBase* item, unsigned int overAlloc = 1);
+    inline bool append(MatchingItemBase* item, unsigned int overAlloc = 1)
+	{ return change(item,-1,false,overAlloc); }
+
+    /**
+     * Set an item at given position
+     * Item is removed if given pointer is NULL
+     * @param item Item to set, pointer will be consumed
+     * @param pos Item position. Append if past list length
+     * @param overAlloc Optional number of items to over allocate
+     *  This parameter is ignored if there is enough space in the list set append the item
+     * @return True on success, false on failure (memory allocation error or NULL pointer given)
+     */
+    inline bool set(MatchingItemBase* item, unsigned int pos, unsigned int overAlloc = 1)
+	{ return change(item,pos,false,overAlloc); }
+
+    /**
+     * Insert an item at list start
+     * @param item Item to insert, pointer will be consumed
+     * @param pos Item position. Append if past list length
+     * @param overAlloc Optional number of items to over allocate
+     *  This parameter is ignored if there is enough space in the list set append the item
+     * @return True on success, false on failure (memory allocation error or NULL pointer given)
+     */
+    inline bool insert(MatchingItemBase* item, unsigned int pos = 0, unsigned int overAlloc = 1)
+	{ return change(item,pos,true,overAlloc); }
 
     /**
      * String match
      * @param str String to match
+     * @param params Optional parameters used during match
      * @return True if matched, false otherwise
      */
-    virtual bool runMatchString(const String& str) const;
+    virtual bool runMatchString(const String& str, MatchingParams* params = 0) const;
 
     /**
      * NamedList parameter match
      * @param list List to search for parameter match
+     * @param params Optional parameters used during match
      * @return True if matches, false otherwise
      */
-    virtual bool runMatchListParam(const NamedList& list) const;
+    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const;
 
     /**
      * Copy this item
@@ -6888,6 +7353,43 @@ public:
 private:
     ObjVector m_value;                   // List of items to match
     bool m_matchAll;                     // Match all/any item(s)
+};
+
+/**
+ * Custom match
+ * @short Base class for custom matching
+ */
+class YATE_API MatchingItemCustom : public MatchingItemBase
+{
+    YCLASS(MatchingItemCustom,MatchingItemBase)
+public:
+    /**
+     * Constructor
+     * @param name Item name
+     * @param type Type name
+     * @param negated True if matching is negated (return the opposite of match in
+     *  public methods), false otherwise
+     */
+    inline MatchingItemCustom(const char* name, const char* type, bool negated = false)
+	: MatchingItemBase(name,negated), m_type(type)
+	{}
+
+    /**
+     * Retrieve the type
+     * @return Type name
+     */
+    inline const String& type() const
+	{ return m_type; }
+
+    /**
+     * Check if this item is a MatchingItemCustom one
+     * @return MatchingItemCustom pointer
+     */
+    virtual const MatchingItemCustom* itemCustom() const
+	{ return this; }
+
+private:
+    String m_type;
 };
 
 class MutexPrivate;
