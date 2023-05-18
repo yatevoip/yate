@@ -9323,7 +9323,7 @@ public:
      * @param addr Address to fill in with the address of the incoming connection
      * @return Open socket to the new connection or NULL on failure
      */
-    Socket* accept(SocketAddr& addr);
+    virtual Socket* accept(SocketAddr& addr);
 
     /**
      * Create a new socket for an incoming connection attempt on a listening socket
