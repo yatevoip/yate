@@ -110,16 +110,18 @@
 ; filtersniff: regexp: Default filter to apply to message sniffer at initialization
 ; If empty it will match all messages except engine.timer which is never displayed
 ; Example for a filter matching all chan.Anything messages and engine.halt:
-;  filtersniff=^\(chan\.\|engine\.halt$\)
+;  filtersniff=^\(chan\.\|engine\.halt\)$
 ;filtersniff=
 
 ; agesniff: float: Display only messages whose age or delay is higher than this value
+; This is a floating point number in seconds (1.5 means 1500msec)
 ;agesniff=0
 
 ; filtersniffparams: string: Default parameter(s) filter to apply to message sniffer at initialization
 ; If empty it will not attempt to match message parameters
-; Format: [any] param1=value1 [param2=value2 ...]
-; 'any' indicates that message matches if at least one configured parameter matches
+; Format: [any] [negated] param1=value1 [param2=value2 ...]
+; any: message matches if at least one configured parameter matches
+; negated: message matches if list does not match
 ; Value to match is handled as regexp. It may end with '^' to revert match (i.e. matches if regexp don't match)
 ; Value may be empty. In this case the parameter matches if missing in message or present with empty value
 ; Example for a filter matching messages with empty route_type or route_type=call
@@ -127,6 +129,16 @@
 ; Example for a filter matching message with caller=123 or called=123
 ;  filtersniffparams=any caller=^123$ called=^123$
 ;filtersniffparams=
+
+; msgsniff:<NAME>: string: Add a message sniffer rule
+; <NAME> is optional. If missing the rule is handled as the one set using filtersniff/agesniff/filtersniffparams
+; This parameter may be repeated with different <NAME> value to add multiple rules
+; A rule will replace a previously defined rule with the same name
+; Format: [filter=[value]] [age=[value]] [params [any negated] [name=value]]
+; Examples:
+; msgsniff:=filter=^\(chan\.\) age=0.5 params id=^sip/
+; msgsniff:extra=filter=^\(call\.cdr\)$ params any caller=123 called=^2
+;msgsniff:<NAME>=
 
 ; trace_msg_time: boolean: Instruct message dispatcher to set message event(s) time (enqueue / dispatch)
 ;trace_msg_time=no
