@@ -969,6 +969,7 @@ public:
 	    XDebug(DebugAll,"JsMatchingItem() [%p]",this);
 	    params().addParam(new ExpFunction("matches"));
 	    params().addParam(new ExpFunction("getDesc"));
+	    params().addParam(new ExpFunction("dump"));
 	}
     inline JsMatchingItem(MatchingItemBase* match, ScriptMutex* mtx, unsigned int line,
 	const char* name = 0)
@@ -6464,6 +6465,32 @@ bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObje
 	    params && params->getBoolValue(YSTRING("force_bool_props")));
 	pushStackObjNull(stack,jso,"desc");
     }
+    else if (oper.name() == YSTRING("dump")) {
+	// dump([params[,indent,origIndent]])
+	if (!extractStackArgs(0,0,args,this,stack,oper,context))
+	    return false;
+	String indent = "\r\n";
+	String origIndent = "  ";
+	ExpOperation* op = args[1];
+	if (op) {
+	    if (!JsParser::isUndefined(*op)) {
+		if (JsParser::isNull(*op))
+		    indent = "";
+		else
+		    indent = *op;
+	    }
+	    op = args[2];
+	    if (op && !JsParser::isUndefined(*op)) {
+		if (JsParser::isNull(*op))
+		    origIndent = "";
+		else
+		    origIndent = *op;
+	    }
+	}
+	ExpOperation* res = new ExpOperation("","dump");
+	MatchingItemDump::dumpItem(m_match,*res,indent,origIndent,getObjParams(args[0]));
+	ExpEvaluator::pushOne(stack,res);
+    }
     else if (oper.name() == YSTRING("validate")) {
 	// validate(value[,name[,params]])
 	// Return: Object (success), null/undefined (empty optimized matching), string (error)
@@ -6513,21 +6540,22 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
     const NamedList* params, unsigned int flags, const char** reason, bool allowObjValue)
 {
     MatchingItemBase* ret = 0;
+    const char* itemName = TelEngine::c_safe(name);
+    bool negated = params && params->getBoolValue(YSTRING("negated"));
     while (true) {
-	bool negated = params && params->getBoolValue(YSTRING("negated"));
 	JsObject* jso = YOBJECT(JsObject,value);
 	// String
 	if (!jso) {
 	    ExpOperation* oper = YOBJECT(ExpOperation,value);
 	    const char* v = JsParser::isMissing(oper) ? "" : oper->safe();
 	    bool ic = params && params->getBoolValue(YSTRING("ignoreCase"));
-	    ret = new MatchingItemString(TelEngine::c_safe(name),v,ic,negated);
+	    ret = new MatchingItemString(itemName,v,ic,negated);
 	    break;
 	}
 	// Array of items
 	JsArray* jsa = YOBJECT(JsArray,jso);
 	if (jsa) {
-	    MatchingItemList* list = new MatchingItemList(TelEngine::c_safe(name),
+	    MatchingItemList* list = new MatchingItemList(itemName,
 		!(params && params->getBoolValue(YSTRING("any"))),negated);
 	    for (int32_t i = 0; i < jsa->length(); ++i) {
 		value = jsa->params().getParam(String(i));
@@ -6555,25 +6583,34 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 		if (ic != r.isCaseInsensitive() || basic != rBasic) {
 		    Regexp tmp(r);
 		    tmp.setFlags(!basic,ic);
-		    ret = new MatchingItemRegexp(TelEngine::c_safe(name),tmp,negated);
+		    ret = new MatchingItemRegexp(itemName,tmp,negated);
 		    break;
 		}
 	    }
-	    ret = new MatchingItemRegexp(TelEngine::c_safe(name),r,negated);
+	    ret = new MatchingItemRegexp(itemName,r,negated);
 	    break;
+	}
+	const NamedList& jsp = jso->params();
+	const String* type = jsp.getParam(YSTRING("type"));
+	if (type) {
+	    if (*type == YSTRING("random")) {
+		ret = new MatchingItemRandom(jsp.getUInt64Value(YSTRING("value")),
+		    jsp.getUInt64Value(YSTRING("maxvalue")),negated,itemName);
+		break;
+	    }
 	}
 	if (!allowObjValue || YOBJECT(JsMatchingItem,jso)) {
 	    if (reason)
 		*reason = "object-not-allowed";
 	    return 0;
 	}
-	// Build from object: {name:"", value:???, params:{}}
+	// Build from object: {name:"", value:???, params:{}, type:""}
 	// 'value' is no longer allowed to be a non handled object
 	// Retrieve params from 'params' property or object itself
-	GenObject* gen = jso->params().getParam(YSTRING("params"));
-	value = jso->params().getParam(YSTRING("value"));
+	GenObject* gen = jsp.getParam(YSTRING("params"));
+	value = jsp.getParam(YSTRING("value"));
 	params = gen ? getObjParams(gen) : getObjParams(jso);
-	name = jso->params().getParam(YSTRING("name"));
+	name = jsp.getParam(YSTRING("name"));
 	ret = buildItem(value,name,params,flags,reason,false);
 	break; 
     }
@@ -6623,6 +6660,13 @@ JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
 		    jsa->push(new ExpWrapper(jso));
 	    }
 	    val = jsa;
+	}
+	else if (item->itemRandom()) {
+	    const MatchingItemRandom* tmp = item->itemRandom();
+	    val = new JsObject(context,line,mtx);
+	    val->setStringField("type","random");
+	    val->setIntField("value",tmp->value());
+	    val->setIntField("maxvalue",tmp->maxValue());
 	}
 	if (val) {
 	    jso->setObjField("value",val);
