@@ -2485,6 +2485,19 @@ static const TokenDict s_miDumpFlags[] = {
     {0,0}
 };
 
+static inline String dumpIndent(const String& buf)
+{
+    String s;
+    for (const char* ss = buf; (ss && *ss); ++ss)
+	if (*ss == '\r')
+	    s << "\\r";
+	else if (*ss == '\n')
+	    s << "\\n";
+	else
+	    s << *ss;
+    return s;
+}
+
 void MatchingItemDump::init(const NamedList& params)
 {
     for (ObjList* o = params.paramList()->skipNull(); o; o = o->skipNext()) {
@@ -2517,8 +2530,10 @@ String& MatchingItemDump::dumpValue(const MatchingItemBase* item, String& buf,
     // Done if already dumped (item implements dumpValue())
     if (item->dumpValue(tmp,this,indent,origIndent,depth))
 	return buf << tmp;
-    XDebug("MatchingItemDump",DebugAll,"dumpValue (%p) %s '%s' indent='%s' origIndent='%s'",
-	item,miType(item),item->name().safe(),indent.safe(),origIndent.safe());
+    XDebug("MatchingItemDump",DebugAll,
+	"dumpValue (%p) %s '%s' depth=%u indent='%s'/'%s' [%p]",
+	item,miType(item),item->name().safe(),depth,dumpIndent(indent).safe(),
+	dumpIndent(origIndent).safe(),this);
     if (item->itemList()) {
 	for (unsigned int i = 0; i < item->itemList()->length(); ++i) {
 	    String tmp;
@@ -2562,8 +2577,8 @@ String& MatchingItemDump::dumpValue(const MatchingItemBase* item, String& buf,
 		buf << "<UNKNOWN>";
 	}
     }
-    XDebug("MatchingItemDump",DebugAll,"Dumped value (%p) '%s'\r\n-----\r\n%s\r\n-----",
-	item,item->name().safe(),buf.safe());
+    XDebug("MatchingItemDump",DebugAll,"Dumped value (%p) '%s' [%p]\r\n-----\r\n%s\r\n-----",
+	item,item->name().safe(),this,buf.safe());
     return buf;
 }
 
@@ -2573,8 +2588,10 @@ String& MatchingItemDump::dump(const MatchingItemBase* item, String& buf,
     if (!item)
 	return buf;
 
-    XDebug("MatchingItemDump",DebugAll,"dump (%p) %s '%s' indent='%s' origIndent='%s'",
-	item,miType(item),item->name().safe(),indent.safe(),origIndent.safe());
+    XDebug("MatchingItemDump",DebugAll,
+	"dump (%p) %s '%s' flags=0x%x depth=%u indent='%s'/'%s' [%p]",
+	item,miType(item),item->name().safe(),m_flags,depth,
+	dumpIndent(indent).safe(),dumpIndent(origIndent).safe(),this);
     unsigned int oLen = buf.length();
     item->dump(buf,this,indent,origIndent,depth);
     // Done if already dumped (item implements dump())
@@ -2583,7 +2600,7 @@ String& MatchingItemDump::dump(const MatchingItemBase* item, String& buf,
 
     const MatchingItemList* list = item->itemList();
     if (list) {
-	String newIndent = indent;
+	String tmp;
 	if (depth || 0 == (m_flags & NoInitialListDesc)) {
 	    String flags;
 	    if (list->negated())
@@ -2592,14 +2609,18 @@ String& MatchingItemDump::dump(const MatchingItemBase* item, String& buf,
 		flags.append("any",",");
 	    if (flags)
 		flags.printf(" [%s]",flags.safe());
-	    if (flags || depth || item->name()) {
-		buf << indent << item->name().safe("List") << ':' << flags;
-		if (depth)
-		    newIndent += origIndent;
-	    }
+	    if (depth || flags || item->name())
+		tmp << item->name().safe("List") << ':' << flags;
+	}
+	// Nothing dumped at first level:
+	// print the rest of the list at same alignment
+	String newIndent = indent;
+	if (tmp) {
+	    buf << indent << tmp;
+	    newIndent += origIndent;
 	}
 	for (unsigned int i = 0; i < list->length(); ++i) {
-	    String tmp;
+	    tmp.clear();
 	    buf << dump(list->at(i),tmp,newIndent,origIndent,depth + 1);
 	}
     }
@@ -2607,14 +2628,14 @@ String& MatchingItemDump::dump(const MatchingItemBase* item, String& buf,
 	String val;
 	dumpValue(item,val);
 	if (item->name() || val) {
-	    buf << indent << origIndent;
+	    buf << indent;
 	    if (item->name())
 		buf << item->name() << m_nameValueSep.safe("=");
 	    buf << val;
 	}
     }
-    XDebug("MatchingItemDump",DebugAll,"Dumped (%p) '%s'\r\n-----\r\n%s\r\n-----",
-	item,item->name().safe(),buf.safe());
+    XDebug("MatchingItemDump",DebugAll,"Dumped (%p) '%s' [%p]\r\n-----\r\n%s\r\n-----",
+	item,item->name().safe(),this,buf.safe());
     return buf;
 }
 
@@ -2707,13 +2728,21 @@ MatchingItemBase* MatchingItemList::copy() const
 static inline bool matchingListRun(const MatchingItemList& mil, MatchingParams* params,
     const NamedList* list, const String& str = String::empty())
 {
-    int pos = -1;
     bool allMatch = mil.matchAll();
+#ifdef XDEBUG
+    Debugger dbg(DebugAll,"MatchingItemList MATCHING",
+	" name='%s' all=%s negated=%s input='%s' params=(%p) [%p]",
+	mil.name().safe(),String::boolText(allMatch),String::boolText(mil.negated()),
+	list ? list->safe("list") : "<string>",params,&mil);
+#endif
+    int pos = -1;
     while (true) {
 	const MatchingItemBase* item = const_cast<MatchingItemBase*>(mil.at(++pos));
 	if (!item)
 	    break;
 	bool ok = list ? item->matchListParam(*list,params) : item->matchString(str,params);
+	XDebug("MatchingItemList",DebugAll,"matched [%s] idx=%d (%p) '%s' type=%s [%p]",
+	    String::boolText(ok),pos,item,item->name().safe(),miType(item),&mil);
 	// Matched: done if not all match (any match)
 	// Not matched: done if all match is required
 	if (ok) {
@@ -2726,6 +2755,8 @@ static inline bool matchingListRun(const MatchingItemList& mil, MatchingParams* 
     // End of list reached
     // Empty list or match any: not matched
     // Otherwise: matched
+    XDebug("MatchingItemList",DebugAll,"End of matching [%s] pos=%d [%p]",
+	String::boolText(pos && allMatch),pos,&mil);
     return pos && allMatch;
 }
 
@@ -2738,8 +2769,6 @@ bool MatchingItemList::runMatchListParam(const NamedList& list, MatchingParams* 
 {
     return matchingListRun(*this,params,&list);
 }
-
-#undef MatchingItemList_RUN_LIST
 
 MatchingItemBase* MatchingItemList::optimize(MatchingItemList* list)
 {
