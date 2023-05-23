@@ -79,6 +79,7 @@ EOF
 	esac
     done
     ) < "$fn" > "$tf"
+    chmod --reference="$fn" "$tf"
     if cmp -s "$fn" "$tf"; then
 	echo " unchanged"
 	rm "$tf"
