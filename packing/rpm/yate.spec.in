@@ -186,6 +186,7 @@ for small to large scale projects.
 %{_libdir}/yate/server/ysnmpagent.yate
 %{_libdir}/yate/server/cache.yate
 %{_libdir}/yate/server/eventlogs.yate
+%{_libdir}/yate/server/hep3_capture.yate
 %{_libdir}/yate/client/osschan.yate
 %{_libdir}/yate/client/jabberclient.yate
 %{_libdir}/yate/jabber/jabberserver.yate
@@ -256,6 +257,7 @@ for small to large scale projects.
 %config(noreplace) %{_sysconfdir}/yate/camel_map.conf
 %config(noreplace) %{_sysconfdir}/yate/sip_cnam_lnp.conf
 %config(noreplace) %{_sysconfdir}/yate/dummyradio.conf
+%config(noreplace) %{_sysconfdir}/yate/hep3_capture.conf
 
 %config %{_sysconfdir}/logrotate.d/yate
 

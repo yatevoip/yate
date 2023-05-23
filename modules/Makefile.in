@@ -91,7 +91,8 @@ PROGS := cdrbuild.yate cdrcombine.yate cdrfile.yate regexroute.yate \
 	server/eventlogs.yate \
 	client/jabberclient.yate \
 	callgen.yate analyzer.yate rmanager.yate msgsniff.yate wiresniff.yate \
-	radio/dummyradio.yate radio/radiotest.yate
+	radio/dummyradio.yate radio/radiotest.yate \
+	server/hep3_capture.yate
 
 LIBS :=
 DIRS := client server jabber qt4 sip sig radio

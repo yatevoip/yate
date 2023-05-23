@@ -1,0 +1,52 @@
+
+; each section starting with 'server' configures a connection
+; to a HEP3 server
+; The string after 'server' is the server name
+[server hep_server]
+
+; enable: boolean: True to enable this connection. False to disable it
+; This setting is applicable on reload.
+;enable=yes
+
+; auth_key: string: Authentication key string. If not set, it will look at
+; value of auth_key_hex.
+; This setting is applicable on reload.
+;auth_key=
+
+; auth_key_hex: Hexified string: Authentication key in hexadecimal octet string.
+; If auth_key is not set and neither is this, authentication key will not be set
+; in HEP3 packets.
+; This setting is applicable on reload.
+;auth_key_hex=
+
+; capture_id: unsigned 4 byte integer: HEP3 Capture agent ID for this connection
+; This setting is applicable on reload.
+;capture_id=0
+
+; compress: boolean: Compress HEP3 packet payload
+; This setting can be overridden by entities that request a HEP3 capture
+; for its own instance.
+;compress=false
+
+; socket_type: keyword (udp, tcp). Type of socket to create for communication
+; with this server.
+; Not applicable on reload.
+;socket_type=udp
+
+; remote_host: destination IPv4 address, mandatory to set. IPv4 address of the
+; server where to send HEP3 packets
+; Not applicable on reload.
+;remote_host=
+
+; remote_port: destination port, mandatory to set. Port where to send HEP3 packets
+; Not applicable on reload.
+;remote_port=
+
+; local_host: local IPv4 address, mandatory to set. IPv4 address to use for
+; sending HEP3 packets
+; Not applicable on reload.
+;local_host=
+
+; remote_port: source port, mandatory to set. Port to use for sending HEP3 packets
+; Not applicable on reload.
+;local_port=
