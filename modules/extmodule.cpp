@@ -5,7 +5,7 @@
  * External module handler
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2017 Null Team
+ * Copyright (C) 2004-2023 Null Team
  * Portions copyright (C) 2005 Maciek Kaminski
  *
  * This software is distributed under multiple licenses;

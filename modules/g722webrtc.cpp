@@ -5,7 +5,7 @@
  * G.722 codec using library based on WebRTC project.
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2019 Null Team
+ * Copyright (C) 2019-2023 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing

@@ -5,7 +5,7 @@
  * GSM-EFR transcoder implemented using 3GPP AMR codec
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2015 Null Team
+ * Copyright (C) 2015-2023 Null Team
  * Author: Paul Chitescu
  *
  * AMR codec library by Stanislav Brabec at http://www.penguin.cz/~utx/amr

@@ -11,7 +11,7 @@
  * H.323 channel
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2023 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing

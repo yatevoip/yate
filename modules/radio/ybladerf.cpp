@@ -5,7 +5,7 @@
  * BladeRF radio interface
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2015, 2016 Null Team
+ * Copyright (C) 2015, 2016-2023 Null Team
  * Copyright (C) 2015, 2016 LEGBA Inc
  *
  * This software is distributed under multiple licenses;

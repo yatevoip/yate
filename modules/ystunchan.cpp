@@ -5,7 +5,7 @@
  * STUN support module
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2023 Null Team
  * Author: Marian Podgoreanu
  *
  * This software is distributed under multiple licenses;
