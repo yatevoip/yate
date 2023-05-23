@@ -39,6 +39,13 @@
 ;     Default true
 ;   sips: Boolean. Use SIPS URI for register/contact. Transport defaults to TLS if enabled
 ;
+;   For TCP SIP HEP3 capturing, setup the following parameters:
+;   capture_filter: Boolean, default false. Enable it if you want HEP3 capture of packets
+;   capture_agent: String, mandatory if capture_filter is set to true. Name of capture
+;   capture_server: String, mandatory if capture_filter is set to true. Name of HEP3 server where to send packets
+;   capture_compress: Boolean, default false. Set to true to compress captured packets
+;   If not set, capture settings will default to SIP global capture settings.
+;
 ;   NOTE: Default port is 5060 for udp/tcp and 5061 for tls
 ;
 ; Jabber:

@@ -214,6 +214,47 @@ protected:
     int m_methods[MethodCount];
 };
 
+class CaptureFilter : virtual public SocketFilter
+{
+public:
+    CaptureFilter(const char* name = 0)
+	:m_name(name), m_lock("CaptureFilter"), m_captureAgent(0), m_warned(false)
+    {
+	DDebug(DebugAll,"CaptureFilter(%s) [%p]",TelEngine::c_safe(name),this);
+    }
+
+    virtual ~CaptureFilter()
+    {
+	DDebug(DebugAll,"~CaptureFilter(%s) [%p]",m_name.c_str(),this);
+	TelEngine::destruct(m_captureAgent);
+    }
+
+    inline void setLocalAddr(const SocketAddr& lAddr)
+    {
+	WLock l(m_lock);
+	m_local = lAddr;
+    }
+
+    inline void setRemoteAddr(const SocketAddr& rAddr)
+    {
+	WLock l(m_lock);
+	m_remote = rAddr;
+    }
+
+    bool init(YateSIPTransport* transp, const NamedList& params, const SocketAddr& lAddr, const SocketAddr& rAddr);
+    virtual void* getObject(const String& name) const;
+    virtual bool received(const void* buffer, int length, int flags, const struct sockaddr* addr, socklen_t adrlen);
+    virtual bool sent(const void* buffer, int length, int flags, const struct sockaddr* addr, socklen_t adrlen);
+
+private:
+    String m_name;
+    RWLock m_lock;
+    SocketAddr m_local;
+    SocketAddr m_remote;
+    Capture* m_captureAgent;
+    bool m_warned;
+};
+
 // A SIP party holder
 class YateSIPPartyHolder : public ProtocolHolder
 {
@@ -221,7 +262,7 @@ public:
     inline YateSIPPartyHolder(DebugEnabler* enabler, Mutex* mutex = 0, const String& traceId = String::empty())
 	: ProtocolHolder(Udp),
 	m_party(0), m_partyMutex(mutex), m_sips(false),	m_transLocalPort(0), m_transRemotePort(0),
-	m_enabler(enabler), m_traceId(traceId)
+	m_capture(false), m_captZipped(false), m_enabler(enabler), m_traceId(traceId)
 	{}
     virtual ~YateSIPPartyHolder()
 	{ setParty(); }
@@ -295,6 +336,11 @@ protected:
     int m_transRemotePort;
     // Failure
     String m_partyInvalidRemote;
+
+    bool m_capture;
+    String m_captAgent;
+    String m_captServer;
+    bool m_captZipped;
 
 private:
     DebugEnabler* m_enabler;
@@ -463,6 +509,8 @@ protected:
     String m_protoAddr;                  // Proto + addr: used for debug (send/recv msg)
     String m_role;
     bool m_ignoreVia;                    // Ignore VIA header (override from global)
+    CaptureFilter* m_capture;
+
 private:
     YateSIPTransport() : ProtocolHolder(Udp) {} // No default constructor
 };
@@ -1334,6 +1382,12 @@ static int s_expires_min = EXPIRES_MIN;
 static int s_expires_def = EXPIRES_DEF;
 static int s_expires_max = EXPIRES_MAX;
 static int s_defEncoding = SipHandler::BodyBase64;
+
+// SIP packet capture global parameters
+static bool s_captureFilter = false;
+static String s_captureAgent = "sip";
+static String s_captureServer;
+static bool s_captureZipped = false;
 
 static const String s_statusCmd = "status";
 static const String s_noAutoAuth = "noautoauth";
@@ -2719,7 +2773,12 @@ bool YateSIPPartyHolder::buildParty(bool force, bool isTemp)
     }
     if (tcpTrans && initTcp) {
 	// TODO: handle other params: maxpkt, thread prio
-	tcpTrans->init(NamedList::empty(),true);
+	NamedList p("extra");
+	p.setParam(YSTRING("capture_filter"),m_capture);
+	p.setParam(YSTRING("capture_agent"),m_captAgent);
+	p.setParam(YSTRING("capture_server"),m_captServer);
+	p.setParam(YSTRING("capture_compress"),m_captZipped);
+	tcpTrans->init(p,true);
     }
     if (!isTemp || m_party)
 	TraceDebug(m_traceId,m_enabler,m_party ? DebugAll : DebugNote,
@@ -3092,6 +3151,92 @@ void YateSIPListener::initialize(const NamedList& params, bool first)
     }
 }
 
+class CaptureRef : public RefObject
+{
+public:
+    inline CaptureRef(Capture** capt)
+	: m_capture(capt)
+	{ }
+
+    virtual void* getObject(const String& name) const
+	{ return (name == YATOM("Capture*")) ? m_capture : RefObject::getObject(name); }
+
+private:
+    CaptureRef();
+    void* m_capture;
+};
+
+void* CaptureFilter::getObject(const String& name) const
+{
+    if (name == "CaptureFilter")
+	return (void*) this;
+    return GenObject::getObject(name);
+}
+
+bool CaptureFilter::init(YateSIPTransport* transp, const NamedList& params,
+	const SocketAddr& lAddr, const SocketAddr& rAddr)
+{
+    if (!transp)
+	return false;
+    WLock l(m_lock);
+    if (m_captureAgent && m_captureAgent->valid())
+	return true;
+    TelEngine::destruct(m_captureAgent);
+    m_local = lAddr;
+    m_remote = rAddr;
+    DDebug(&plugin,DebugAll,"CaptureFilter::init() '%s' [%p]",m_name.c_str(),this);
+    Message m("hep3.capture");
+    CaptureRef* cRef = new CaptureRef(&m_captureAgent);
+    m.userData(cRef);
+    TelEngine::destruct(cRef);
+    m.copyParams(params);
+    m.setParam("payload_proto","sip");
+    m.setParam("ip_type",lAddr.familyName());
+    m.setParam("ip_proto",transp->protoName());
+    Engine::dispatch(m);
+    if (!m_captureAgent) {
+	Debug(&plugin,DebugConf,"Failed to obtain capture agent '%s' [%p]",m_name.c_str(),this);
+	return false;
+    }
+    return true;
+}
+
+bool CaptureFilter::received(const void* buffer, int length, int flags,
+	const struct sockaddr* addr, socklen_t adrlen)
+{
+    if (!m_captureAgent)
+	return false;
+    DDebug(&plugin,DebugAll,"CaptureFilter::received(%p,%d,%x,%p,%u) [%p]",
+	    buffer,length,flags,addr,adrlen,this);
+    SocketAddr a(addr,adrlen);
+    CaptureInfo info(Time::now(),addr && adrlen ? &a : &m_remote,&m_local);
+    if (!m_captureAgent->write((const uint8_t*)buffer,length,info)) {
+	if (!m_captureAgent->valid() && !m_warned) {
+	    Debug(&plugin,DebugWarn,"Capture filter '%s' has become invalid [%p]",m_captureAgent->toString().c_str(),this);
+	    m_warned = true;
+	}
+    }
+    return false;
+}
+
+bool CaptureFilter::sent(const void* buffer, int length, int flags,
+	const struct sockaddr* addr, socklen_t adrlen)
+{
+    if (!m_captureAgent)
+	return false;
+    DDebug(&plugin,DebugAll,"CaptureFilter::sent(%p,%d,%x,%p,%u) [%p]",
+	    buffer,length,flags,addr,adrlen,this);
+    SocketAddr a(addr,adrlen);
+    CaptureInfo info(Time::now(),&m_local,addr && adrlen ? &a : &m_remote);
+    if (!m_captureAgent->write((const uint8_t*)buffer,length,info)) {
+    	if (!m_captureAgent->valid() && !m_warned) {
+	    Debug(&plugin,DebugWarn,"Capture filter '%s' has become invalid [%p]",m_captureAgent->toString().c_str(),this);
+	    m_warned = true;
+	}
+    }
+    return false;
+}
+
 
 YateSIPTransport::YateSIPTransport(int proto, const String& id, Socket* sock, int stat)
     : Mutex(true,"YateSIPTransport"),
@@ -3099,7 +3244,7 @@ YateSIPTransport::YateSIPTransport(int proto, const String& id, Socket* sock, in
     m_id(id), m_status(stat), m_statusChgTime(Time::secNow()),
     m_sock(sock), m_maxpkt(1500),
     m_worker(0), m_initialized(false),
-    m_ignoreVia(s_ignoreVia)
+    m_ignoreVia(s_ignoreVia), m_capture(0)
 {
 }
 
@@ -3127,6 +3272,38 @@ bool YateSIPTransport::init(const NamedList& params, const NamedList& defs,
     }
     m_rtpNatAddr = params.getValue(YSTRING("nat_address"));
     m_role = params[YSTRING("role")];
+
+    bool capture = params.getBoolValue(YSTRING("capture_filter"),s_captureFilter);
+    if (capture) {
+	NamedList captParams("capture");
+	Lock lck(s_globalMutex);
+	captParams.addParam(YSTRING("capture"),params.getValue(YSTRING("capture_agent"),s_captureAgent));
+	captParams.addParam(YSTRING("server"),params.getValue(YSTRING("capture_server"),s_captureServer));
+	captParams.addParam(YSTRING("compress"),params.getBoolValue(YSTRING("capture_compress"),s_captureZipped));
+	lck.drop();
+	bool install = false;
+	if (!m_capture) {
+	    m_capture = new CaptureFilter(captParams.getValue("agent"));
+	    install = true;
+	}
+	if (!m_capture->init(this,captParams,m_local,m_remote)) {
+	    if (m_sock)
+		m_sock->removeFilter(m_capture);
+	    TelEngine::destruct(m_capture);
+	}
+	else if (install && m_sock) {
+	    if (!m_sock->installFilter(m_capture)) {
+		Debug(&plugin,DebugNote,"Transport(%s) failed to install capture filter [%p]",
+		    m_id.c_str(),this);
+	    }
+	}
+    }
+    else if (m_capture) {
+	if (m_sock)
+	    m_sock->removeFilter(m_capture);
+	TelEngine::destruct(m_capture);
+    }
+
     unlock();
     // Done if not first
     if (!first)
@@ -3135,6 +3312,7 @@ bool YateSIPTransport::init(const NamedList& params, const NamedList& defs,
 	m_sock->getSockName(m_local);
 	m_sock->getPeerName(m_remote);
     }
+
     return true;
 }
 
@@ -3237,6 +3415,8 @@ void YateSIPTransport::resetSocket(Socket*& sock, int linger)
     if (!sock)
 	return;
     sock->setLinger(linger);
+    // socket does not own capture filter, avoid being destroyed
+    sock->clearFilters(false);
     delete sock;
     sock = 0;
 }
@@ -3245,6 +3425,7 @@ void YateSIPTransport::destroyed()
 {
     terminate("Destroyed");
     resetSocket(m_sock,-1);
+    TelEngine::destruct(m_capture);
     Debug(&plugin,DebugAll,"Transport(%s) destroyed [%p]",m_id.c_str(),this);
     RefObject::destroyed();
 }
@@ -3462,6 +3643,14 @@ int YateSIPUDPTransport::process()
 	lock();
 	m_sock = sock;
 	m_local = addr;
+	if (m_capture) {
+	    m_capture->setLocalAddr(addr);
+	    // doesn't matter if we installed if before, install filter checks
+	    if (!m_sock->installFilter(m_capture))
+		Debug(&plugin,DebugNote,
+		"Transport(%s) failed to install capture filter [%p]",
+		m_id.c_str(),this);
+	}
 	m_reason.clear();
 	unlock();
 	setProtoAddr(true);
@@ -4192,6 +4381,14 @@ void YateSIPTCPTransport::resetConnection(Socket* sock)
 	setProtoAddr(true);
 	Debug(&plugin,DebugAll,"Transport(%s) connected local=%s remote=%s [%p]",
 	    m_id.c_str(),m_local.addr().c_str(),m_remote.addr().c_str(),this);
+	if (m_capture) {
+	    m_capture->setLocalAddr(m_local);
+	    m_capture->setRemoteAddr(m_remote);
+	    // doesn't matter if we installed if before, install filter checks
+	    if (!m_sock->installFilter(m_capture))
+		Debug(&plugin,DebugNote,"Transport(%s)) failed to install capture filter [%p]",
+		    m_id.c_str(),this);
+	}
     }
     // Update party local/remote ip/port
     if (m_party)
@@ -9212,6 +9409,12 @@ bool YateSIPLine::update(const Message& msg)
     chg = change(m_password,msg.getValue(YSTRING("password"))) || chg;
     chg = change(m_domain,msg.getValue(YSTRING("domain"))) || chg;
     chg = change(m_flags,msg.getIntValue(YSTRING("xsip_flags"),-1)) || chg;
+    s_globalMutex.lock();
+    chg = change(m_capture,msg.getBoolValue(YSTRING("capture_filter"),s_captureFilter)) || chg;
+    m_captAgent = msg.getValue(YSTRING("capture_agent"),s_captureAgent);
+    m_captServer = msg.getValue(YSTRING("capture_server"),s_captureServer);
+    m_captZipped = msg.getBoolValue(YSTRING("capture_compress"),s_captureZipped);
+    s_globalMutex.unlock();
     m_trans = msg.getIntValue(YSTRING("xsip_trans_count"),-1);
     m_display = msg.getValue(YSTRING("description"));
     m_interval = msg.getIntValue(YSTRING("interval"),600);
@@ -9761,6 +9964,11 @@ void SIPDriver::initialize()
     s_tcpIdle = tcpIdleInterval(s_cfg.getIntValue("general","tcp_idle",TCP_IDLE_DEF));
     s_tcpKeepalive = s_cfg.getIntValue("general","tcp_keepalive",s_tcpIdle);
     s_tcpKeepaliveFirst = s_cfg.getIntValue("general","tcp_keepalive_first",0,0);
+    // SIP capture parameters
+    s_captureFilter = s_cfg.getBoolValue("general","capture_filter",s_captureFilter);
+    s_captureAgent = s_cfg.getValue("general","capture_agent","sip");
+    s_captureServer = s_cfg.getValue("general","capture_server",s_captureServer);
+    s_captureZipped = s_cfg.getBoolValue("general","capture_compress",s_captureZipped);
     // Mark listeners
     m_endpoint->initializing(true);
     // Setup general listener

@@ -388,6 +388,31 @@
 ; This parameter is applied on reload
 ;warn_no_default_udp_transport=yes
 
+; capture_filter: boolean. Enable global HEP3 capture of SIP packets
+; NOTE: This setting can be overridden by listener settings or by account settings
+; in case of outgoing TCP connections.
+; This setting applies on reload.
+;capture_filter=false
+
+; capture_agent: string, mandatory if capture_filter is set to true. Name of capture agent.
+; NOTE: This setting can be overridden by listener settings or by account settings
+; in case of outgoing TCP connections.
+; This is for internal tracking.
+;capture_agent=
+
+; capture_server: string, mandatory if capture_filter is set to true.
+; Name of HEP3 server where to send packets. The server with this name must be configured
+; in HEP3 module configuration.
+; NOTE: This setting can be overridden by listener settings or by account settings
+; in case of outgoing TCP connections.
+;capture_server=
+
+; capture_compress: boolean. Set to true to compress captured packets.
+; If not set, it will use the HEP server configuration 'compress' configured value.
+; NOTE: This setting can be overridden by listener settings or by account settings
+; in case of outgoing TCP connections.
+;capture_compress=false
+
 
 [options]
 ; Controls the behaviour for SIP options retrieval
@@ -625,3 +650,21 @@
 ; role: string: Role to be set in messages sent by connections using this listener
 ; This parameter is applied on reload
 ;role=
+
+; capture_filter: boolean. Enable HEP3 capture of packets on this listener.
+; NOTE: for outgoing TCP connections, these settings must be made in accfile.conf.
+; This setting applies on reload.
+;capture_filter=false
+
+; capture_agent: string, mandatory if capture_filter is set to true. Name of capture agent
+; This is for internal tracking.
+;capture_agent=
+
+; capture_server: string, mandatory if capture_filter is set to true.
+; Name of HEP3 server where to send packets. The server with this name must be configured
+; in HEP3 module configuration
+;capture_server=
+
+; capture_compress: boolean. Set to true to compress captured packets.
+; If not set, it will use the HEP server configuration 'compress' configured value
+;capture_compress=false
