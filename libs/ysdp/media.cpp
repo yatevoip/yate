@@ -5,7 +5,7 @@
  * SDP media handling
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2023 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -23,16 +23,24 @@
 
 namespace TelEngine {
 
+const TokenDict SDPMedia::s_sdpDir[] = {
+    {"sendrecv", DirBidir},
+    {"sendonly", DirSend},
+    {"recvonly", DirRecv},
+    {"inactive", DirInactive},
+    {0, 0},
+};
+
 /*
  * SDPMedia
  */
 SDPMedia::SDPMedia(const char* media, const char* transport, const char* formats,
     int rport, int lport)
     : NamedList(media),
-    m_audio(true), m_video(false), m_modified(false), m_securable(true),
+    m_audio(true), m_video(false), m_modified(false), m_securable(true), m_haveRfc3833(false),
     m_localChanged(false),
     m_transport(transport), m_formats(formats),
-    m_rfc2833(String::boolText(false))
+    m_lDir(0), m_rDir(0)
 {
     DDebug(DebugAll,"SDPMedia::SDPMedia('%s','%s','%s',%d,%d) [%p]",
 	media,transport,formats,rport,lport,this);
@@ -103,10 +111,10 @@ bool SDPMedia::sameAs(const SDPMedia* other, bool ignorePort, bool checkStarted)
     }
 
     // Check RFC 2833
-    if (m_rfc2833 != m.m_rfc2833) {
+    if (m_rfc2833.payload(m_format) != m.m_rfc2833.payload(m_format)) {
 	XDebug(DebugAll,
-	    "SDPMedia::sameAs(%p) rfc2833=%s other_rfc2833=%s: not matched [%p]",
-	    other,m_rfc2833.c_str(),m.m_rfc2833.c_str(),this);
+	    "SDPMedia::sameAs(%p) format='%s' rfc2833=%d other_rfc2833=%d: not matched [%p]",
+	    other,m_format.c_str(),m_rfc2833.payload(m_format),m.m_rfc2833.payload(m_format),this);
 	return false;
     }
 
@@ -231,6 +239,34 @@ void SDPMedia::crypto(const char* desc, bool remote)
 	m_securable = false;
 }
 
+void SDPMedia::direction(int value, bool remote)
+{
+    int& v = remote ? m_rDir : m_lDir;
+    if (v == value)
+	return;
+    DDebug(DebugAll,"SDPMedia set %s direction %s -> %s [%p]",remote ? "remote" : "local",
+	lookup(v,s_sdpDir),lookup(value,s_sdpDir),this);
+    v = value;
+}
+
+// Retrieve negotiated media direction to be sent to remote or set in RTP
+int SDPMedia::direction(int sessLDir)
+{
+    int dir = m_lDir ? m_lDir : sessLDir;
+    if (!m_rDir || dir)
+	return dir;
+    switch (m_rDir) {
+	case DirBidir:
+	case DirInactive:
+	    return m_rDir;
+	case DirSend:
+	    return DirRecv;
+	case DirRecv:
+	    return DirSend;
+    }
+    return 0;
+}
+
 // Put the list of net media in a parameter list
 void SDPMedia::putMedia(NamedList& msg, bool putPort)
 {
@@ -240,7 +276,7 @@ void SDPMedia::putMedia(NamedList& msg, bool putPort)
     if (mappings())
 	msg.addParam("rtp_mapping" + suffix(),mappings());
     if (isAudio())
-	msg.addParam("rtp_rfc2833",rfc2833());
+	m_rfc2833.put(msg);
     if (putPort)
 	msg.addParam("rtp_port" + suffix(),remotePort());
     if (remoteCrypto())
@@ -261,6 +297,7 @@ void SDPMedia::putMedia(NamedList& msg, bool putPort)
 // Copy RTP related data from old media
 void SDPMedia::keepRtp(const SDPMedia& other)
 {
+    m_haveRfc3833 = other.m_haveRfc3833;
     m_formats = other.m_formats;
     m_format = other.m_format;
     m_rfc2833 = other.m_rfc2833;

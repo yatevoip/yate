@@ -155,6 +155,9 @@
 ; OBSOLETE - please use "enable" in section [options]
 ;options=enable
 
+; update: bool: Enable receiving UPDATE transactions (RFC 3311)
+;update=disable
+
 ; prack: bool: Enable acknowledging provisional 1xx answers (RFC 3262)
 ;prack=disable
 
@@ -247,9 +250,14 @@
 ; Defaults to enable
 ;honor_dtmf_detect=enable
 
-; rfc2833: bool: Offer RFC2833 telephone-event by default
+; rfc2833: bool: Offer RFC2833 telephone-event 8KHz by default
 ; A numeric payload >= 96 can be provided
 ;rfc2833=yes
+
+; rfc2833_RATE: bool: Offer RFC2833 telephone-event for specific rate (non 8KHz) by default
+; A numeric payload >= 96 can be provided
+; Supported rates (parameters): rfc2833_16000, rfc2833_32000
+;rfc2833_RATE=yes
 
 ; privacy: bool: Process and generate privacy related SIP headers
 ;privacy=disable
@@ -259,6 +267,9 @@
 
 ; forward_sdp: bool: Include the raw SDP body to be used as-is for forwarding RTP
 ;forward_sdp=disable
+
+; forward_gpmd: bool: Propagate GPMD even when not forwarding RTP
+;forward_gpmd=disable
 
 ; rtp_start: bool: Start RTP when sending 200 on incoming instead of receiving ACK
 ;rtp_start=disable
@@ -370,11 +381,35 @@
 ; If set this parameter must be less than 'tcp_keepalive'
 ;tcp_keepalive_first=0
 
+; ssdp_prefix: string: Prefix to use when handling SDP session level parameters
+; This parameter is used when setting them in yate messages or handling them from there
+; This parameter is applied on reload
+; Prefix used to set parsed SDP: <ssdp_prefix>_ (default: ssdp_)
+; Prefix used to update from yate messages: o<ssdp_prefix>_ (default: ossdp_)
+; When updated from yate messages the prefix must be set in 'ossdp-prefix' message parameter
+;ssdp_prefix=ssdp
+
 ; initial_headers: boolean: Put all headers from initial requests in yate message
 ; Handled for incoming channel preroute, user (un)register and messages sent on SIP
 ;  requests received outside a dialog
 ; This parameter is applied on reload
 ;initial_headers=no
+
+; reinvite_wait_initial: boolean: Wait for answered initial transaction termination when need to send
+;  a re-INVITE and initial transaction was not terminated
+; Applicable for the inbound call leg
+; This parameter is handled when answer (200 OK) was sent to initial transaction
+; If enabled the module will not send an UPDATE even if supported by remote
+; This parameter can be overridden from routing
+; This parameter is applied on reload
+;reinvite_wait_initial=no
+
+; mixed_provisional: boolean: Accept mixed (non)reliable provisional responses to initial transaction
+; When enabled (default) the dialog will accept non reliable provisional messages
+;  after receiving a reliable one
+; This parameter can be overridden from routing
+; This parameter is applied on reload
+;mixed_provisional=yes
 
 ; warn_bind_fail_delay: integer/string: Delay failed to bind debug message
 ; This parameter may be used when listener is going to bind on an IP which may become

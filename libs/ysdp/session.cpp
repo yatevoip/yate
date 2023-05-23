@@ -5,7 +5,7 @@
  * SDP media handling
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2023 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -31,7 +31,9 @@ SDPSession::SDPSession(SDPParser* parser)
       m_rtpForward(false), m_sdpForward(parser->sdpForward()), m_rtpMedia(0),
       m_sdpSession(0), m_sdpVersion(0), m_sdpHash(YSTRING_INIT_HASH),
       m_secure(m_parser->m_secure), m_rfc2833(m_parser->m_rfc2833),
-      m_ipv6(false), m_amrExtra(""), m_enabler(0), m_ptr(0)
+      m_ipv6(false), m_gpmd(parser->m_gpmd),
+      m_amrExtra(""), m_parsedParams(0), m_createSdpParams(""),
+      m_enabler(0), m_ptr(0)
 {
     setSdpDebug();
 }
@@ -40,14 +42,17 @@ SDPSession::SDPSession(SDPParser* parser, NamedList& params)
     : m_parser(parser), m_mediaStatus(MediaMissing),
       m_rtpForward(false), m_sdpForward(parser->sdpForward()), m_rtpMedia(0),
       m_sdpSession(0), m_sdpVersion(0), m_sdpHash(YSTRING_INIT_HASH),
-      m_ipv6(false), m_amrExtra(""), m_enabler(0), m_ptr(0)
+      m_ipv6(false), m_gpmd(false),
+      m_amrExtra(""), m_parsedParams(0), m_createSdpParams(""),
+      m_enabler(0), m_ptr(0)
 {
     setSdpDebug();
-    m_rtpForward = params.getBoolValue("rtp_forward");
+    m_rtpForward = params.getBoolValue(YSTRING("rtp_forward"));
     m_sdpForward = params.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
-    m_secure = params.getBoolValue("secure",parser->m_secure);
+    m_secure = params.getBoolValue(YSTRING("secure"),parser->m_secure);
+    m_gpmd = params.getBoolValue(YSTRING("forward_gpmd"),parser->m_gpmd);
     m_rfc2833 = parser->m_rfc2833;
-    setRfc2833(params.getParam("rfc2833"));
+    setRfc2833(params,false);
 }
 
 SDPSession::~SDPSession()
@@ -91,8 +96,15 @@ bool SDPSession::setMedia(ObjList* media, bool preserveExisting)
 }
 
 // Put the list of net media in a parameter list
-void SDPSession::putMedia(NamedList& msg, ObjList* mList, bool putPort)
+void SDPSession::putMedia(NamedList& msg, ObjList* mList, bool putPort, const NamedList* sessParams)
 {
+    if (sessParams) {
+	const char* prefix = sessParams->safe("ssdp_");
+	for (ObjList* o = sessParams->paramList()->skipNull(); o; o = o->skipNext()) {
+	    const NamedString* ns = static_cast<const NamedString*>(o->get());
+	    msg.addParam(prefix + ns->name(),*ns);
+	}
+    }
     if (!mList)
 	return;
     bool audio = false;
@@ -110,15 +122,19 @@ void SDPSession::putMedia(NamedList& msg, ObjList* mList, bool putPort)
 }
 
 // Update the RFC 2833 availability and payload
-void SDPSession::setRfc2833(const String& value)
+void SDPSession::setRfc2833(const String& value, int rate)
 {
-    if (value.toBoolean(true)) {
-	m_rfc2833 = value.toInteger(m_parser->m_rfc2833);
-	if (m_rfc2833 < 96 || m_rfc2833 > 127)
-	    m_rfc2833 = value.toBoolean(false) ? 101 : m_parser->m_rfc2833;
-    }
-    else
-	m_rfc2833 = -1;
+    m_rfc2833.update(rate,value,m_parser->m_rfc2833);
+}
+
+// Update the RFC 2833 availability and payload
+void SDPSession::setRfc2833(const NamedList& params, bool force)
+{
+    m_rfc2833.update(params,m_parser->m_rfc2833,force);
+#ifdef DEBUG
+    String tmp;
+    TraceDebug(m_traceId,m_enabler,DebugAll,"Updated RFC 2833: %s [%p]",m_rfc2833.dump(tmp).c_str(),m_ptr);
+#endif
 }
 
 // Build and dispatch a chan.rtp message for a given media. Update media on success
@@ -147,6 +163,7 @@ bool SDPSession::dispatchRtp(SDPMedia* media, const char* addr, bool start,
 	if (!sdpPrefix.endsWith("_"))
 	    sdpPrefix += "_";
 	unsigned int n = m->length();
+	int dir = SDPMedia::DirUnknown;
 	for (unsigned int j = 0; j < n; j++) {
 	    const NamedString* param = m->getParam(j);
 	    if (!param)
@@ -157,8 +174,10 @@ bool SDPSession::dispatchRtp(SDPMedia* media, const char* addr, bool start,
 		    "Updating (from RTP message) %s parameter '%s' to '%s' [%p]",
 		    media->c_str(),tmp.c_str(),param->c_str(),this);
 	        media->parameter(tmp,*param,false);
+		SDPMedia::setDirection(dir,tmp);
 	    }
 	}
+	media->direction(dir,false);
     }
     if (m_secure) {
 	int tag = m->getIntValue("crypto_tag",1);
@@ -225,6 +244,7 @@ bool SDPSession::updateSDP(const NamedList& params, bool defaults)
     DDebug(m_enabler,DebugAll,"SDPSession::updateSdp('%s',%s) [%p]",
 	params.c_str(),String::boolText(defaults),m_ptr);
     const char* sdpPrefix = params.getValue("osdp-prefix","osdp");
+    updateSessionParams(params);
     ObjList* lst = 0;
     unsigned int n = params.length();
     String defFormats;
@@ -309,6 +329,7 @@ bool SDPSession::updateRtpSDP(const NamedList& params)
     String addr;
     ObjList* tmp = updateRtpSDP(params,addr,m_rtpMedia);
     if (tmp) {
+	updateSessionParams(params);
 	bool chg = (m_rtpLocalAddr != addr);
 	m_rtpLocalAddr = addr;
 	return setMedia(tmp) || chg;
@@ -387,21 +408,21 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
     sdp->addLine("t","0 0");
 
     Lock lock(m_parser);
+    addSdpParams(sdp,m_createSdpParams);
+    int sessDir = 0;
+    // TODO: Add session level direction
     bool defcodecs = m_parser->m_codecs.getBoolValue("default",true);
     for (ObjList* ml = mList->skipNull(); ml; ml = ml->skipNext()) {
 	SDPMedia* m = static_cast<SDPMedia*>(ml->get());
-	int rfc2833 = 0;
-	if ((m_rfc2833 >= 0) && m->isAudio()) {
+	Rfc2833 rfc2833;
+	if (m->isAudio()) {
 	    if (!m_rtpForward) {
-		rfc2833 = m->rfc2833().toInteger(m_rfc2833);
-		if (rfc2833 < 96 || rfc2833 > 127)
-		    rfc2833 = 101;
+		const Rfc2833& mr = m->rfc2833();
+		for (int i = 0; i < Rfc2833::RateCount; ++i)
+		    rfc2833[i] = (mr[i] >= 0) ? mr[i] : m_rfc2833[i];
 	    }
-	    else if (m->rfc2833().toBoolean(true)) {
-		rfc2833 = m->rfc2833().toInteger();
-		if (rfc2833 < 96 || rfc2833 > 127)
-		    rfc2833 = 0;
-	    }
+	    else
+		rfc2833 = m->rfc2833();
 	}
 	String mline(m->fmtList());
 	ObjList* l = mline.split(',',false);
@@ -413,6 +434,7 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 	String frm;
 	int ptime = 0;
 	ObjList* f = l;
+	Rfc2833 rfc2833Send;
 	for (; f; f = f->next()) {
 	    const String* s = static_cast<const String*>(f->get());
 	    if (s) {
@@ -467,7 +489,7 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 			}
 			// allocate free and non-standard is possible
 			for (pload = 96; pload < 127; pload++) {
-			    if (pload == rfc2833)
+			    if (rfc2833.includes(pload))
 				continue;
 			    if (lookup(pload,SDPParser::s_rtpmap))
 				continue;
@@ -480,7 +502,7 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 			    break;
 			// none free, allocate from "standard" ones too
 			for (pload = 96; pload < 127; pload++) {
-			    if (pload == rfc2833)
+			    if (rfc2833.includes(pload))
 				continue;
 			    if ((bmap & (1 << (pload - 96))) == 0) {
 				payload = pload;
@@ -500,6 +522,12 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 			defcode = payload;
 		    const char* map = lookup(defcode,SDPParser::s_rtpmap);
 		    if (map && m_parser->m_codecs.getBoolValue(*s,defcodecs && DataTranslator::canConvert(*s))) {
+			// Update RFC 2833 support to advertise
+			if (m->isAudio()) {
+			    int r = Rfc2833::fmtRate(*s);
+			    if (r < Rfc2833::RateCount)
+				rfc2833Send[r] = rfc2833[r];
+			}
 			frm << " " << payload;
 			String* temp = new String("rtpmap:");
 			*temp << payload << " " << map;
@@ -536,7 +564,7 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 			    setFmtpLine(temp,payload,*fmtp);
 			if (temp)
 			    dest = dest->append(temp);
-			if (mediaList) {
+			if (mediaList || m_gpmd) {
 			    // RTP forward propagates General Purpose Media Descriptor
 			    const String* gpmd = m->getParam("gpmd:" + *s);
 			    if (gpmd) {
@@ -552,12 +580,15 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 	TelEngine::destruct(l);
 	TelEngine::destruct(map);
 
-	if (rfc2833 && frm) {
-	    // claim to support telephone events
-	    frm << " " << rfc2833;
-	    String* s = new String;
-	    *s << "rtpmap:" << rfc2833 << " telephone-event/8000";
-	    dest = dest->append(s);
+	if (frm && m->isAudio()) {
+	    for (int i = 0; i < Rfc2833::RateCount; ++i) {
+		if (rfc2833Send[i] < 0)
+		    continue;
+		frm << " " << rfc2833Send[i];
+		String* s = new String;
+		s->printf("rtpmap:%d telephone-event/%s",rfc2833Send[i],Rfc2833::rateValue(i).c_str());
+		dest = dest->append(s);
+	    }
 	}
 
 	if (frm.null()) {
@@ -584,26 +615,9 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 
 	sdp->addLine("m",mline + frm);
 	bool enc = false;
-	if (m->isModified()) {
-	    unsigned int n = m->length();
-	    for (unsigned int i = 0; i < n; i++) {
-		const NamedString* param = m->getParam(i);
-		if (param && (param->name().find(':') < 0)) {
-		    const char* type = "a";
-		    String tmp = param->name();
-		    if (tmp.startSkip("BW-",false)) {
-			if (!tmp)
-			    continue;
-			type = "b";
-		    }
-		    else
-			enc = enc || (tmp == "encryption");
-		    if (*param)
-			tmp << ":" << *param;
-		    sdp->addLine(type,tmp);
-		}
-	    }
-	}
+	bool addedDir = false;
+	if (m->isModified())
+	    addSdpParams(sdp,*m,&enc,&addedDir);
 	for (f = rtpmap.skipNull(); f; f = f->skipNext()) {
 	    String* s = static_cast<String*>(f->get());
 	    if (s)
@@ -613,6 +627,11 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 	    sdp->addLine("a","crypto:" + m->localCrypto());
 	    if (!enc)
 		sdp->addLine("a","encryption:optional");
+	}
+	if (!addedDir) {
+	    const char* dir = lookup(m->direction(sessDir),SDPMedia::s_sdpDir);
+	    if (dir)
+		sdp->addLine("a",dir);
 	}
     }
     // increment version if body hash changed
@@ -655,6 +674,7 @@ MimeSdpBody* SDPSession::createPasstroughSDP(NamedList& msg, bool update,
 	msg.setParam("rtp_forward","accepted");
 	return new MimeSdpBody("application/sdp",raw->safe(),raw->length());
     }
+    updateSessionParams(msg);
     String addr;
     ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr);
     if (!lst)
@@ -813,7 +833,7 @@ bool SDPSession::addRtpParams(NamedList& msg, const String& natAddr,
 	    SDPMedia* m = static_cast<SDPMedia*>(o->get());
 	    msg.addParam("rtp_port" + m->suffix(),m->remotePort());
 	    if (m->isAudio())
-		msg.addParam("rtp_rfc2833",m->rfc2833());
+		m->rfc2833().put(msg);
 	}
 	addSdpParams(msg,body);
 	return true;
@@ -836,8 +856,11 @@ void SDPSession::resetSdp(bool all)
     m_host.clear();
     if (all) {
 	m_secure = m_parser->secure();
+	m_gpmd = m_parser->gpmd();
 	m_rfc2833 = m_parser->rfc2833();
     }
+    setSessionParams(0);
+    m_createSdpParams.clearParams();
 }
 
 // Build a populated chan.rtp message
@@ -864,7 +887,11 @@ Message* SDPSession::buildChanRtp(SDPMedia* media, const char* addr, bool start,
 	int payload = SDPMedia::payloadMapping(media->mappings(),media->format());
 	if (payload >= 0)
 	    m->addParam("payload",String(payload));
-	m->addParam("evpayload",media->rfc2833());
+	int evpayload = media->selectRfc2833(media->format());
+	if (evpayload >= 0)
+	    m->addParam("evpayload",String(evpayload));
+	else
+	    m->addParam("evpayload",String::boolText(false));
     }
     if (m_secure) {
 	if (media->remoteCrypto()) {
@@ -970,20 +997,32 @@ ObjList* SDPSession::updateRtpSDP(const NamedList& params, String& rtpAddr, ObjL
 	    rtp = new SDPMedia(tmp,trans,fmts,-1,port);
 	    append = true;
 	}
+	int dir = SDPMedia::DirUnknown;
 	if (sdpPrefix) {
 	    for (unsigned int j = 0; j < n; j++) {
 		const NamedString* param = params.getParam(j);
 		if (!param)
 		    continue;
 		tmp = param->name();
-		if (tmp.startSkip(sdpPrefix + rtp->suffix() + "_",false) && (tmp.find('_') < 0))
+		if (tmp.startSkip(sdpPrefix + rtp->suffix() + "_",false) && (tmp.find('_') < 0)) {
 		    rtp->parameter(tmp,*param,append);
+		    SDPMedia::setDirection(dir,tmp);
+		}
 	    }
 	}
 	rtp->mappings(params.getValue("rtp_mapping" + rtp->suffix()));
-	if (audio)
-	    rtp->rfc2833(params.getIntValue("rtp_rfc2833",-1));
+	if (audio) {
+	    Rfc2833 rfc2833;
+	    for (int i = 0; i < Rfc2833::RateCount; ++i) {
+		if (i == Rfc2833::Rate8khz)
+		    rfc2833[i] = params.getIntValue(YSTRING("rtp_rfc2833"),-1);
+		else
+		    rfc2833[i] = params.getIntValue("rtp_rfc2833_" + Rfc2833::rateValue(i),-1);
+	    }
+	    rtp->rfc2833(rfc2833);
+	}
 	rtp->crypto(params.getValue("crypto" + rtp->suffix()),false);
+	rtp->direction(dir,false);
 	if (!lst)
 	    lst = new ObjList;
 	lst->append(rtp);
@@ -1055,6 +1094,66 @@ void SDPSession::setFormatsExtra(const NamedList& list, bool out)
     }
 }
 
+// Parse a received SDP body, process session level parameters.
+NamedList* SDPSession::parseSessionParams(const MimeSdpBody* sdp)
+{
+    NamedList* nl = 0;
+    for (const ObjList* o = (sdp ? sdp->lines().skipNull() : 0); o; o = o->skipNext()) {
+	const NamedString* l = static_cast<const NamedString*>(o->get());
+	if (l->name() == YSTRING("m"))
+	    break;
+	const char* pref = 0;
+	if (l->name() == YSTRING("b"))
+	    pref = "BW-";
+	else if (l->name() != YSTRING("a"))
+	    continue;
+	NamedString* ns = 0;
+	int pos = l->find(':');
+	if (pos >= 0)
+	    ns = new NamedString(pref + l->substr(0,pos),l->substr(pos + 1));
+	else
+	    ns = new NamedString(pref + *l);
+	XDebug(m_enabler,DebugAll,"Parsed sess SDP param %s='%s' [%p]",
+	    ns->name().c_str(),ns->safe(),m_ptr);
+	if (!nl) {
+	    Lock lck(m_parser);
+	    String pref = m_parser->m_ssdpParam;
+	    if (!pref)
+		break;
+	    nl = new NamedList(pref + "_");
+	}
+	nl->addParam(ns);
+    }
+    return nl;
+}
+
+// Replace SDP sesison 
+void SDPSession::updateSessionParams(const NamedList& nl)
+{
+    String pref;
+    Lock lck(m_parser);
+    if (m_parser->m_ssdpParam)
+	pref = "o" + m_parser->m_ssdpParam;
+    lck.drop();
+    pref = nl.getValue(YSTRING("ossdp-prefix"),pref);
+    XDebug(m_enabler,DebugAll,"updateSessionParams('%s') pref='%s' [%p]",
+	nl.c_str(),pref.c_str(),m_ptr);
+    if (!pref)
+	return;
+    pref << "_";
+    m_createSdpParams.clearParams();
+    int pLen = pref.length();
+    for (ObjList* o = nl.paramList()->skipNull(); o; o = o->skipNext()) {
+	const NamedString* p = static_cast<const NamedString*>(o->get());
+	if (p->name().startsWith(pref) && p->name().rfind('_') < pLen) {
+	    NamedString* ns = new NamedString(p->name().substr(pLen),*p);
+	    m_createSdpParams.addParam(ns);
+	    XDebug(m_enabler,DebugAll,"Added sess create SDP param %s='%s' [%p]",
+		ns->name().c_str(),ns->safe(),m_ptr);
+	}
+    }
+}
+
 // Add extra AMR params to fmtp line
 void SDPSession::addFmtpAmrExtra(String& buf, const String* fmtp)
 {
@@ -1092,6 +1191,32 @@ void SDPSession::addFmtpAmrExtra(String& buf, const String* fmtp)
     buf.append(m_amrExtra,";");
     buf.append(l,";");
     TelEngine::destruct(l);
+}
+
+// Add session or media parameters
+void SDPSession::addSdpParams(MimeSdpBody* sdp, const NamedList& params, bool* enc, bool* dir)
+{
+    for (ObjList* o = params.paramList()->skipNull(); o; o = o->skipNext()) {
+	const NamedString* p = static_cast<const NamedString*>(o->get());
+	if (p->name().find(':') >= 0)
+	    continue;
+	const char* type = "a";
+	String tmp = p->name();
+	if (tmp.startSkip("BW-",false)) {
+	    if (!tmp)
+		continue;
+	    type = "b";
+	}
+	else {
+	    if (dir)
+		*dir = *dir || lookup(tmp,SDPMedia::s_sdpDir);
+	    if (enc)
+		*enc = *enc || (tmp == YSTRING("encryption"));
+	}
+	if (*p)
+	    tmp << ":" << *p;
+	sdp->addLine(type,tmp);
+    }
 }
 
 };   // namespace TelEngine

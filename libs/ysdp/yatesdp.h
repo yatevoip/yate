@@ -5,7 +5,7 @@
  * SDP media handling
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2023 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -55,12 +55,155 @@ class SDPSession;
 class SDPParser;
 
 /**
+ * This class holds RFC 2833 payloads for known audio rates
+ * @short RFC 2833 payloads for known audio rates
+ */
+class YSDP_API Rfc2833
+{
+public:
+    /**
+     * Suported (known) rates
+     */
+    enum Rate {
+	Rate8khz = 0,
+	Rate16khz,
+	Rate32khz,
+	RateCount,
+    };
+
+    /**
+     * Constructor
+     */
+    inline Rfc2833()
+	{ set(); }
+
+    /**
+     * Check if a payload is present in the list
+     * @param payload Payload to check
+     */
+    inline bool includes(int payload) const {
+	    for (int i = 0; i < RateCount; ++i)
+		if (m_payloads[i] == payload)
+		    return true;
+	    return false;
+	}
+	
+    /**
+     * Select RFC 2833 payload for given media format
+     * @param fmt Format internal name
+     * @return Payload value, negative if not available
+     */
+    inline int payload(const String& fmt) const {
+	    int r = fmtRate(fmt);
+	    return r < RateCount ? m_payloads[r] : -1;
+	}
+
+    /**
+     * Replace all values
+     * @param other Optional values to replace with. Reset if not present
+     */
+    inline void set(const Rfc2833* other = 0) {
+	    for (int i = 0; i < RateCount; ++i)
+		m_payloads[i] = other ? (*other)[i] : -1;
+	}
+
+    /**
+     * Update payloads
+     * @param params Parameters list
+     * @param defaults Payload list with default values
+     * @param force True to force updating if a needed parameter is not present
+     * @param param Parameter name. defaults to "rfc2833"
+     */
+    void update(const NamedList& params, const Rfc2833& defaults, bool force = true,
+	const String& param = String::empty());
+
+    /**
+     * Update payload for specific rate
+     * @param value Payload
+     * @param rate Rate value
+     * @param defaults Payload list with default values
+     */
+    void update(int rate, const String& value, const Rfc2833& defaults);
+
+    /**
+     * Put RFC 2833 parameters in a parameter list
+     * @param params Destination list
+     * @param param Parameter name. Defaults to "rtp_rfc2833"
+     */
+    void put(NamedList& params, const String& param = String::empty()) const;
+
+    inline int operator[](int index) const
+	{ return m_payloads[index]; }
+
+    inline int& operator[](int index)
+	{ return m_payloads[index]; }
+
+    /**
+     * Assignment operator
+     */
+    inline Rfc2833& operator=(const Rfc2833& other)
+	{ set(&other); return *this; }
+
+    /**
+     * Dump (append) payloads to destination string
+     * Format: rate=payload[rate1=payload1...],
+     * @param buf Destination string
+     * @return Destination string
+     */
+    String& dump(String& buf) const;
+
+    /**
+     * Select RFC 2833 rate for given media format
+     * @param fmt Format internal name
+     * @return Rate value as enumeration
+     */
+    static int fmtRate(const String& fmt);
+
+    /**
+     * Retrieve rate enumeration value from rate value
+     * @param s Rate value
+     * @return Rate as enumeration, RateCount if not found
+     */
+    static inline int rate(const String& s) {
+	    for (int r = 0; r < RateCount; ++r)
+		if (s_rates[r] == s)
+		    return r;
+	    return RateCount;
+	}
+
+    /**
+     * Retrieve rate value from rate enumeration value
+     * @param index Rate enumeration index
+     * @return Rate name, empty string if not found
+     */
+    static inline const String& rateValue(int index)
+	{ return index < RateCount ? s_rates[index] : String::empty(); }
+
+protected:
+    static const String s_rates[RateCount];
+
+    int m_payloads[RateCount];
+};
+
+
+/**
  * This class holds a single SDP media description
  * @short SDP media description
  */
 class YSDP_API SDPMedia : public NamedList
 {
 public:
+    /**
+     * RTP session/media direction
+     */
+    enum Direction {
+	DirUnknown = 0,
+	DirRecv = 1,
+	DirSend = 2,
+	DirBidir = 3,
+	DirInactive = 4,
+    };
+
     /**
      * Constructor
      * @param media Media type name
@@ -176,23 +319,35 @@ public:
 	{ if (newMap) m_mappings = newMap; }
 
     /**
-     * Retrieve RFC2833 status or payload of this media
-     * @return RFC2833 status or payload of this media
+     * Retrieve RFC 2833 payloads of this media
+     * @return RFC 2833 payloads of this media
      */
-    inline const String& rfc2833() const
+    inline const Rfc2833& rfc2833() const
 	{ return m_rfc2833; }
 
     /**
-     * Set RFC2833 status or payload of this media
-     * @param payload SDP numeric payload to set.
-     *  Set it to a negative value to reset RFC2833
+     * Set RFC 2833 payloads of this media
+     * @param values SDP RFC 2833 payloads to set
      */
-    inline void rfc2833(int payload)
-	{
-	    if (payload >= 0)
-		m_rfc2833 = payload;
-	    else
-		m_rfc2833 = String::boolText(false);
+    inline void rfc2833(const Rfc2833& values)
+	{ m_rfc2833 = values; }
+
+    /**
+     * Check if RFC 2833 was selected for this media
+     * @return True if RFC 2833 was selected for this media, false otherwise
+     */
+    inline bool haveRfc2833() const
+	{ return m_haveRfc3833; }
+
+    /**
+     * Select RFC 2833 payload for given media format
+     * @param fmt Format internal name
+     * @return Payload value, negative if not available
+     */
+    inline int selectRfc2833(const String& fmt) {
+	    int rVal = m_rfc2833.payload(fmt);
+	    m_haveRfc3833 = (rVal >= 0);
+	    return rVal;
 	}
 
     /**
@@ -287,6 +442,20 @@ public:
     void crypto(const char* desc, bool remote);
 
     /**
+     * Set media direction
+     * @param value New direction
+     * @param remote True to set the remote direction, false to set the local one
+     */
+    void direction(int value, bool remote);
+
+    /**
+     * Retrieve negotiated media direction to be sent to remote
+     * @param sessLDir SDP session level local direction, if known
+     * @return Media direction
+     */
+    int direction(int sessLDir = 0);
+
+    /**
      * Put this net media in a parameter list
      * @param msg Destination list
      * @param putPort True to add remote media port
@@ -300,6 +469,17 @@ public:
     void keepRtp(const SDPMedia& other);
 
     /**
+     * Retrieve direction if known
+     * @param dir Destination variable to set the direction in
+     * @param name Direction name
+     */
+    static inline void setDirection(int& dir, const char* name) {
+	int d = lookup(name,s_sdpDir);
+	if (d != DirUnknown)
+	    dir = d;
+    }
+
+    /**
      * Retrieve format mapping to payload
      * @param mappings Mappings list
      * @param fmt Format name
@@ -307,11 +487,17 @@ public:
      */
     static int payloadMapping(const String& mappings, const String& fmt);
 
+    /**
+     * SDP media direction dictionary
+     */
+    static const TokenDict s_sdpDir[];
+
 private:
     bool m_audio;
     bool m_video;
     bool m_modified;
     bool m_securable;
+    bool m_haveRfc3833;
     // local rtp data changed flag
     bool m_localChanged;
     // suffix used for this type
@@ -330,12 +516,15 @@ private:
     String m_mappings;
     // local media port
     String m_lPort;
-    // payload for telephone/event
-    String m_rfc2833;
+    // payloads for telephone/event
+    Rfc2833 m_rfc2833;
     // remote security descriptor
     String m_rCrypto;
     // local security descriptor
     String m_lCrypto;
+    // Local / remote media direction
+    int m_lDir;
+    int m_rDir;
 };
 
 
@@ -401,8 +590,10 @@ public:
      * @param msg Destination list
      * @param media List of SDP media information
      * @param putPort True to add the media port
+     * @param sessParams Optional session level SDP parameters
      */
-    static void putMedia(NamedList& msg, ObjList* media, bool putPort = true);
+    static void putMedia(NamedList& msg, ObjList* media, bool putPort = true,
+	const NamedList* sessParams = 0);
 
     /**
      * Put session media parameters into a list of parameters
@@ -410,7 +601,7 @@ public:
      * @param putPort True to add the media port
      */
     inline void putMedia(NamedList& msg, bool putPort = true)
-	{ putMedia(msg,m_rtpMedia,putPort); }
+	{ putMedia(msg,m_rtpMedia,putPort,m_parsedParams); }
 
     /**
      * Retrieve a single media description
@@ -423,15 +614,16 @@ public:
     /**
      * Update the RFC 2833 availability and payload
      * @param value String to get payload or availability
+     * @param rate Rate to set
      */
-    void setRfc2833(const String& value);
+    void setRfc2833(const String& value, int rate = Rfc2833::Rate8khz);
 
     /**
      * Update the RFC 2833 availability and payload
-     * @param value Pointer to string to get payload or availability
+     * @param params Parameters list
+     * @param force Force update even if needed parameters are not present
      */
-    inline void setRfc2833(const String* value)
-	{ if (value) setRfc2833(*value); }
+    void setRfc2833(const NamedList& params, bool force);
 
     /**
      * Build and dispatch a chan.rtp message for a given media. Update media on success
@@ -656,6 +848,37 @@ protected:
      */
     void setFormatsExtra(const NamedList& list, bool out);
 
+    /**
+     * Parse a received SDP body, process session level parameters
+     * @param sdp Pointer to received SDP body
+     * @return List with handled session level parameters, may be NULL
+     */
+    NamedList* parseSessionParams(const MimeSdpBody* sdp);
+
+    /**
+     * Replace parsed SDP session level parameters
+     * Consume receveived pointer
+     * @param params Parsed SDP session params
+     */
+    inline void setSessionParams(NamedList* params) {
+	    TelEngine::destruct(m_parsedParams);
+	    m_parsedParams = params;
+	}
+
+    /**
+     * Parse a received SDP body, process session level parameters.
+     * Replace 
+     * @param sdp Pointer to received SDP body
+     */
+    inline void processSessionParams(const MimeSdpBody* sdp)
+	{ setSessionParams(parseSessionParams(sdp)); }
+
+    /**
+     * Update SDP session level parameters to be used when building SDP
+     * @param params Parameters list
+     */
+    void updateSessionParams(const NamedList& params);
+
     SDPParser* m_parser;
     int m_mediaStatus;
     bool m_rtpForward;                   // Forward RTP flag
@@ -671,13 +894,18 @@ protected:
     unsigned int m_sdpHash;              // SDP content hash
     String m_host;
     bool m_secure;
-    int m_rfc2833;                       // Payload of RFC 2833 for remote party
+    Rfc2833 m_rfc2833;                   // Payloads of RFC 2833 for remote party
     bool m_ipv6;                         // IPv6 support
+    bool m_gpmd;                         // Handle GPMD even if not RTP forwarding
     NamedList m_amrExtra;                // Extra AMR codec parameters
+    NamedList* m_parsedParams;           // Parsed session level parameters
+    NamedList m_createSdpParams;         // Session level parameters used on SDP create
 
 private:
     // Add extra AMR params to fmtp line
     void addFmtpAmrExtra(String& buf, const String* fmtp);
+    // Add session or media parameters when creating SDP
+    void addSdpParams(MimeSdpBody* sdp, const NamedList& params, bool* enc = 0, bool* dir = 0);
 
     DebugEnabler* m_enabler;             // Debug enabler used for output
     void* m_ptr;                         // Pointer to show in debug messages
@@ -701,8 +929,7 @@ public:
      */
     inline SDPParser(const char* dbgName, const char* sessName, const char* fmts = "alaw,mulaw")
 	: Mutex(true,"SDPParser"),
-	  m_rfc2833(101),
-	  m_sdpForward(false), m_secure(false), m_ignorePort(false),
+	  m_sdpForward(false), m_secure(false), m_gpmd(false), m_ignorePort(false),
 	  m_sessionName(sessName), m_audioFormats(fmts),
 	  m_codecs(""), m_hacks("")
 	{ debugName(dbgName); }
@@ -716,10 +943,10 @@ public:
 	{ Lock lock(this); buf = m_audioFormats; }
 
     /**
-     * Get the RFC 2833 offer payload
-     * @return Payload for RFC 2883 telephony events, negative if not offered
+     * Get the RFC 2833 offer payloads
+     * @return Payloads for RFC 2883 telephony events
      */
-    inline int rfc2833() const
+    inline Rfc2833 rfc2833() const
 	{ return m_rfc2833; }
 
     /**
@@ -728,6 +955,13 @@ public:
      */
     inline bool secure() const
 	{ return m_secure; }
+
+    /**
+     * Get the propagate GPMD flag
+     * @return True if session GPMD will be set in SDP when not forwarding
+     */
+    inline bool gpmd() const
+	{ return m_gpmd; }
 
     /**
      * Get the SDP forward flag
@@ -753,10 +987,11 @@ public:
      * @param media Optional expected media type. If not empty this will be the
      *  only media type returned (if found)
      * @param force Force updating formats even if incompatible with old ones
+     * @param handleDir Handle media direction, false to ignore it
      * @return List of SDPMedia objects, may be NULL
      */
     ObjList* parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedia = 0,
-	const String& media = String::empty(), bool force = false);
+	const String& media = String::empty(), bool force = false, bool handleDir = true);
 
     /**
      * Parse a received SDP body, returns NULL if SDP is not present
@@ -768,11 +1003,12 @@ public:
      * @param media Optional expected media type. If not empty this will be the
      *  only media type returned (if found)
      * @param force Force updating formats even if incompatible with old ones
+     * @param handleDir Handle media direction, false to ignore it
      * @return List of SDPMedia objects, may be NULL
      */
     inline ObjList* parse(const MimeSdpBody* sdp, String& addr, ObjList* oldMedia = 0,
-	const String& media = String::empty(), bool force = false)
-	{ return sdp ? parse(*sdp,addr,oldMedia,media,force) : 0; }
+	const String& media = String::empty(), bool force = false, bool handleDir = true)
+	{ return sdp ? parse(*sdp,addr,oldMedia,media,force,handleDir) : 0; }
 
     /**
      * Update configuration. This method should be called after a configuration file is loaded
@@ -793,14 +1029,16 @@ public:
     static const TokenDict s_rtpmap[];
 
 private:
-    int m_rfc2833;                       // RFC 2833 payload offered to remote
+    Rfc2833 m_rfc2833;                   // RFC 2833 payloads offered to remote
     bool m_sdpForward;                   // Include raw SDP for forwarding
     bool m_secure;                       // Offer SRTP
+    bool m_gpmd;                         // Propagate GPMD when not forwarding
     bool m_ignorePort;                   // Ignore port only changes in SDP
     String m_sessionName;
     String m_audioFormats;               // Default audio formats to be advertised to remote party
     NamedList m_codecs;                  // Codecs configuration list
     NamedList m_hacks;                   // Various potentially standard breaking settings
+    String m_ssdpParam;                  // Session level parameters prefix
 };
 
 }; // namespace TelEngine

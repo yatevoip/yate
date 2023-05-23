@@ -5,7 +5,7 @@
  * SDP media handling
  *
  * Yet Another Telephony Engine - a fully featured software PBX and IVR
- * Copyright (C) 2004-2014 Null Team
+ * Copyright (C) 2004-2023 Null Team
  *
  * This software is distributed under multiple licenses;
  * see the COPYING file in the main directory for licensing
@@ -22,6 +22,13 @@
 #include <yatesdp.h>
 
 namespace TelEngine {
+
+// RFC 2833 default payloads
+#define RFC2833_8khz  101
+#define RFC2833_16khz 108
+#define RFC2833_32khz 109
+
+static Rfc2833 s_rfc2833;
 
 /*
  * SDPParser
@@ -60,6 +67,7 @@ const TokenDict SDPParser::s_payloads[] = {
     { "h263-1998",   111 },
     { "h263-2000",   112 },
     { "h264",        114 },
+    { "h265",        116 },
     { "vp8",         113 },
     { "vp9",         115 },
     { "mpv",          32 },
@@ -104,6 +112,7 @@ const TokenDict SDPParser::s_rtpmap[] = {
     { "H263-1998/90000",  111 },
     { "H263-2000/90000",  112 },
     { "H264/90000",       114 },
+    { "H265/90000",       116 },
     { "VP8/90000",        113 },
     { "VP9/90000",        115 },
     { "MPV/90000",         32 },
@@ -133,6 +142,76 @@ static const TokenDict s_sdpFmtParamsCheck[] = {
     { 0,              0 },
 };
 
+
+const String Rfc2833::s_rates[RateCount] = {"8000", "16000", "32000"};
+
+void Rfc2833::update(const NamedList& params, const Rfc2833& defaults, bool force, const String& param)
+{
+    String pref = param.safe("rfc2833");
+    for (int i = 0; i < RateCount; ++i) {
+	const String* p = params.getParam((i == Rate8khz) ? pref : pref + "_" + s_rates[i]);
+	if (p)
+	    update(i,*p,defaults);
+	else if (force)
+	    m_payloads[i] = defaults[i];
+    }
+}
+
+// Update payload for specific rate
+void Rfc2833::update(int rate, const String& value, const Rfc2833& defaults)
+{
+    if (rate >= RateCount)
+	return;
+    if (value.toBoolean(true)) {
+	int val = value.toInteger();
+	if (96 <= val && val <= 127)
+	    m_payloads[rate] = val;
+	else
+	    m_payloads[rate] = defaults[rate];
+    }
+    else
+	m_payloads[rate] = -1;
+}
+
+void Rfc2833::put(NamedList& params, const String& param) const
+{
+    String pref = param.safe("rtp_rfc2833");
+    for (int i = 0; i < RateCount; ++i) {
+	if (m_payloads[i] >= 0) {
+	    if (i == Rate8khz)
+		params.addParam(pref,String(m_payloads[i]));
+	    else
+		params.addParam(pref + "_" + s_rates[i],String(m_payloads[i]));
+	}
+	else if (i == Rate8khz)
+	    params.addParam(pref,String::boolText(false));
+    }
+}
+
+String& Rfc2833::dump(String& buf) const
+{
+    String tmp;
+    for (int i = 0; i < RateCount; ++i) {
+	if (m_payloads[i] >= 0)
+	    tmp.append(s_rates[i] + "=" + String(m_payloads[i]),",");
+    }
+    return buf.append(tmp);
+}
+
+// Select RFC 2833 rate for given media format
+int Rfc2833::fmtRate(const String& fmt)
+{
+    int pos = fmt.find('/');
+    if (pos <= 0)
+	return Rate8khz;
+    int r = rate(fmt.substr(pos + 1));
+    // G722 uses 8KHz
+    if (r != Rate8khz && fmt.substr(0,pos) == YSTRING("g722"))
+	return Rate8khz;
+    return r;
+}
+
+
 // Utility used in SDPParser::parse
 // Retrieve a SDP line 'param<payload>' contents
 // Trim contents spaces
@@ -156,7 +235,7 @@ static inline String& getPayloadLine(String& buf, ObjList& list, int payload, co
 
 // Parse a received SDP body
 ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedia,
-    const String& media, bool force)
+    const String& media, bool force, bool handleDir)
 {
     DDebug(DebugAll,"SDPParser::parse(%p,%s,%p,'%s',%s)",
 	&sdp,addr.c_str(),oldMedia,media.safe(),String::boolText(force));
@@ -176,6 +255,20 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 	    if (tmp == SocketAddr::ipv6NullAddr())
 		tmp.clear();
 	    addr = tmp;
+	}
+    }
+    // Obtain session level direction
+    int sessRDir = 0;
+    if (handleDir) {
+	for (const ObjList* o = sdp.lines().skipNull(); o; o = o->skipNext()) {
+	    const NamedString* l = static_cast<const NamedString*>(o->get());
+	    if (l->name() == YSTRING("m"))
+		break;
+	    if (l->name() != YSTRING("a"))
+		continue;
+	    SDPMedia::setDirection(sessRDir,*l);
+	    if (sessRDir)
+		break;
 	}
     }
     Lock lock(this);
@@ -220,7 +313,9 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 	ObjList* dest = &params;
 	bool first = true;
 	int ptime = 0;
-	int rfc2833 = -1;
+	Rfc2833 rfc2833;
+	Rfc2833 mediaAvailable;
+	int dir = sessRDir;
 	// Remember format related lines
 	ObjList fmtLines;
 	ObjList* fmtA = &fmtLines;
@@ -291,7 +386,9 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 			    continue;
 			}
 			if (line.startsWith("TELEPHONE-EVENT/")) {
-			    rfc2833 = var;
+			    int rate = Rfc2833::rate(line.substr(16));
+			    if (rate < Rfc2833::RateCount)
+				rfc2833[rate] = var;
 			    payload.clear();
 			    continue;
 			}
@@ -323,10 +420,15 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 			int pos = line.find(':');
 			if (pos >= 0)
 			    dest = dest->append(new NamedString(line.substr(0,pos),line.substr(pos+1)));
-			else
+			else {
 			    dest = dest->append(new NamedString(line));
+			    if (handleDir)
+				SDPMedia::setDirection(dir,line);
+			}
 		    }
 		}
+		else if (handleDir)
+		    SDPMedia::setDirection(dir,line);
 	    }
 	    if (var < 0)
 		break;
@@ -432,10 +534,24 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 		    dest = dest->append(new NamedString("fmtp:" + payload,fmtp));
 		if ((payload == "g729") && m_hacks.getBoolValue(YSTRING("g729_annexb"),annexB))
 		    aux << ",g729b";
+		int r = Rfc2833::fmtRate(payload);
+		if (r < Rfc2833::RateCount)
+		    mediaAvailable[r] = 1;
 	    }
 	}
 	fmt += aux;
-	DDebug(this,DebugAll,"Formats '%s' mappings '%s'",fmt.c_str(),mappings.c_str());
+	// Change supported RFC 2833 from available media rates
+	for (int i = 0; i < Rfc2833::RateCount; ++i)
+	    if (mediaAvailable[i] < 0)
+		rfc2833[i] = -1;
+#ifdef DEBUG
+	String extraD;
+	if (type == YSTRING("audio")) {
+	    String tmp;
+	    extraD << " RFC 2833: " << rfc2833.dump(tmp);
+	}
+	DDebug(this,DebugAll,"Formats '%s' mappings '%s'%s",fmt.c_str(),mappings.c_str(),extraD.safe());
+#endif
 	SDPMedia* net = 0;
 	// try to take the media descriptor from the old list
 	if (oldMedia) {
@@ -456,6 +572,7 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 	net->mappings(mappings);
 	net->rfc2833(rfc2833);
 	net->crypto(crypto,true);
+	net->direction(dir,true);
 	if (!lst)
 	    lst = new ObjList;
 	lst->append(net);
@@ -469,7 +586,13 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 // Update configuration
 void SDPParser::initialize(const NamedList* codecs, const NamedList* hacks, const NamedList* general)
 {
+    const NamedList& safeGen = general ? *general : NamedList::empty();
     Lock lock(this);
+    if (s_rfc2833[Rfc2833::Rate8khz] < 0) {
+	s_rfc2833[Rfc2833::Rate8khz] = RFC2833_8khz;
+	s_rfc2833[Rfc2833::Rate16khz] = RFC2833_16khz;
+	s_rfc2833[Rfc2833::Rate32khz] = RFC2833_32khz;
+    }
     m_codecs.clearParams();
     m_hacks.clearParams();
     if (codecs)
@@ -497,20 +620,18 @@ void SDPParser::initialize(const NamedList* codecs, const NamedList* hacks, cons
 	    m_audioFormats.c_str());
     }
     m_ignorePort = m_hacks.getBoolValue("ignore_sdp_port",false);
-    m_rfc2833 = 101;
+    m_rfc2833.update(safeGen,s_rfc2833);
+    String tmp;
+    Debug(this,DebugAll,"Initialized RFC 2833: %s",m_rfc2833.dump(tmp).c_str());
     m_secure = false;
+    m_gpmd = false;
     m_sdpForward = false;
     if (general) {
-	if (general->getBoolValue("rfc2833",true)) {
-	    m_rfc2833 = general->getIntValue("rfc2833",m_rfc2833);
-	    if (m_rfc2833 < 96 || m_rfc2833 > 127)
-		m_rfc2833 = 101;
-	}
-	else
-	    m_rfc2833 = -1;
 	m_secure = general->getBoolValue("secure",m_secure);
+	m_gpmd = general->getBoolValue("forward_gpmd",m_gpmd);
 	m_sdpForward = general->getBoolValue("forward_sdp",m_sdpForward);
     }
+    m_ssdpParam = general ? general->getValue(YSTRING("ssdp_prefix"),"ssdp") : "ssdp";
 }
 
 };   // namespace TelEngine
