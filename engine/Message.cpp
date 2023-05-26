@@ -237,7 +237,7 @@ int Message::commonDecode(const char* str, int offs)
 MessageHandler::MessageHandler(const char* name, unsigned priority,
 	const char* trackName, bool addPriority)
     : String(name),
-      m_trackName(trackName), m_priority(priority),
+      m_trackName(trackName), m_trackNameOnly(trackName), m_priority(priority),
       m_unsafe(0), m_dispatcher(0), m_filter(0), m_counter(0)
 {
     DDebug(DebugAll,"MessageHandler::MessageHandler('%s',%u,'%s',%s) [%p]",
@@ -271,9 +271,12 @@ void MessageHandler::destruct()
 
 void MessageHandler::safeNowInternal()
 {
-    Lock lock(m_dispatcher);
+    WLock lck(m_dispatcher ? &m_dispatcher->handlersLock() : 0);
     // when the unsafe counter reaches zero we're again safe to destroy
     m_unsafe--;
+    if (m_unsafe < 0)
+	Debug(DebugFail,"MessageHandler(%s) unsafe=%d locked=%s dispatcher=(%p) [%p]",
+	    safe(),m_unsafe,String::boolText(lck.locked()),m_dispatcher,this);
 }
 
 bool MessageHandler::receivedInternal(Message& msg)
@@ -315,8 +318,8 @@ bool MessageRelay::receivedInternal(Message& msg)
 
 
 MessageDispatcher::MessageDispatcher(const char* trackParam)
-    : Mutex(false,"MessageDispatcher"),
-      m_hookMutex(false,"PostHooks"),
+    : m_handlersLock("DispatcherHandlers"), m_messagesLock("DispatcherMsgs"), 
+      m_hooksLock("DispatcherHooks"),
       m_msgAppend(&m_messages), m_hookAppend(&m_hooks),
       m_trackParam(trackParam), m_changes(0), m_warnTime(0),
       m_enqueueCount(0), m_dequeueCount(0), m_dispatchCount(0),
@@ -330,9 +333,16 @@ MessageDispatcher::MessageDispatcher(const char* trackParam)
 MessageDispatcher::~MessageDispatcher()
 {
     XDebug(DebugInfo,"MessageDispatcher::~MessageDispatcher() [%p]",this);
-    lock();
     clear();
-    unlock();
+}
+
+void MessageDispatcher::clear()
+{
+    WLock lck(m_handlersLock);
+    m_handlers.clear();
+    lck.acquire(m_hooksLock);
+    m_hookAppend = &m_hooks;
+    m_hooks.clear();
 }
 
 bool MessageDispatcher::install(MessageHandler* handler)
@@ -340,7 +350,7 @@ bool MessageDispatcher::install(MessageHandler* handler)
     DDebug(DebugAll,"MessageDispatcher::install(%p)",handler);
     if (!handler)
 	return false;
-    Lock lock(this);
+    WLock lck(m_handlersLock);
     ObjList *l = m_handlers.find(handler);
     if (l)
 	return false;
@@ -376,7 +386,7 @@ bool MessageDispatcher::install(MessageHandler* handler)
 bool MessageDispatcher::uninstall(MessageHandler* handler)
 {
     DDebug(DebugAll,"MessageDispatcher::uninstall(%p)",handler);
-    lock();
+    WLock lck(m_handlersLock);
     handler = static_cast<MessageHandler *>(m_handlers.remove(handler,false));
     if (handler) {
 	m_changes++;
@@ -385,16 +395,15 @@ bool MessageDispatcher::uninstall(MessageHandler* handler)
 		handler,handler->c_str());
 	    // wait until handler is again safe to destroy
 	    do {
-		unlock();
+		lck.drop();
 		Thread::yield();
-		lock();
+		lck.acquire(m_handlersLock);
 	    } while (handler->m_unsafe > 0);
 	}
 	if (handler->m_unsafe != 0)
 	    Debug(DebugFail,"MessageHandler %p has unsafe=%d",handler,handler->m_unsafe);
 	handler->m_dispatcher = 0;
     }
-    unlock();
     return (handler != 0);
 }
 
@@ -420,7 +429,7 @@ bool MessageDispatcher::dispatch(Message& msg)
     unsigned int hTrackPos = 0;
     bool hTrackTime = m_traceHandlerTime;
     ObjList *l = &m_handlers;
-    Lock mylock(this);
+    RLock lck(m_handlersLock);
     m_dispatchCount++;
     for (; l; l=l->next()) {
 	MessageHandler *h = static_cast<MessageHandler*>(l->get());
@@ -445,7 +454,7 @@ bool MessageDispatcher::dispatch(Message& msg)
 	    }
 	    // mark handler as unsafe to destroy / uninstall
 	    h->m_unsafe++;
-	    mylock.drop();
+	    lck.drop();
 
 	    u_int64_t tm = (m_warnTime || hTrackTime) ? Time::now() : 0;
 
@@ -454,7 +463,7 @@ bool MessageDispatcher::dispatch(Message& msg)
 	    if (tm) {
 		tm = Time::now() - tm;
 		if (m_warnTime && tm > m_warnTime) {
-		    mylock.acquire(this);
+		    lck.acquire(m_handlersLock);
 		    const char* name = (c == m_changes) ? h->trackName().c_str() : 0;
 		    Debug(DebugInfo,"Message '%s' [%p] passed through %p%s%s%s in " FMT64U " usec",
 			msg.c_str(),&msg,h,
@@ -480,7 +489,7 @@ bool MessageDispatcher::dispatch(Message& msg)
 
 	    if (retv && !msg.broadcast())
 		break;
-	    mylock.acquire(this);
+	    lck.acquire(m_handlersLock);
 	    if (c == m_changes)
 		continue;
 	    // the handler list has changed - find again
@@ -509,7 +518,7 @@ bool MessageDispatcher::dispatch(Message& msg)
 		break;
 	}
     }
-    mylock.drop();
+    lck.drop();
     if (counting)
 	Thread::setCurrentObjCounter(msg.getObjCounter());
     msg.dispatched(retv);
@@ -532,7 +541,7 @@ bool MessageDispatcher::dispatch(Message& msg)
 	}
     }
 
-    m_hookMutex.lock();
+    lck.acquire(m_hooksLock);
     if (m_hookHole && !m_hookCount) {
 	// compact the list, remove the holes
 	for (l = &m_hooks; l; l = l->next()) {
@@ -550,16 +559,16 @@ bool MessageDispatcher::dispatch(Message& msg)
     for (l = m_hooks.skipNull(); l; l = l->skipNext()) {
 	RefPointer<MessagePostHook> ph = static_cast<MessagePostHook*>(l->get());
 	if (ph) {
-	    m_hookMutex.unlock();
+	    lck.drop();
 	    if (counting)
 		Thread::setCurrentObjCounter(ph->getObjCounter());
 	    ph->dispatched(msg,retv);
 	    ph = 0;
-	    m_hookMutex.lock();
+	    lck.acquire(m_hooksLock);
 	}
     }
     m_hookCount--;
-    m_hookMutex.unlock();
+    lck.drop();
     if (counting)
 	Thread::setCurrentObjCounter(saved);
 
@@ -568,7 +577,7 @@ bool MessageDispatcher::dispatch(Message& msg)
 
 bool MessageDispatcher::enqueue(Message* msg)
 {
-    Lock lock(this);
+    WLock lck(m_messagesLock);
     if (!msg || m_messages.find(msg))
 	return false;
     if (m_traceTime)
@@ -582,19 +591,17 @@ bool MessageDispatcher::enqueue(Message* msg)
 
 bool MessageDispatcher::dequeueOne()
 {
-    lock();
+    WLock lck(m_messagesLock);
     if (m_messages.next() == m_msgAppend)
 	m_msgAppend = &m_messages;
     Message* msg = static_cast<Message *>(m_messages.remove(false));
-    if (msg) {
-	m_dequeueCount++;
-	uint64_t age = Time::now() - msg->msgTime();
-	if (age < 60000000)
-	    m_msgAvgAge = (3 * m_msgAvgAge + age) >> 2;
-    }
-    unlock();
     if (!msg)
 	return false;
+    m_dequeueCount++;
+    uint64_t age = Time::now() - msg->msgTime();
+    if (age < 60000000)
+	m_msgAvgAge = (3 * m_msgAvgAge + age) >> 2;
+    lck.drop();
     dispatch(*msg);
     msg->destruct();
     return true;
@@ -608,35 +615,35 @@ void MessageDispatcher::dequeue()
 
 unsigned int MessageDispatcher::messageCount()
 {
-    Lock lock(this);
+    RLock lck(m_messagesLock);
     return (unsigned int)(m_enqueueCount - m_dequeueCount);
 }
 
 unsigned int MessageDispatcher::handlerCount()
 {
-    Lock lock(this);
+    RLock lck(m_handlersLock);
     return m_handlers.count();
 }
 
 unsigned int MessageDispatcher::postHookCount()
 {
-    Lock lock(m_hookMutex);
+    RLock lck(m_hooksLock);
     return m_hooks.count();
 }
 
 void MessageDispatcher::getStats(u_int64_t& enqueued, u_int64_t& dequeued, u_int64_t& dispatched, u_int64_t& queueMax)
 {
-    lock();
+    RLock lck(m_messagesLock);
     enqueued = m_enqueueCount;
     dequeued = m_dequeueCount;
-    dispatched = m_dispatchCount;
     queueMax = m_queuedMax;
-    unlock();
+    lck.acquire(m_handlersLock);
+    dispatched = m_dispatchCount;
 }
 
 void MessageDispatcher::setHook(MessagePostHook* hook, bool remove)
 {
-    m_hookMutex.lock();
+    WLock lck(m_hooksLock);
     if (remove) {
 	// zero the hook, we'll compact it later when safe
 	ObjList* l = m_hooks.find(hook);
@@ -647,7 +654,30 @@ void MessageDispatcher::setHook(MessagePostHook* hook, bool remove)
     }
     else
 	m_hookAppend = m_hookAppend->append(hook);
-    m_hookMutex.unlock();
+}
+
+unsigned int MessageDispatcher::fillHandlersInfo(bool byName, const String& match,
+    String* details, unsigned int* total)
+{
+    unsigned int n = 0;
+    unsigned int matched = 0;
+    String tmp;
+    RLock lck(m_handlersLock);
+    for (ObjList* o = m_handlers.skipNull(); o; o = o->skipNext()) {
+	n++;
+	MessageHandler *h = static_cast<MessageHandler*>(o->get());
+	if (!match.matches(byName ? (const String&)(*h): h->trackNameOnly()))
+	    continue;
+	matched++;
+	if (!details)
+	    continue;
+	tmp.printf("%s=%u|%s|%s",h->safe(),h->priority(),h->trackNameOnly().safe(),
+	    h->filter() ? "yes" : "no");
+	details->append(tmp,",");
+    }
+    if (total)
+	*total = n;
+    return matched;
 }
 
 

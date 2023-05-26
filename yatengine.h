@@ -640,12 +640,28 @@ public:
 	{ return m_trackName; }
 
     /**
+     * Retrieve the tracking name of this handler without added priority
+     * @return Name that is to be used in tracking operation
+     */
+    inline const String& trackNameOnly() const
+	{ return m_trackNameOnly; }
+
+    /**
      * Set a new tracking name for this handler.
      * Works only if the handler was not yet inserted into a dispatcher
      * @param name Name that is to be used in tracking operation
      */
-    inline void trackName(const char* name)
-	{ if (!m_dispatcher) m_trackName = name; }
+    inline void trackName(const char* name) {
+	    if (m_dispatcher)
+		return;
+	    m_trackName = name;
+	    String tmp;
+	    tmp << ':' << priority();
+	    if (m_trackName.endsWith(tmp))
+		m_trackNameOnly = m_trackName.substr(0,m_trackName.length() - tmp.length());
+	    else
+		m_trackNameOnly = m_trackName;
+	}
 
     /**
      * Retrive the objects counter associated to this handler
@@ -714,6 +730,7 @@ protected:
 
 private:
     String m_trackName;
+    String m_trackNameOnly;
     unsigned m_priority;
     int m_unsafe;
     MessageDispatcher* m_dispatcher;
@@ -826,7 +843,7 @@ class YATE_API MessagePostHook : public RefObject, public MessageNotifier
  *  messages that are typically dispatched by a separate thread.
  * @short A message dispatching hub
  */
-class YATE_API MessageDispatcher : public GenObject, public Mutex
+class YATE_API MessageDispatcher : public GenObject
 {
     friend class Engine;
     YNOCOPY(MessageDispatcher); // no automatic copies please
@@ -921,8 +938,7 @@ public:
     /**
      * Clear all the message handlers and post-dispatch hooks
      */
-    inline void clear()
-	{ m_handlers.clear(); m_hookAppend = &m_hooks; m_hooks.clear(); }
+    void clear();
 
     /**
      * Check if there is at least one message in the queue
@@ -1000,6 +1016,13 @@ public:
 	{ return usec ? m_msgAvgAge : ((m_msgAvgAge + 500) / 1000); }
 
     /**
+     * Retrieve the handlers list lock object
+     * @return Handlers list lock object reference
+     */
+    inline RWLock& handlersLock()
+	{ return m_handlersLock; }
+
+    /**
      * Retrieve all statistics counters
      * @param enqueued Returns count of enqueued messages
      * @param dequeued Returns count of dequeued messages
@@ -1015,6 +1038,17 @@ public:
      */
     void setHook(MessagePostHook* hook, bool remove = false);
 
+    /**
+     * Fill handlers status info
+     * @param matchName True to match message name, false to match handler trackname
+     * @param match Value to match. May be a regular expression
+     * @param details Optional pointer to string to be filled with details
+     * @param total Optional pointer to data to be filled with total number of handlers
+     * @return The number of matched handlers
+     */
+    unsigned int fillHandlersInfo(bool matchName, const String& match, String* details = 0,
+	unsigned int* total = 0);
+
 protected:
     /**
      * Set the tracked parameter name
@@ -1027,7 +1061,9 @@ private:
     ObjList m_handlers;
     ObjList m_messages;
     ObjList m_hooks;
-    Mutex m_hookMutex;
+    RWLock m_handlersLock;
+    RWLock m_messagesLock;
+    RWLock m_hooksLock;
     ObjList* m_msgAppend;
     ObjList* m_hookAppend;
     String m_trackParam;

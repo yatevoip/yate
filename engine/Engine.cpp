@@ -544,6 +544,29 @@ bool EngineStatusHandler::received(Message &msg)
 		objects(msg.retValue(),details);
 	    return true;
 	}
+	if (sel.startSkip("dispatcher")) {
+	    bool byMsg = sel.startSkip("handlers");
+	    if ((byMsg || sel.startSkip("handlers-trackname")) && sel) {
+		String str;
+		unsigned int count = 0;
+		unsigned int total = 0;
+		MessageDispatcher* d = Engine::dispatcher();
+		if (d) {
+		    if (sel[0] == '^')
+			count = d->fillHandlersInfo(byMsg,Regexp(sel),details ? &str : 0,&total);
+		    else
+			count = d->fillHandlersInfo(byMsg,sel,details ? &str : 0,&total);
+		}
+		msg.retValue()
+		    << "name=dispatcher,type=system,format=Priority|TrackName|Filtered;"
+		    << "handlers=" << total << ",count=" << count;
+		if (details)
+		    msg.retValue() << ';' << str;
+		msg.retValue() << "\r\n";
+		return true;
+	    }
+	    return false;
+	}
 	return false;
     }
     msg.retValue() << "name=engine,type=system";
@@ -651,6 +674,8 @@ static const char s_runpOpt[] = "  runparam name=value\r\n";
 static const char s_runpMsg[] = "Add a new parameter to the Engine's runtime list\r\n";
 static const char s_dispatcherOpt[] = "  dispatcher {trace_msg_time|trace_msg_handler_time} <on|off>\r\n";
 static const char s_dispatcherMsg[] = "Enable or disable dispatcher debugging options\r\n";
+static const char s_dispatcherStatusOpt[] = "  status dispatcher {handlers|handlers-trackname} <match>\r\n";
+static const char s_dispatcherStatusMsg[] = "Show installed handlers by message name or track name. Matching value starting with ^ is handled as basic regular expression\r\n";
 
 // get the base name of a module file
 static String moduleBase(const String& fname)
@@ -753,27 +778,32 @@ void completeModule(String& ret, const String& part, ObjList& mods, bool reload,
 void EngineCommand::doCompletion(Message &msg, const String& partLine, const String& partWord)
 {
     if (partLine.null() || (partLine == YSTRING("help"))) {
-	completeOne(msg.retValue(),"module",partWord);
-	completeOne(msg.retValue(),"events",partWord);
-	completeOne(msg.retValue(),"logview",partWord);
-	completeOne(msg.retValue(),"runparam",partWord);
-	completeOne(msg.retValue(),"dispatcher",partWord);
+	completeOne(msg.retValue(),YSTRING("module"),partWord);
+	completeOne(msg.retValue(),YSTRING("events"),partWord);
+	completeOne(msg.retValue(),YSTRING("logview"),partWord);
+	completeOne(msg.retValue(),YSTRING("runparam"),partWord);
+	completeOne(msg.retValue(),YSTRING("dispatcher"),partWord);
     }
     else if (partLine == YSTRING("status")) {
-	completeOne(msg.retValue(),"engine",partWord);
-	completeOne(msg.retValue(),"objects",partWord);
+	completeOne(msg.retValue(),YSTRING("engine"),partWord);
+	completeOne(msg.retValue(),YSTRING("objects"),partWord);
+	completeOne(msg.retValue(),YSTRING("dispatcher"),partWord);
     }
     else if (partLine == YSTRING("status objects")) {
 	for (ObjList* l = getObjCounters().skipNull();l;l = l->skipNext())
 	    completeOne(msg.retValue(),l->get()->toString(),partWord);
     }
+    else if (partLine == YSTRING("status dispatcher")) {
+	completeOne(msg.retValue(),YSTRING("handlers"),partWord);
+	completeOne(msg.retValue(),YSTRING("handlers-trackname"),partWord);
+    }
     else if (partLine == YSTRING("module")) {
-	completeOne(msg.retValue(),"load",partWord);
+	completeOne(msg.retValue(),YSTRING("load"),partWord);
 	if (!s_nounload) {
-	    completeOne(msg.retValue(),"unload",partWord);
-	    completeOne(msg.retValue(),"reload",partWord);
+	    completeOne(msg.retValue(),YSTRING("unload"),partWord);
+	    completeOne(msg.retValue(),YSTRING("reload"),partWord);
 	}
-	completeOne(msg.retValue(),"list",partWord);
+	completeOne(msg.retValue(),YSTRING("list"),partWord);
     }
     else if (partLine == YSTRING("module load"))
 	completeModule(msg.retValue(),partWord,Engine::self()->m_libs,false);
@@ -798,28 +828,29 @@ void EngineCommand::doCompletion(Message &msg, const String& partLine, const Str
 	    const EngineEventList* e = static_cast<const EngineEventList*>(l->get());
 	    completeOne(msg.retValue(),e->toString(),partWord);
 	}
-	completeOne(msg.retValue(),"log",partWord);
+	completeOne(msg.retValue(),YSTRING("log"),partWord);
 	if (partLine == YSTRING("events"))
-	    completeOne(msg.retValue(),"clear",partWord);
+	    completeOne(msg.retValue(),YSTRING("clear"),partWord);
     }
     else if (partLine == YSTRING("dispatcher")) {
-	completeOne(msg.retValue(),"trace_msg_time",partWord);
-	completeOne(msg.retValue(),"trace_msg_handler_time",partWord);
+	completeOne(msg.retValue(),YSTRING("trace_msg_time"),partWord);
+	completeOne(msg.retValue(),YSTRING("trace_msg_handler_time"),partWord);
     }
     else if ((partLine == YSTRING("dispatcher trace_msg_time"))
 	|| (partLine == YSTRING("dispatcher trace_msg_handler_time"))) {
-	completeOne(msg.retValue(),"on",partWord);
-	completeOne(msg.retValue(),"off",partWord);
+	completeOne(msg.retValue(),YSTRING("on"),partWord);
+	completeOne(msg.retValue(),YSTRING("off"),partWord);
     }
 }
 
 bool EngineCommand::received(Message &msg)
 {
-    String line = msg.getValue("line");
-    if (line.null()) {
+    const String& l = msg[YSTRING("line")];
+    if (!l) {
 	doCompletion(msg,msg.getValue("partline"),msg.getValue("partword"));
 	return false;
     }
+    String line = l;
     if (line.startSkip("control")) {
 	int pos = line.find(' ');
 	String id = line.substr(0,pos).trimBlanks();
@@ -883,17 +914,19 @@ bool EngineCommand::received(Message &msg)
 	    }
 	    return false;
 	}
-	if (line.startSkip("dispatcher trace_msg_time")) {
-	    MessageDispatcher* d = Engine::dispatcher();
-	    if (d)
-		d->traceTime(line.toBoolean());
-	    return 0 != d;
-	}
-	if (line.startSkip("dispatcher trace_msg_handler_time")) {
-	    MessageDispatcher* d = Engine::dispatcher();
-	    if (d)
-		d->traceHandlerTime(line.toBoolean());
-	    return 0 != d;
+	if (line.startSkip("dispatcher")) {
+	    bool traceMsgTime = line.startSkip("trace_msg_time");
+	    if (traceMsgTime || line.startSkip("trace_msg_handler_time")) {
+		MessageDispatcher* d = Engine::dispatcher();
+		if (d) {
+		    if (traceMsgTime)
+			d->traceTime(line.toBoolean());
+		    else
+			d->traceHandlerTime(line.toBoolean());
+		    return true;
+		}
+	    }
+	    return false;
 	}
 	return false;
     }
@@ -974,7 +1007,8 @@ bool EngineHelp::received(Message &msg)
     else if (line == YSTRING("runparam"))
 	msg.retValue() << s_runpOpt << s_runpMsg;
     else if (line == YSTRING("dispatcher"))
-	msg.retValue() << s_dispatcherOpt << s_dispatcherMsg;
+	msg.retValue() << s_dispatcherOpt << s_dispatcherMsg
+	    << s_dispatcherStatusOpt << s_dispatcherStatusMsg;
     else
 	return false;
     return true;
