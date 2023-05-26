@@ -3442,6 +3442,8 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	//   js_props: Boolean. Force Javascript ExpOperation in returned result. Default: true
 	//   autonum: Boolean. Force ExpOperation auto number in returned result. Default: false.
 	//     Ignored if not returning ExpOperation
+	//   autobool: Boolean. Detect booleans, put them in returned result. Default: false.
+	//     Ignored if not returning ExpOperation
 	//   prefix: String. Optional prefix for variables
 	//   skip_prefix: Boolean. Skip prefix when returned. Default: true. Ignored if prefix is empty
 	ObjList args;
@@ -3451,13 +3453,16 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	if (m_vars) {
 	    bool expOper = true;
 	    bool autoNum = false;
+	    bool autoBool = false;
 	    String prefix;
 	    bool skipPrefix = true;
 	    JsObject* params = YOBJECT(JsObject,pOp);
 	    if (params) {
 		params->getBoolField(YSTRING("js_props"),expOper);
-		if (expOper)
+		if (expOper) {
 		    params->getBoolField(YSTRING("autonum"),autoNum);
+		    params->getBoolField(YSTRING("autobool"),autoBool);
+		}
 		params->getStringField(YSTRING("prefix"),prefix);
 		if (prefix)
 		    params->getBoolField(YSTRING("skip_prefix"),skipPrefix);
@@ -3468,7 +3473,10 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 		m_vars->copy(tmp,prefix,skipPrefix);
 		for (ObjList* o = tmp.paramList()->skipNull(); o; o = o->skipNext()) {
 		    NamedString* ns = static_cast<NamedString*>(o->get());
-		    jso->params().addParam(new ExpOperation(*ns,ns->name(),autoNum));
+		    if (autoBool && ns->isBoolean())
+			jso->params().addParam(new ExpOperation(ns->toBoolean(),ns->name()));
+		    else
+			jso->params().addParam(new ExpOperation(*ns,ns->name(),autoNum));
 		}
 	    }
 	    else
