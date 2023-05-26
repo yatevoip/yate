@@ -56,7 +56,32 @@ typedef pthread_rwlock_t rwlock_t;
 
 namespace TelEngine {
 
-class MutexPrivate {
+class LockablePrivateBase
+{
+public:
+    inline LockablePrivateBase(const char* name)
+	: m_name(name ? name : ""), m_owner(0), m_ownerName(0)
+	{}
+    inline const char* name() const
+	{ return m_name; }
+    inline Thread* owner() const
+	{ return m_owner; }
+    inline const char* ownerName() const
+	{ return m_ownerName; }
+
+protected:
+    inline void setOwner(Thread* th = 0) {
+	    m_owner = th;
+	    m_ownerName = th ? th->name() : "";
+	}
+private:
+    const char* m_name;
+    Thread* m_owner;
+    const char* m_ownerName;
+};
+
+class MutexPrivate : public LockablePrivateBase
+{
 public:
     MutexPrivate(bool recursive, const char* name);
     ~MutexPrivate();
@@ -66,10 +91,6 @@ public:
 	{ if (!--m_refcount) delete this; }
     inline bool recursive() const
 	{ return m_recursive; }
-    inline const char* name() const
-	{ return m_name; }
-    inline const char* owner() const
-	{ return m_owner; }
     bool locked() const
     	{ return (m_locked > 0); }
     bool lock(long maxwait);
@@ -82,8 +103,6 @@ private:
     volatile unsigned int m_locked;
     volatile unsigned int m_waiting;
     bool m_recursive;
-    const char* m_name;
-    const char* m_owner;
 };
 
 class SemaphorePrivate {
@@ -110,7 +129,7 @@ private:
     const char* m_name;
 };
 
-class RWLockPrivate
+class RWLockPrivate : public LockablePrivateBase
 {
 public:
     RWLockPrivate(const char* name);
@@ -119,11 +138,11 @@ public:
 	{ ++m_refcount; }
     inline void deref()
 	{ if (!--m_refcount) delete this; }
-    inline const char* name() const
-	{ return m_name; }
-    inline const char* owner() const
-	{ return m_nonRWLck ? m_nonRWLck->owner() : m_wrOwner; }
-    bool locked() const
+    inline Thread* owner() const
+	{ return m_nonRWLck ? m_nonRWLck->owner() : LockablePrivateBase::owner(); }
+    inline const char* ownerName() const
+	{ return m_nonRWLck ? m_nonRWLck->ownerName() : LockablePrivateBase::ownerName(); }
+    inline bool locked() const
 	{ return m_nonRWLck ? m_nonRWLck->locked() : (m_locked > 0); }
     bool readLock(long maxWait = -1);
     bool writeLock(long maxWwait = -1);
@@ -138,9 +157,7 @@ private:
 #endif
     MutexPrivate* m_nonRWLck;
     int m_refcount;
-    const char* m_name;
     unsigned int m_locked;
-    const char* m_wrOwner;
 #ifndef ATOMIC_OPS
     Mutex m_mutex;
 #endif
@@ -230,8 +247,8 @@ void GlobalMutex::unlock()
 
 
 MutexPrivate::MutexPrivate(bool recursive, const char* name)
-    : m_refcount(1), m_locked(0), m_waiting(0), m_recursive(recursive),
-      m_name(name), m_owner(0)
+    : LockablePrivateBase(name),
+    m_refcount(1), m_locked(0), m_waiting(0), m_recursive(recursive)
 {
     GlobalMutex::lock();
     s_count++;
@@ -276,11 +293,11 @@ MutexPrivate::~MutexPrivate()
 #endif
     GlobalMutex::unlock();
     if (m_locked || m_waiting)
-	Debug(DebugFail,"MutexPrivate '%s' owned by '%s' destroyed with %u locks, %u waiting [%p]",
-	    m_name,m_owner,m_locked,m_waiting,this);
+	Debug(DebugFail,"MutexPrivate '%s' owned by '%s' (%p) destroyed with %u locks, %u waiting [%p]",
+	    name(),ownerName(),owner(),m_locked,m_waiting,this);
     else if (warn)
-	Debug(DebugCrit,"MutexPrivate '%s' owned by '%s' unlocked in destructor [%p]",
-	    m_name,m_owner,this);
+	Debug(DebugCrit,"MutexPrivate '%s' owned by '%s' (%p) unlocked in destructor [%p]",
+	    name(),ownerName(),owner(),this);
 }
 
 bool MutexPrivate::lock(long maxwait)
@@ -351,18 +368,16 @@ bool MutexPrivate::lock(long maxwait)
 	if (safety)
 	    s_locks++;
 	m_locked++;
-	if (thr) {
+	setOwner(thr);
+	if (thr)
 	    thr->m_locks++;
-	    m_owner = thr->name();
-	}
-	else
-	    m_owner = 0;
     }
     if (safety)
 	GlobalMutex::unlock();
     if (warn && !rval)
-	Debug(DebugFail,"Thread '%s' could not lock mutex '%s' owned by '%s' waited by %u others for %lu usec!",
-	    Thread::currentName(),m_name,m_owner,m_waiting,maxwait);
+	Debug(DebugFail,
+	    "Thread '%s' could not lock mutex '%s' owned by '%s' (%p) waited by %u others for %lu usec!",
+	    Thread::currentName(),name(),ownerName(),owner(),m_waiting,maxwait);
     return rval;
 }
 
@@ -378,11 +393,10 @@ bool MutexPrivate::unlock()
 	if (thr)
 	    thr->m_locks--;
 	if (!--m_locked) {
-	    const char* tname = thr ? thr->name() : 0;
-	    if (tname != m_owner)
-		Debug(DebugFail,"MutexPrivate '%s' unlocked by '%s' but owned by '%s' [%p]",
-		    m_name,tname,m_owner,this);
-	    m_owner = 0;
+	    if (thr != owner())
+		Debug(DebugFail,"MutexPrivate '%s' unlocked by '%s' (%p) but owned by '%s' (%p) [%p]",
+		    name(),thr ? thr->name() : "",thr,ownerName(),owner(),this);
+	    setOwner();
 	}
 	if (safety) {
 	    int locks = --s_locks;
@@ -399,10 +413,10 @@ bool MutexPrivate::unlock()
 	ok = s_unsafe || !::pthread_mutex_unlock(&m_mutex);
 #endif
 	if (!ok)
-	    Debug(DebugFail,"Failed to unlock mutex '%s' [%p]",m_name,this);
+	    Debug(DebugFail,"Failed to unlock mutex '%s' [%p]",name(),this);
     }
     else
-	Debug(DebugFail,"MutexPrivate::unlock called on unlocked '%s' [%p]",m_name,this);
+	Debug(DebugFail,"MutexPrivate::unlock called on unlocked '%s' [%p]",name(),this);
     if (safety)
 	GlobalMutex::unlock();
     return ok;
@@ -650,7 +664,7 @@ bool Mutex::locked() const
 
 const char* Mutex::owner() const
 {
-    return m_private ? m_private->owner() : static_cast<const char*>(0);
+    return m_private ? m_private->ownerName() : static_cast<const char*>(0);
 }
 
 int Mutex::count()
@@ -814,7 +828,8 @@ void Lock2::drop()
 }
 
 RWLockPrivate::RWLockPrivate(const char* name)
-    : m_nonRWLck(0), m_refcount(1), m_name(name), m_locked(0), m_wrOwner(0)
+    : LockablePrivateBase(name),
+    m_nonRWLck(0), m_refcount(1), m_locked(0)
 #ifndef ATOMIC_OPS
     , m_mutex(true,"RWLockPrivate")
 #endif
@@ -863,11 +878,11 @@ RWLockPrivate::~RWLockPrivate()
 #endif
     GlobalMutex::unlock();
     if (m_locked)
-	Debug(DebugFail,"RWLockPrivate '%s' owned by '%s' destroyed with %u locks [%p]",
-	    m_name,m_wrOwner,m_locked,this);
+	Debug(DebugFail,"RWLockPrivate '%s' owned by '%s' (%p) destroyed with %u locks [%p]",
+	    name(),ownerName(),owner(),m_locked,this);
     else if (warn)
-	Debug(DebugCrit,"RWLockPrivate '%s' owned by '%s' unlocked in destructor [%p]",
-	    m_name,m_wrOwner,this);
+	Debug(DebugCrit,"RWLockPrivate '%s' owned by '%s' (%p) unlocked in destructor [%p]",
+	    name(),ownerName(),owner(),this);
 }
 
 bool RWLockPrivate::readLock(long maxwait)
@@ -949,8 +964,9 @@ bool RWLockPrivate::readLock(long maxwait)
     if (safety)
 	GlobalMutex::unlock();
     if (warn && ret)
-	Debug(DebugFail,"Thread '%s' could not lock for read RW lock '%s' writing-owned by '%s' after waiting for %ld usec! [%p]",
-	    Thread::currentName(),TelEngine::c_safe (m_name),TelEngine::c_safe(m_wrOwner),maxwait,this);
+	Debug(DebugFail,"Thread '%s' could not lock for read RW lock '%s'"
+	    " writing-owned by '%s' (%p) after waiting for %ld usec! [%p]",
+	    Thread::currentName(),name(),ownerName(),owner(),maxwait,this);
     return ret == 0;
 }
 
@@ -1026,15 +1042,16 @@ bool RWLockPrivate::writeLock(long maxwait)
 	++m_locked;
 	m_mutex.unlock();
 #endif
-	m_wrOwner = Thread::currentName();
+	setOwner(thr);
 	if (thr)
 	    ++thr->m_locks;
     }
     if (safety)
 	GlobalMutex::unlock();
     if (warn && ret)
-	Debug(DebugFail,"Thread '%s' could not lock for write RW lock '%s' writing-owned by '%s' after waiting for %ld usec! [%p]",
-	    Thread::currentName(),TelEngine::c_safe(m_name),TelEngine::c_safe(m_wrOwner),maxwait,this);
+	Debug(DebugFail,"Thread '%s' could not lock for write RW lock '%s'"
+	    " writing-owned by '%s' (%p) after waiting for %ld usec! [%p]",
+	    Thread::currentName(),name(),ownerName(),name(),maxwait,this);
     return ret == 0;
 }
 
@@ -1065,11 +1082,10 @@ bool RWLockPrivate::unlock()
 #endif
 
 	if (!l) {
-	    const char* tname = thr ? thr->name() : 0;
-	    if (m_wrOwner && tname != m_wrOwner)
-		Debug(DebugFail,"RWLockPrivate '%s' unlocked by '%s' but owned by '%s' [%p]",
-		    TelEngine::c_safe(m_name),TelEngine::c_safe(tname),TelEngine::c_safe(m_wrOwner),this);
-	    m_wrOwner = 0;
+	    if (owner() && owner() != thr)
+		Debug(DebugFail,"RWLockPrivate '%s' unlocked by '%s' (%p) but owned by '%s' (%p) [%p]",
+		    name(),thr ? thr->name() : "",thr,ownerName(),owner(),this);
+	    setOwner();
 	}
 	if (safety) {
 	    int locks = --s_locks;
@@ -1086,12 +1102,13 @@ bool RWLockPrivate::unlock()
 	ok = s_unsafe ? 0 : ::pthread_rwlock_unlock(&m_lock);
 #endif
 	if (ok)
-	    Debug(DebugFail,"Thread '%s' failed to unlock RW lock '%s' owned by '%s' [%p]",Thread::currentName(),
-		TelEngine::c_safe(m_name),TelEngine::c_safe(m_wrOwner),this);
+	    Debug(DebugFail,"Thread '%s' failed to unlock RW lock '%s' owned by '%s' (%p) [%p]",
+		Thread::currentName(),name(),ownerName(),owner(),this);
     }
     else {
-	Debug(DebugFail,"Thread '%s' could not unlock already unlocked RW lock '%s' writing-owned by '%s' [%p]",Thread::currentName(),
-	    TelEngine::c_safe(m_name),TelEngine::c_safe(m_wrOwner),this);
+	Debug(DebugFail,
+	    "Thread '%s' could not unlock already unlocked RW lock '%s' writing-owned by '%s' (%p) [%p]",
+	    Thread::currentName(),name(),ownerName(),owner(),this);
     }
     if (safety)
 	GlobalMutex::unlock();
