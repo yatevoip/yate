@@ -40,7 +40,8 @@ SDPMedia::SDPMedia(const char* media, const char* transport, const char* formats
     m_audio(true), m_video(false), m_modified(false), m_securable(true), m_haveRfc3833(false),
     m_localChanged(false),
     m_transport(transport), m_formats(formats),
-    m_lDir(0), m_rDir(0)
+    m_lDir(0), m_rDir(0),
+    m_enabler(0), m_ptr(0)
 {
     DDebug(DebugAll,"SDPMedia::SDPMedia('%s','%s','%s',%d,%d) [%p]",
 	media,transport,formats,rport,lport,this);
@@ -133,8 +134,8 @@ bool SDPMedia::update(const char* formats, int rport, int lport, bool force)
 	if (tmp.find(',') < 0) {
 	    // single format received, check if acceptable
 	    if (m_formats && !force && m_formats.find(tmp) < 0) {
-		Debug(DebugNote,"Not changing to '%s' from '%s' [%p]",
-		    formats,m_formats.c_str(),this);
+		TraceDebug(m_traceId,m_enabler,DebugInfo,"Not changing to '%s' from '%s' [%p]",
+		    formats,m_formats.c_str(),m_ptr);
 		tmp.clear();
 	    }
 	}
@@ -155,15 +156,16 @@ bool SDPMedia::update(const char* formats, int rport, int lport, bool force)
 	    TelEngine::destruct(l1);
 	    TelEngine::destruct(l2);
 	    if (tmp.null())
-		Debug(DebugNote,"Not changing formats '%s' [%p]",m_formats.c_str(),this);
+		TraceDebug(m_traceId,m_enabler,DebugInfo,"Not changing formats '%s' [%p]",
+		    m_formats.c_str(),m_ptr);
 	}
 	if (tmp && (m_formats != tmp)) {
 	    chg = true;
 	    m_formats = tmp;
 	    int q = m_formats.find(',');
 	    m_format = m_formats.substr(0,q);
-	    Debug(DebugInfo,"Choosing offered '%s' format '%s' [%p]",
-		c_str(),m_format.c_str(),this);
+	    TraceDebug(m_traceId,m_enabler,DebugAll,"Choosing offered '%s' format '%s' [%p]",
+		c_str(),m_format.c_str(),m_ptr);
 	}
     }
     if (rport >= 0) {
@@ -196,8 +198,8 @@ void SDPMedia::update(const NamedList& msg, bool pickFormat)
 	if (format) {
 	    m_format = format;
 	    if ((m_formats != m_format) && (msg.getIntValue("remoteport") > 0)) {
-		Debug(DebugNote,"Choosing started '%s' format '%s' [%p]",
-		    c_str(),format,this);
+		TraceDebug(m_traceId,m_enabler,DebugAll,"Choosing started '%s' format '%s' [%p]",
+		    c_str(),format,m_ptr);
 		m_formats = m_format;
 	    }
 	}
@@ -327,6 +329,15 @@ int SDPMedia::payloadMapping(const String& mappings, const String& fmt)
     }
     TelEngine::destruct(lst);
     return payload;
+}
+
+// Set data used in debug
+void SDPMedia::setSdpDebug(DebugEnabler* enabler, void* ptr, const String* traceId)
+{
+    m_enabler = enabler;
+    m_ptr = (m_enabler && ptr) ? ptr : (void*)this;
+    if (traceId)
+	m_traceId = *traceId;
 }
 
 };   // namespace TelEngine

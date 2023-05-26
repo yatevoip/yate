@@ -469,6 +469,14 @@ public:
     void keepRtp(const SDPMedia& other);
 
     /**
+     * Set data used in debug
+     * @param enabler The DebugEnabler to use (0 to to use the parser)
+     * @param ptr Pointer to print, 0 to use the media pointer
+     * @param traceId Trace ID to use for debugging
+     */
+    void setSdpDebug(DebugEnabler* enabler = 0, void* ptr = 0, const String* traceId = 0);
+
+    /**
      * Retrieve direction if known
      * @param dir Destination variable to set the direction in
      * @param name Direction name
@@ -525,6 +533,9 @@ private:
     // Local / remote media direction
     int m_lDir;
     int m_rDir;
+    DebugEnabler* m_enabler;             // Debug enabler used for output
+    void* m_ptr;                         // Pointer to show in debug messages
+    String m_traceId;
 };
 
 

@@ -68,6 +68,8 @@ bool SDPSession::setMedia(ObjList* media, bool preserveExisting)
     DDebug(m_enabler,DebugAll,"SDPSession::setMedia(%p) [%p]",media,m_ptr);
     ObjList* tmp = m_rtpMedia;
     m_rtpMedia = media;
+    for (ObjList* o = m_rtpMedia ? m_rtpMedia->skipNull() : 0; o; o = o->skipNext())
+	static_cast<SDPMedia*>(o->get())->setSdpDebug(m_enabler,m_ptr,&m_traceId);
     bool chg = m_rtpMedia != 0;
     if (tmp) {
 	chg = false;
@@ -756,6 +758,7 @@ void SDPSession::updateFormats(const NamedList& msg, bool changeMedia)
 		p->c_str(),tmp.c_str(),m_ptr);
 	    if (trans) {
 		rtp = new SDPMedia(tmp,trans,p->c_str());
+		rtp->setSdpDebug(m_enabler,m_ptr,&m_traceId);
 		m_rtpMedia->append(rtp);
 		mediaChanged(*rtp);
 	    }
