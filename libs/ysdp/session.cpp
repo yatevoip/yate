@@ -750,7 +750,7 @@ void SDPSession::updateFormats(const NamedList& msg, bool changeMedia)
 	SDPMedia* rtp = static_cast<SDPMedia*>(m_rtpMedia->operator[](tmp));
 	if (rtp) {
 	    if (rtp->update(*p))
-		TraceDebug(m_traceId,m_enabler,DebugNote,"Formats for '%s' changed to '%s' [%p]",
+		TraceDebug(m_traceId,m_enabler,DebugInfo,"Formats for '%s' changed to '%s' [%p]",
 		    tmp.c_str(),rtp->formats().c_str(),m_ptr);
 	}
 	else if (*p) {
