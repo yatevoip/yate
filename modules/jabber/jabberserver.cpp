@@ -325,8 +325,6 @@ public:
     // Build a jabber.feature message
     Message* jabberFeature(XmlElement* xml, XMPPNamespace::Type t, JBStream::Type sType,
 	const char* from, const char* to = 0, const char* operation = 0);
-    // Build a xmpp.iq message
-    Message* xmppIq(JBEvent* ev, const char* service);
     // Build an user.(un)register message
     Message* userRegister(JBStream& stream, bool reg, const char* instance = 0);
     // Fill module status
@@ -2428,7 +2426,7 @@ void YJBEngine::processDbResult(JBEvent* ev)
     }
     Debug(this,DebugNote,
 	"Failed to authenticate dialback request from=%s to=%s id=%s key=%s",
-	ev->from().c_str(),ev->to().c_str(),id.c_str(),ev->text().c_str());
+	ev->from().safe(),ev->to().safe(),id.c_str(),ev->text().safe());
     if (stream)
 	stream->sendDbResult(ev->to(),ev->from(),XMPPError::RemoteConn);
 }
@@ -2782,19 +2780,6 @@ Message* YJBEngine::jabberFeature(XmlElement* xml, XMPPNamespace::Type t, JBStre
     addValidParam(*m,"to",to);
     if (xml)
 	m->addParam(new NamedPointer("xml",xml));
-    return m;
-}
-
-// Build a xmpp.iq message
-Message* YJBEngine::xmppIq(JBEvent* ev, const char* xmlns)
-{
-    Message* m = __plugin.message("xmpp.iq");
-    m->addParam(new NamedPointer("xml",ev->releaseXml()));
-    addValidParam(*m,"to",ev->to());
-    addValidParam(*m,"from",ev->from());
-    addValidParam(*m,"id",ev->id());
-    addValidParam(*m,"type",ev->stanzaType());
-    addValidParam(*m,"xmlns",xmlns);
     return m;
 }
 
