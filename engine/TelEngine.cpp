@@ -1287,7 +1287,6 @@ ObjList& GenObject::getObjCounters()
     return s_counters;
 }
 
-
 #ifndef ATOMIC_OPS
 static MutexPool s_refMutex(REFOBJECT_MUTEX_COUNT,false,"RefObject");
 #endif
@@ -1425,58 +1424,6 @@ void RefPointerBase::assign(RefObject* oldptr, RefObject* newptr, void* pointer)
 }
 
 
-NamedCounter::NamedCounter(const String& name)
-    : String(name), m_count(0), m_enabled(getObjCounting()), m_mutex(0)
-{
-#ifndef ATOMIC_OPS
-    m_mutex = s_refMutex.mutex(this);
-#endif
-}
-
-int NamedCounter::inc()
-{
-#ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-    return InterlockedIncrement((LONG*)&m_count);
-#else
-    return __sync_add_and_fetch(&m_count,1);
-#endif
-#else
-    Lock lock(m_mutex);
-    return ++m_count;
-#endif
-}
-
-int NamedCounter::dec()
-{
-#ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-    return InterlockedDecrement((LONG*)&m_count);
-#else
-    return __sync_fetch_and_sub(&m_count,1);
-#endif
-#else
-    Lock lock(m_mutex);
-    return --m_count;
-#endif
-}
-
-int NamedCounter::add(int val)
-{
-#ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-    return InterlockedExchangeAdd((LONG*)&m_count,(LONG)val);
-#else
-    return __sync_add_and_fetch(&m_count,val);
-#endif
-#else
-    Lock lock(m_mutex);
-    m_count += val;
-    return m_count;
-#endif
-}
-
-
 void SysUsage::init()
 {
     if (!s_startTime)
@@ -1547,6 +1494,35 @@ double SysUsage::runTime(Type type)
     return 0.000001 * (int64_t)usecRunTime(type);
 #else
     return 0.000001 * usecRunTime(type);
+#endif
+}
+
+
+//
+// AtomicOp
+//
+#ifndef ATOMIC_OP_LOCK_COUNT
+#define ATOMIC_OP_LOCK_COUNT 101
+#endif
+
+#ifdef YATOMIC_LOCK
+static RWLockPool s_atomicLock(ATOMIC_OP_LOCK_COUNT,"AtomicOp");
+#endif
+
+AtomicOp::AtomicOp()
+    : m_lock(0)
+{
+#ifdef YATOMIC_LOCK
+    m_lock = s_atomicLock.lock(this);
+#endif
+}
+
+bool AtomicOp::efficient()
+{
+#ifdef YATOMIC_LOCK
+    return false;
+#else
+    return true;
 #endif
 }
 

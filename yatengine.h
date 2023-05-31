@@ -732,7 +732,7 @@ private:
     String m_trackName;
     String m_trackNameOnly;
     unsigned m_priority;
-    int m_unsafe;
+    AtomicInt m_unsafe;
     MessageDispatcher* m_dispatcher;
     MatchingItemBase* m_filter;
     NamedCounter* m_counter;

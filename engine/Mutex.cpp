@@ -1175,4 +1175,28 @@ RWLockPrivate* RWLock::privDataCopy() const
 }
 
 
+RWLockPool::RWLockPool(unsigned int len, const char* name)
+    : m_name(0), m_data(0), m_length(len ? len : 1)
+{
+    if (TelEngine::null(name))
+	name = "Pool";
+    m_name = new String[m_length];
+    m_data = new RWLock*[m_length];
+    for (unsigned int i = 0; i < m_length; i++) {
+	m_name[i] << name << "::" << (i + 1);
+	m_data[i] = new RWLock(m_name[i]);
+    }
+}
+
+RWLockPool::~RWLockPool()
+{
+    if (m_data) {
+	for (unsigned int i = 0; i < m_length; i++)
+	    delete m_data[i];
+	delete[] m_data;
+    }
+    if (m_name)
+	delete[] m_name;
+}
+
 /* vi: set ts=8 sw=4 sts=4 noet: */

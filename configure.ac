@@ -1824,7 +1824,7 @@ AC_SUBST(INSTALL_L)
 
 INSTALL_D="install -D"
 CFLAGS=`echo "$CFLAGS" | sed 's/\(^\| \+\)-g[[0-9]]*//' | sed 's/[[[:space:]]]\{2,\}/ /g'`
-MODULE_CFLAGS="-fno-exceptions -fPIC $HAVE_GCC_FORMAT_CHECK $HAVE_BLOCK_RETURN"
+MODULE_CFLAGS="-fno-exceptions -fPIC $HAVE_GCC_FORMAT_CHECK $HAVE_BLOCK_RETURN $ATOMIC_OPS"
 MODULE_CPPFLAGS="$HAVE_NO_OVERLOAD_VIRT_WARN $RTTI_OPT $MODULE_CFLAGS"
 MODULE_LDRELAX="-rdynamic -shared"
 MODULE_SYMBOLS="-Wl,--retain-symbols-file,/dev/null"

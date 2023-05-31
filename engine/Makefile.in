@@ -109,13 +109,13 @@ Resolver.o: @srcdir@/Resolver.cpp $(MKDEPS) $(CINC)
 	$(COMPILE) @RESOLV_INC@ -c $<
 
 Mutex.o: @srcdir@/Mutex.cpp $(MKDEPS) $(CINC)
-	$(COMPILE) @ATOMIC_OPS@ @MUTEX_HACK@ -c $<
+	$(COMPILE) @MUTEX_HACK@ -c $<
 
 Thread.o: @srcdir@/Thread.cpp $(MKDEPS) $(CINC)
 	$(COMPILE) @THREAD_KILL@ @THREAD_AFFINITY@ @HAVE_PRCTL@ -c $<
 
 TelEngine.o: @srcdir@/TelEngine.cpp $(MKDEPS) $(CINC)
-	$(COMPILE) @ATOMIC_OPS@ @HAVE_GMTOFF@ @HAVE_INT_TZ@ -c $<
+	$(COMPILE) @HAVE_GMTOFF@ @HAVE_INT_TZ@ -c $<
 
 Client.o: @srcdir@/Client.cpp $(MKDEPS) $(CLINC)
 	$(COMPILE) -c $<

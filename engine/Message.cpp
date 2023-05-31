@@ -238,7 +238,7 @@ MessageHandler::MessageHandler(const char* name, unsigned priority,
 	const char* trackName, bool addPriority)
     : String(name),
       m_trackName(trackName), m_trackNameOnly(trackName), m_priority(priority),
-      m_unsafe(0), m_dispatcher(0), m_filter(0), m_counter(0)
+      m_dispatcher(0), m_filter(0), m_counter(0)
 {
     DDebug(DebugAll,"MessageHandler::MessageHandler('%s',%u,'%s',%s) [%p]",
 	name,priority,trackName,String::boolText(addPriority),this);
@@ -273,10 +273,10 @@ void MessageHandler::safeNowInternal()
 {
     WLock lck(m_dispatcher ? &m_dispatcher->handlersLock() : 0);
     // when the unsafe counter reaches zero we're again safe to destroy
-    m_unsafe--;
-    if (m_unsafe < 0)
-	Debug(DebugFail,"MessageHandler(%s) unsafe=%d locked=%s dispatcher=(%p) [%p]",
-	    safe(),m_unsafe,String::boolText(lck.locked()),m_dispatcher,this);
+    int v = --m_unsafe;
+    if (v < 0)
+	Debug(DebugFail,"MessageHandler(%s) unsafe=%d dispatcher=(%p) [%p]",
+	    safe(),v,m_dispatcher,this);
 }
 
 bool MessageHandler::receivedInternal(Message& msg)
@@ -401,7 +401,7 @@ bool MessageDispatcher::uninstall(MessageHandler* handler)
 	    } while (handler->m_unsafe > 0);
 	}
 	if (handler->m_unsafe != 0)
-	    Debug(DebugFail,"MessageHandler %p has unsafe=%d",handler,handler->m_unsafe);
+	    Debug(DebugFail,"MessageHandler %p has unsafe=%d",handler,(int)handler->m_unsafe);
 	handler->m_dispatcher = 0;
     }
     return (handler != 0);
