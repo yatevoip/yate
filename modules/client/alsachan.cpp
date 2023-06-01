@@ -74,12 +74,12 @@ private:
     unsigned m_total;
 };
 
-class AlsaDevice : public RefObject
+class AlsaDevice : public RefObject, public DebugEnabler
 {
 public:
-    AlsaDevice(const String& dev, unsigned int rate = 8000);
+    AlsaDevice(const String& dev, unsigned int rate = 8000,
+	const NamedList& params = NamedList::empty());
     ~AlsaDevice();
-    bool timePassed(void);
     bool open();
     void close();
     int write(void *buffer, int frames);
@@ -100,6 +100,8 @@ private:
     snd_pcm_t *m_handle_in;
     snd_pcm_t *m_handle_out;
     u_int64_t m_lastTime;
+    int m_warnIO;
+    String m_debugName;
 };
 
 class AlsaChan : public CallEndpoint
@@ -123,12 +125,17 @@ private:
 
 class AlsaHandler;
 
-class AlsaPlugin : public Plugin
+class AlsaPlugin : public Module
 {
 public:
     AlsaPlugin();
+    ~AlsaPlugin();
     virtual void initialize();
     virtual bool isBusy() const;
+
+protected:
+    virtual void statusParams(String& str);
+
 private:
     AlsaHandler *m_handler;
 };
@@ -140,15 +147,6 @@ class AlsaHandler : public MessageHandler
 public:
     AlsaHandler(const char *name)
 	: MessageHandler(name,100,__plugin.name())
-	{ }
-    virtual bool received(Message &msg);
-};
-
-class StatusHandler : public MessageHandler
-{
-public:
-    StatusHandler()
-	: MessageHandler("engine.status",100,__plugin.name())
 	{ }
     virtual bool received(Message &msg);
 };
@@ -180,8 +178,18 @@ public:
     virtual bool received(Message &msg);
 };
 
+static int s_warnDeviceIO = DebugCall;
 AlsaChan *s_chan = 0;
 AlsaDevice* s_dev = 0;
+
+static inline int getLevel(const String& str, int defVal, int off = DebugCall, int on = DebugWarn)
+{
+    if (!str)
+	return defVal;
+    if (str.isBoolean())
+	return str.toBoolean() ? on : off;
+    return str.toInteger(defVal);
+}
 
 
 bool AlsaSource::init()
@@ -195,16 +203,16 @@ bool AlsaSource::init()
 AlsaSource::AlsaSource(AlsaDevice* dev)
     : m_device(0)
 {
-    Debug(DebugNote,"AlsaSource::AlsaSource(%p) [%p]",dev,this);
     dev->ref();
     m_device = dev;
+    Debug(m_device,DebugAll,"AlsaSource::AlsaSource(%p) [%p]",dev,this);
     if (dev->rate() != 8000)
 	m_format << "/" << dev->rate();
 }
 
 AlsaSource::~AlsaSource()
 {
-    Debug(DebugNote,"AlsaSource::~AlsaSource() [%p] total=%u",this,m_total);
+    Debug(m_device,DebugAll,"AlsaSource::~AlsaSource() [%p] total=%u",this,m_total);
     m_device->deref();
 }
 
@@ -238,12 +246,12 @@ void AlsaSource::run()
 	}
 	m_total += r;
     }
-    Debug(DebugWarn,"AlsaSource [%p] end of data",this);
+    Debug(m_device,DebugAll,"AlsaSource [%p] end of data",this);
 }
 
 void AlsaSource::cleanup()
 {
-    Debug(DebugNote,"AlsaSource [%p] cleanup, total=%u",this,m_total);
+    Debug(m_device,DebugAll,"AlsaSource [%p] cleanup, total=%u",this,m_total);
     ThreadedSource::cleanup();
 }
 
@@ -257,16 +265,16 @@ bool AlsaConsumer::init()
 AlsaConsumer::AlsaConsumer(AlsaDevice* dev)
     : m_device(0)
 {
-    Debug(DebugNote,"AlsaConsumer::AlsaConsumer(%p) [%p]",dev,this);
     dev->ref();
     m_device = dev;
+    Debug(m_device,DebugAll,"AlsaConsumer::AlsaConsumer(%p) [%p]",dev,this);
     if (dev->rate() != 8000)
 	m_format << "/" << dev->rate();
 }
 
 AlsaConsumer::~AlsaConsumer()
 {
-    Debug(DebugNote,"AlsaConsumer::~AlsaConsumer() [%p] total=%u",this,m_total);
+    Debug(m_device,DebugAll,"AlsaConsumer::~AlsaConsumer() [%p] total=%u",this,m_total);
     m_device->deref();
 }
 
@@ -284,13 +292,13 @@ AlsaChan::AlsaChan(const String& dev, unsigned int rate)
     : CallEndpoint("alsa"),
       m_dev(dev), m_rate(rate)
 {
-    Debug(DebugNote,"AlsaChan::AlsaChan('%s',%u) [%p]",dev.c_str(),rate,this);
+    Debug(&__plugin,DebugCall,"AlsaChan::AlsaChan('%s',%u) [%p]",dev.c_str(),rate,this);
     s_chan = this;
 }
 
 AlsaChan::~AlsaChan()
 {
-    Debug(DebugNote,"AlsaChan::~AlsaChan() [%p]",this);
+    Debug(&__plugin,DebugCall,"AlsaChan::~AlsaChan() [%p]",this);
     setTarget();
     setSource();
     setConsumer();
@@ -326,11 +334,15 @@ bool AlsaChan::init()
 }
 
 
-AlsaDevice::AlsaDevice(const String& dev, unsigned int rate)
+AlsaDevice::AlsaDevice(const String& dev, unsigned int rate, const NamedList& params)
     : m_dev(dev), m_dev_in(dev), m_dev_out(dev), m_closed(true), m_rate(rate),
-      m_handle_in(0), m_handle_out(0)
+      m_handle_in(0), m_handle_out(0),
+      m_warnIO(getLevel(params[YSTRING("warn_device_io")],s_warnDeviceIO))
 {
-    Debug(DebugNote,"AlsaDevice::AlsaDevice('%s',%u) [%p]",m_dev.c_str(),rate,this);
+    m_debugName << "alsa/" << dev;
+    debugChain(&__plugin);
+    debugName(m_debugName);
+    Debug(this,DebugAll,"AlsaDevice(%u) [%p]",rate,this);
     int p = dev.find('/');
     if (p>0) {
         m_dev_in = dev.substr(0,p);
@@ -354,7 +366,7 @@ bool AlsaDevice::open()
     snd_pcm_uframes_t period_size_out = 20 * 4;
     snd_pcm_uframes_t buffer_size_out= period_size_out * 16;
     snd_pcm_sw_params_t *swparams = NULL;
-    Debug(DebugNote, "Opening ALSA input device %s",m_dev_in.c_str());
+    Debug(this,DebugInfo,"Opening ALSA input device %s",m_dev_in.c_str());
     Lock lock(s_mutex);
     if ((err = snd_pcm_open (&m_handle_in, m_dev_in.c_str(), SND_PCM_STREAM_CAPTURE, 0)) < 0) {
 	Debug(DebugWarn, "cannot open audio device %s (%s)", m_dev.c_str(),snd_strerror (err));
@@ -374,7 +386,7 @@ bool AlsaDevice::open()
     if ((err = snd_pcm_hw_params (m_handle_in, hw_params)) < 0) Debug(DebugWarn, "cannot set parameters (%s)", snd_strerror (err));
     snd_pcm_hw_params_free (hw_params);
 
-    Debug(DebugNote, "Opening ALSA output device %s",m_dev_out.c_str());
+    Debug(this,DebugInfo,"Opening ALSA output device %s",m_dev_out.c_str());
     if ((err = snd_pcm_open (&m_handle_out, m_dev_out.c_str(), SND_PCM_STREAM_PLAYBACK, 0)) < 0) {
 	Debug(DebugWarn, "cannot open audio device %s (%s)", m_dev.c_str(), snd_strerror (err));
 	return false;
@@ -406,7 +418,9 @@ bool AlsaDevice::open()
     if ((err = snd_pcm_sw_params_set_silence_size(m_handle_out, swparams, 0)) < 0) Debug(DebugWarn, "cannot set silence size: (%s)", snd_strerror (err));
     if ((err = snd_pcm_sw_params(m_handle_out, swparams)) < 0) Debug(DebugWarn, "cannot set sw param: (%s)", snd_strerror (err));
 
-    Debug(DebugNote, "Alsa(%s/%s) %u/%u %u/%u %u/%u", m_dev_in.c_str(),m_dev_out.c_str(),rate_in,rate_out,(unsigned int)period_size_in,(unsigned int)period_size_out,(unsigned int)buffer_size_in,(unsigned int)buffer_size_out);
+    Debug(this,DebugInfo,"Alsa(%s/%s) %u/%u %u/%u %u/%u",m_dev_in.c_str(),m_dev_out.c_str(),
+	rate_in,rate_out,(unsigned int)period_size_in,(unsigned int)period_size_out,
+	(unsigned int)buffer_size_in,(unsigned int)buffer_size_out);
     m_closed = false;
     m_lastTime = Time::now() + MIN_SWITCH_TIME;
     if (!s_dev)
@@ -433,7 +447,7 @@ void AlsaDevice::close()
 
 AlsaDevice::~AlsaDevice()
 {
-    Debug(DebugNote,"AlsaDevice::~AlsaDevice [%p]",this);
+    Debug(this,DebugAll,"~AlsaDevice [%p]",this);
     close();
 }
 
@@ -445,10 +459,10 @@ int AlsaDevice::read(void *buffer, int frames)
     if (rc <= 0) {
 	int err = rc;
 	if (err == -EPIPE) {    /* under-run */
-	    Debug(DebugWarn, "ALSA read underrun: %s", snd_strerror(err));
+	    Debug(this,m_warnIO,"ALSA read underrun: %s",snd_strerror(err));
 	    err = snd_pcm_prepare(m_handle_in);
 	    if (err < 0)
-		Debug(DebugWarn, "ALSA read can't recover from underrun, prepare failed: %s", snd_strerror(err));
+		Debug(this,m_warnIO,"ALSA read can't recover from underrun, prepare failed: %s",snd_strerror(err));
 	    return 0;
 	} else if (err == -ESTRPIPE) {
 	    while ((err = snd_pcm_resume(m_handle_in)) == -EAGAIN)
@@ -456,7 +470,7 @@ int AlsaDevice::read(void *buffer, int frames)
 	    if (err < 0) {
 		err = snd_pcm_prepare(m_handle_in);
 		if (err < 0)
-		    Debug(DebugWarn, "ALSA read can't recover from suspend, prepare failed: %s", snd_strerror(err));
+		    Debug(this,m_warnIO,"ALSA read can't recover from suspend, prepare failed: %s",snd_strerror(err));
 	    }
 	    return 0;
 	}
@@ -471,7 +485,7 @@ int AlsaDevice::write(void *buffer, int frames)
 	return 0;
     int rc = snd_pcm_writei(m_handle_out, buffer, frames);
     if (rc == -EPIPE) {
-	Debug(DebugWarn, "ALSA write underrun occurred");
+	Debug(this,m_warnIO,"ALSA write underrun occurred");
 	snd_pcm_prepare(m_handle_out);
 	DDebug(DebugInfo, "ALSA write underrun fix frame 1");
 	rc = snd_pcm_writei(m_handle_out, buffer, frames);
@@ -482,15 +496,10 @@ int AlsaDevice::write(void *buffer, int frames)
     	if (rc == -EPIPE)
 	    snd_pcm_prepare(m_handle_out);
     } else if (rc < 0)
-	Debug(DebugWarn,"ALSA error from writei: %s",::snd_strerror(rc));
+	Debug(this,m_warnIO,"ALSA error from writei: %s",::snd_strerror(rc));
     else if (rc != (int)frames)
-	Debug(DebugWarn,"ALSA short write, writei wrote %d frames", rc);
+	Debug(this,m_warnIO,"ALSA short write, writei wrote %d frames",rc);
     return rc;
-}
-
-bool AlsaDevice::timePassed(void)
-{
-    return Time::now() > m_lastTime;
 }
 
 
@@ -593,16 +602,6 @@ bool AlsaHandler::received(Message &msg)
 }
 
 
-bool StatusHandler::received(Message &msg)
-{
-    const String* sel = msg.getParam("module");
-    if (sel && (*sel != "alsa"))
-	return false;
-    msg.retValue() << "name=alsa,type=misc;alsachan=" << (s_chan != 0 ) << "\r\n";
-    return false;
-}
-
-
 bool DropHandler::received(Message &msg)
 {
     String id(msg.getValue("id"));
@@ -677,7 +676,7 @@ bool AttachHandler::received(Message &msg)
 
     const String& name = src ? src : cons;
     int rate = msg.getIntValue("rate",8000);
-    AlsaDevice* dev = new AlsaDevice(name,rate);
+    AlsaDevice* dev = new AlsaDevice(name,rate,msg);
     if (dev->closed()) {
 	dev->deref();
 	dev = s_dev;
@@ -686,7 +685,7 @@ bool AttachHandler::received(Message &msg)
 	    dev->close();
 	    for (int i = 0; s_dev && (i < 10); i++)
 		Thread::idle();
-	    dev = new AlsaDevice(name,rate);
+	    dev = new AlsaDevice(name,rate,msg);
 	    if (dev->closed()) {
 		dev->deref();
 		return false;
@@ -718,28 +717,41 @@ bool AttachHandler::received(Message &msg)
 
 
 AlsaPlugin::AlsaPlugin()
-    : Plugin("alsachan"),
+    : Module("alsachan","misc"),
       m_handler(0)
 {
     Output("Loaded module AlsaChan");
 }
 
+AlsaPlugin::~AlsaPlugin()
+{
+    Output("Unloading module AlsaChan");
+}
+
 void AlsaPlugin::initialize()
 {
     Output("Initializing module AlsaChan");
+    Configuration cfg(Engine::configFile(name()),false);
+    NamedList& gen = *cfg.createSection(YSTRING("general"));
     if (!m_handler) {
 	m_handler = new AlsaHandler("call.execute");
 	Engine::install(new DropHandler("call.drop"));
 	Engine::install(new MasqHandler("chan.masquerade",10));
 	Engine::install(m_handler);
-	Engine::install(new StatusHandler);
 	Engine::install(new AttachHandler);
+	setup();
     }
+    s_warnDeviceIO = getLevel(gen[YSTRING("warn_device_io")],DebugCall);
 }
 
 bool AlsaPlugin::isBusy() const
 {
     return (s_dev != 0);
+}
+
+void AlsaPlugin::statusParams(String& str)
+{
+    str << "alsachan=" << (s_chan != 0 );
 }
 
 }; // anonymous namespace
