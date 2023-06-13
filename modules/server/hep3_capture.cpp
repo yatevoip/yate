@@ -194,7 +194,7 @@ class Hep3CaptAgent : public Capture
 public:
     Hep3CaptAgent(const char* name, Hep3CaptServer* server)
     : Capture(name), m_server(server), m_addIpAddrs(false),
-      m_hep3Proto(Hep3Msg::Hep3ProtocolTypes::PROTO_RESERVED),
+      m_hep3Proto(Hep3Msg::PROTO_RESERVED),
       m_ipFamily(AF_UNSPEC), m_ipProto(IPPROTO_IP), m_compressor(0)
     { }
 
@@ -538,21 +538,21 @@ struct hep3_msg_common
     {
 	header.init();
 	ip_family.init();
-	ip_family.chunk.type = htons(Hep3Msg::Hep3ChunkTypes::CT_IP_PROTO_FAMILY);
+	ip_family.chunk.type = htons(Hep3Msg::CT_IP_PROTO_FAMILY);
 	ip_proto.init();
-	ip_proto.chunk.type  = htons(Hep3Msg::Hep3ChunkTypes::CT_IP_PROTO_ID);
+	ip_proto.chunk.type  = htons(Hep3Msg::CT_IP_PROTO_ID);
 	src_port.init();
-	src_port.chunk.type  = htons(Hep3Msg::Hep3ChunkTypes::CT_SRC_PORT);
+	src_port.chunk.type  = htons(Hep3Msg::CT_SRC_PORT);
 	dst_port.init();
-	dst_port.chunk.type  = htons(Hep3Msg::Hep3ChunkTypes::CT_DST_PORT);
+	dst_port.chunk.type  = htons(Hep3Msg::CT_DST_PORT);
 	time_sec.init();
-	time_sec.chunk.type  = htons(Hep3Msg::Hep3ChunkTypes::CT_TIMESTAMP_SEC);
+	time_sec.chunk.type  = htons(Hep3Msg::CT_TIMESTAMP_SEC);
 	time_usec.init();
-	time_usec.chunk.type = htons(Hep3Msg::Hep3ChunkTypes::CT_TIMESTAMP_USEC);
+	time_usec.chunk.type = htons(Hep3Msg::CT_TIMESTAMP_USEC);
 	proto.init();
-	proto.chunk.type     = htons(Hep3Msg::Hep3ChunkTypes::CT_PROTOCOL_TYPE);
+	proto.chunk.type     = htons(Hep3Msg::CT_PROTOCOL_TYPE);
 	capt_id.init();
-	capt_id.chunk.type   = htons(Hep3Msg::Hep3ChunkTypes::CT_CAPT_AGENT_ID);
+	capt_id.chunk.type   = htons(Hep3Msg::CT_CAPT_AGENT_ID);
     }
 } __attribute__((packed));
 
@@ -570,9 +570,9 @@ struct hep3_msg_ipv4_addrs
     void init()
     {
 	src_addr.init();
-	src_addr.chunk.type = htons(Hep3Msg::Hep3ChunkTypes::CT_IPV4_SRC_ADDR);
+	src_addr.chunk.type = htons(Hep3Msg::CT_IPV4_SRC_ADDR);
 	dst_addr.init();
-	dst_addr.chunk.type = htons(Hep3Msg::Hep3ChunkTypes::CT_IPV4_DST_ADDR);
+	dst_addr.chunk.type = htons(Hep3Msg::CT_IPV4_DST_ADDR);
     }
 } __attribute__((packed));
 
@@ -589,9 +589,9 @@ struct hep3_msg_ipv6_addrs
     void init()
     {
 	src_addr.init();
-	src_addr.chunk.type = htons(Hep3Msg::Hep3ChunkTypes::CT_IPV6_SRC_ADDR);
+	src_addr.chunk.type = htons(Hep3Msg::CT_IPV6_SRC_ADDR);
 	dst_addr.init();
-	dst_addr.chunk.type = htons(Hep3Msg::Hep3ChunkTypes::CT_IPV6_DST_ADDR);
+	dst_addr.chunk.type = htons(Hep3Msg::CT_IPV6_DST_ADDR);
     }
 } __attribute__((packed));
 
