@@ -104,7 +104,15 @@ namespace TelEngine {
 #define DebugDef DebugNote
 #define DebugMax DebugAll
 
-#define OUT_BUFFER_SIZE 8192
+#ifndef OUT_BUFFER_SIZE
+#define OUT_BUFFER_SIZE 16384
+#elif OUT_BUFFER_SIZE < 4096
+#undef OUT_BUFFER_SIZE
+#define OUT_BUFFER_SIZE 4096
+#elif OUT_BUFFER_SIZE > 32768
+#undef OUT_BUFFER_SIZE
+#define OUT_BUFFER_SIZE 32768
+#endif
 #define OUT_HEADER_SIZE 112
 
 // RefObject mutex pool array size
