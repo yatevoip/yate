@@ -219,7 +219,7 @@ protected:
     int m_methods[MethodCount];
 };
 
-class CaptureFilter : virtual public SocketFilter
+class CaptureFilter : virtual public SocketFilter, public RefObject
 {
 public:
     CaptureFilter(const char* name = 0)
@@ -245,6 +245,9 @@ public:
 	WLock l(m_lock);
 	m_remote = rAddr;
     }
+
+    virtual void destruct()
+	{ RefObject::destruct(); }
 
     bool init(YateSIPTransport* transp, const NamedList& params, const SocketAddr& lAddr, const SocketAddr& rAddr);
     virtual void* getObject(const String& name) const;
@@ -597,6 +600,8 @@ protected:
     void setIdleTimeout(u_int64_t time = Time::now());
     // Send keep alive (or response to keep alive)
     bool sendKeepAlive(bool request);
+    // Capture SIP TCP messages
+    void capture(const void* data, unsigned int len, bool rx);
     inline bool sendPendingKeepAlive() {
 	    if (!m_keepAlivePending)
 		return true;
@@ -3200,7 +3205,7 @@ void* CaptureFilter::getObject(const String& name) const
 {
     if (name == "CaptureFilter")
 	return (void*) this;
-    return GenObject::getObject(name);
+    return RefObject::getObject(name);
 }
 
 bool CaptureFilter::init(YateSIPTransport* transp, const NamedList& params,
@@ -3239,9 +3244,14 @@ bool CaptureFilter::received(const void* buffer, int length, int flags,
     DDebug(&plugin,DebugAll,"CaptureFilter::received(%p,%d,%x,%p,%u) [%p]",
 	    buffer,length,flags,addr,adrlen,this);
     SocketAddr a(addr,adrlen);
+    RLock l(m_lock);
     CaptureInfo info(Time::now(),addr && adrlen ? &a : &m_remote,&m_local);
-    if (!m_captureAgent->write((const uint8_t*)buffer,length,info)) {
-	if (!m_captureAgent->valid() && !m_warned) {
+    RefPointer<Capture> capt = m_captureAgent;
+    l.drop();
+    if (!capt)
+	return false;
+    if (!capt->write((const uint8_t*)buffer,length,info)) {
+	if (!capt->valid() && !m_warned) {
 	    Debug(&plugin,DebugWarn,"Capture filter '%s' has become invalid [%p]",m_captureAgent->toString().c_str(),this);
 	    m_warned = true;
 	}
@@ -3257,9 +3267,14 @@ bool CaptureFilter::sent(const void* buffer, int length, int flags,
     DDebug(&plugin,DebugAll,"CaptureFilter::sent(%p,%d,%x,%p,%u) [%p]",
 	    buffer,length,flags,addr,adrlen,this);
     SocketAddr a(addr,adrlen);
+    RLock l(m_lock);
     CaptureInfo info(Time::now(),&m_local,addr && adrlen ? &a : &m_remote);
-    if (!m_captureAgent->write((const uint8_t*)buffer,length,info)) {
-    	if (!m_captureAgent->valid() && !m_warned) {
+    RefPointer<Capture> capt = m_captureAgent;
+    l.drop();
+    if (!capt)
+	return false;
+    if (!capt->write((const uint8_t*)buffer,length,info)) {
+	if (!capt->valid() && !m_warned) {
 	    Debug(&plugin,DebugWarn,"Capture filter '%s' has become invalid [%p]",m_captureAgent->toString().c_str(),this);
 	    m_warned = true;
 	}
@@ -3314,7 +3329,7 @@ bool YateSIPTransport::init(const NamedList& params, const NamedList& defs,
 	bool install = false;
 	if (!m_capture) {
 	    m_capture = new CaptureFilter(captParams.getValue("agent"));
-	    install = true;
+	    install = protocol() == Udp;
 	}
 	if (!m_capture->init(this,captParams,m_local,m_remote)) {
 	    if (m_sock)
@@ -3921,8 +3936,10 @@ int YateSIPTCPTransport::process()
 		if (s_printMsg && (o != first || m_sent < 0))
 		    printSendMsg(msg);
 		if (!msg->dontSend()) {
-		    if (o != first || m_sent <= 0)
+		    if (o != first || m_sent <= 0) {
+			capture(msg->getBuffer().data(),msg->getBuffer().length(),false);
 			buf += msg->getBuffer();
+		    }
 		    else {
 			int remaining = msg->getBuffer().length() - m_sent;
 			if (remaining > 0)
@@ -4237,6 +4254,7 @@ bool YateSIPTCPTransport::sendPending(const Time& time, bool& sent)
 	    Debug(&plugin,DebugAll,"Transport(%s) sent (%p,%s) [%p]",
 		m_id.c_str(),msg,tmp.c_str(),this);
 #endif
+	    capture(buf.data(),buf.length(),false);
 	    o->remove();
 	    m_sent = -1;
 	    continue;
@@ -4352,6 +4370,7 @@ bool YateSIPTCPTransport::readData(const Time& time, bool& read)
 	    print = false;
 	    printRecvMsg(data,m_sipBufOffs);
 	}
+	capture(data,m_sipBufOffs,true);
 	SIPMessage* msg = m_msg;
 	msg->msgPrint = print;
 	m_msg = 0;
@@ -4414,10 +4433,6 @@ void YateSIPTCPTransport::resetConnection(Socket* sock)
 	if (m_capture) {
 	    m_capture->setLocalAddr(m_local);
 	    m_capture->setRemoteAddr(m_remote);
-	    // doesn't matter if we installed if before, install filter checks
-	    if (!m_sock->installFilter(m_capture))
-		Debug(&plugin,DebugNote,"Transport(%s)) failed to install capture filter [%p]",
-		    m_id.c_str(),this);
 	}
     }
     // Update party local/remote ip/port
@@ -4450,6 +4465,18 @@ bool YateSIPTCPTransport::sendKeepAlive(bool request)
     return wr >= 0 || m_sock->canRetry();
 }
 
+void YateSIPTCPTransport::capture(const void* data, unsigned int len, bool rx)
+{
+    Lock l(this);
+    RefPointer<CaptureFilter> capt = m_capture;
+    l.drop();
+    if (!capt)
+	return;
+    if (rx)
+	capt->received(data,len,0,0,0);
+    else
+	capt->sent(data,len,0,0,0);
+}
 
 YateSIPTransportWorker::YateSIPTransportWorker(YateSIPTransport* trans,
     Thread::Priority prio)
