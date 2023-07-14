@@ -3169,6 +3169,15 @@ public:
 	int64_t maxvalue = LLONG_MAX, bool clamp = true) const;
 
     /**
+     * Convert the string to an 64bit integer value looking up first a token table.
+     * @param tokens Pointer to an array of tokens to lookup first
+     * @param defvalue Default to return if the string is not a token or number
+     * @param base Numeration base, 0 to autodetect
+     * @return The integer interpretation or defvalue.
+     */
+    int64_t toInt64Dict(const TokenDict64* tokens, int64_t defvalue = 0, int base = 0) const;
+
+    /**
      * Convert the string to an unsigned 64 bit integer value.
      * @param defvalue Default to return if the string is not a number
      * @param base Numeration base, 0 to autodetect
@@ -3760,11 +3769,33 @@ public:
 
     /**
      * Splits the string at a delimiter character
+     * @param list Destination list
+     * @param separator Character where to split the string
+     * @param emptyOK True if empty strings should be inserted in list
+     * @return Pointer to last added item, NULL if no item was added
+     */
+    ObjList* split(ObjList& list, char separator, bool emptyOK = true) const;
+
+    /**
+     * Splits the string at Regexp delimiter
+     * @param list Destination list
+     * @param reg Regexp describing the delimiter
+     * @param emptyOK True if empty strings should be inserted in list
+     * @return Pointer to last added item, NULL if no item was added
+     */
+    ObjList* split(ObjList& list, const Regexp& reg, bool emptyOK = true) const;
+
+    /**
+     * Splits the string at a delimiter character
      * @param separator Character where to split the string
      * @param emptyOK True if empty strings should be inserted in list
      * @return A newly allocated list of strings, must be deleted after use
      */
-    ObjList* split(char separator, bool emptyOK = true) const;
+    inline ObjList* split(char separator, bool emptyOK = true) const {
+	    ObjList* lst = new ObjList;
+	    split(*lst,separator,emptyOK);
+	    return lst;
+	}
 
     /**
      * Splits the string at Regexp delimiter
@@ -3772,7 +3803,11 @@ public:
      * @param emptyOK True if empty strings should be inserted in list
      * @return A newly allocated list of strings, must be deleted after use
      */
-    ObjList* split(const Regexp& reg, bool emptyOK = true) const;
+    inline ObjList* split(const Regexp& reg, bool emptyOK = true) const {
+	    ObjList* lst = new ObjList;
+	    split(*lst,reg,emptyOK);
+	    return lst;
+	}
 
     /**
      * Create an escaped string suitable for use in messages
@@ -7114,6 +7149,15 @@ public:
      */
     int64_t getInt64Value(const String& name, int64_t defvalue = 0, int64_t minvalue = LLONG_MIN,
 	int64_t maxvalue = LLONG_MAX, bool clamp = true) const;
+
+    /**
+     * Retrieve the 64bit numeric value of a parameter trying first a table lookup.
+     * @param name Name of parameter to locate
+     * @param tokens A pointer to an array of tokens to try to lookup
+     * @param defvalue Default value to return if not found
+     * @return The number contained in the named parameter or the default
+     */
+    int64_t getInt64ValueDict(const String& name, const TokenDict64* tokens, int64_t defvalue = 0) const;
 
     /**
      * Retrieve the unsigned 64-bit numeric value of a parameter.

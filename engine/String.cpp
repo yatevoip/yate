@@ -829,6 +829,18 @@ int64_t String::toInt64(int64_t defvalue, int base, int64_t minvalue, int64_t ma
     return defvalue;
 }
 
+int64_t String::toInt64Dict(const TokenDict64* tokens, int64_t defvalue, int base) const
+{
+    if (!m_string)
+	return defvalue;
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (operator==(tokens->token))
+		return tokens->value;
+    }
+    return toInt64(defvalue,base);
+}
+
 uint64_t String::toUInt64(uint64_t defvalue, int base, uint64_t minvalue, uint64_t maxvalue,
     bool clamp) const
 {
@@ -1648,39 +1660,39 @@ void String::clearMatches()
 	m_matches->clear();
 }
 
-ObjList* String::split(char separator, bool emptyOK) const
+ObjList* String::split(ObjList& list, char separator, bool emptyOK) const
 {
-    ObjList* list = new ObjList;
-    ObjList* dest = list;
+    ObjList* ret = 0;
+    ObjList* dest = &list;
     int p = 0;
     int s;
     while ((s = find(separator,p)) >= 0) {
 	if (emptyOK || (s > p))
-	    dest = dest->append(new String(m_string+p,s-p));
+	    ret = dest = dest->append(new String(m_string+p,s-p));
 	p = s + 1;
     }
     if (emptyOK || (m_string && m_string[p]))
-	dest->append(new String(m_string+p));
-    return list;
+	return dest->append(new String(m_string+p));
+    return ret;
 }
 
-ObjList* String::split(const Regexp& reg, bool emptyOK) const
+ObjList* String::split(ObjList& list, const Regexp& reg, bool emptyOK) const
 {
     String s = *this;
-    ObjList* list = new ObjList;
-    ObjList* dest = list;
+    ObjList* ret = 0;
+    ObjList* dest = &list;
     while (true) {
 	if (!(s && s.matches(reg))) {
 	    if (s || emptyOK)
-		dest = dest->append(new String(s));
+		return dest->append(new String(s));
 	    break;
 	}
 	int pos = s.matchOffset(0);
 	if (emptyOK || pos > 0)
-	    dest = dest->append(new String(s.c_str(),pos));
+	    ret = dest = dest->append(new String(s.c_str(),pos));
 	s = s.substr(pos + s.matchLength(0));
     }
-    return list;
+    return ret;
 }
 
 String String::msgEscape(const char* str, char extraEsc)
