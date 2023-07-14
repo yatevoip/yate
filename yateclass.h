@@ -4101,6 +4101,37 @@ public:
 	}
 
     /**
+     * Retrieve index of object by value
+     * Obj MUST implement the == operator
+     * @param val Object value
+     * @param offs Optional index to start
+     * @param found Optional pointer to be filled with found object pointer
+     * @return Index of object, -1 if not found
+     */
+    inline int indexOfValue(const Obj& val, unsigned int offs = 0, Obj** found = 0) const {
+	    for (const Obj* d = data(offs); offs < length(); ++offs, ++d)
+		if (val == *d) {
+		    if (found)
+			*found = (Obj*)d;
+		    return offs;
+		}
+	    return -1;
+	}
+
+    /**
+     * Find an object by name
+     * Obj MUST implement the == operator
+     * @param val Object value
+     * @param offs Optional index to start
+     * @return Obj pointer, NULL if not found
+     */
+    inline Obj* findValue(const Obj& val, unsigned int offs = 0) const {
+	    Obj* d = 0;
+	    indexOfValue(val,offs,&d);
+	    return d;
+	}
+
+    /**
      * Clear data
      */
     inline void clear() {
@@ -4204,7 +4235,7 @@ public:
      * @param count Number of items to fill, negative to fill until vector end
      * @return Number of filled items. 0 on empty count or failure
      */
-    inline unsigned int fill(const Obj& value, unsigned int offs = 0, int count = -1)
+    inline unsigned int fillObj(const Obj& value, unsigned int offs = 0, int count = -1)
 	{ return fill(offs,count,&value); }
 
     /**
@@ -4214,7 +4245,7 @@ public:
      * @param offs Optional start offset
      * @return Number of filled items, 0 on empty items or failure
      */
-    inline unsigned int fill(const Obj* items, unsigned int count, unsigned int offs = 0) {
+    inline unsigned int fillObj(const Obj* items, unsigned int count, unsigned int offs = 0) {
 	    if (!(items && count))
 		return 0;
 	    unsigned int n = numItems(offs,count);
@@ -4324,7 +4355,7 @@ public:
 	    else {
 		unsigned int n = length();
 		resize(2 * n);
-		fill(data(),n,n);
+		fillObj(data(),n,n);
 	    }
 	    return *this;
 	}
