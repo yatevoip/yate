@@ -2072,11 +2072,14 @@ public:
 	{ return at(index); }
 
     /**
-     * Array-like indexing operator
+     * Find an object by name
      * @param str String value of the object to locate
      * @return Pointer to the object or NULL
      */
-    GenObject* operator[](const String& str) const;
+    inline GenObject* operator[](const String& str) const {
+	    ObjList* o = find(str);
+	    return o ? o->get() : 0;
+	}
 
     /**
      * Get the item in the list that holds an object
@@ -2084,6 +2087,16 @@ public:
      * @return Pointer to the found item or NULL
      */
     ObjList* find(const GenObject* obj) const;
+
+    /**
+     * Find an object by pointer
+     * @param obj Pointer to the object to search for
+     * @return Pointer to the object or NULL
+     */
+    inline GenObject* findObj(const GenObject* obj) const {
+	    ObjList* o = find(obj);
+	    return o ? o->get() : 0;
+	}
 
     /**
      * Get the item in the list that holds an object by String value
@@ -2176,6 +2189,126 @@ public:
      */
     inline void setDelete(bool autodelete)
 	{ m_delete = autodelete; }
+
+    /**
+     * Get the item in the list that holds an object
+     * @param lock Lockable to protect the operation. A RWLock will be read locked
+     * @param obj Pointer to the object to search for
+     * @param ref True to reference a found RefObject. the method will return NULL
+     *  if a found object is not a RefObject one
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return Pointer to the found item or NULL
+     */
+    GenObject* find(Lockable& lock, const GenObject* obj, bool ref = false, long maxwait = -1) const;
+
+    /**
+     * Get the item in the list that holds an object by String value
+     * @param lock Lockable to protect the operation. A RWLock will be read locked
+     * @param str String value (toString) of the object to search for
+     * @param ref True to reference a found RefObject. the method will return NULL
+     *  if a found object is not a RefObject one
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return Pointer to the found item or NULL
+     */
+    GenObject* find(Lockable& lock, const String& str, bool ref = false, long maxwait = -1) const;
+
+    /**
+     * Insert an object at this point
+     * @param lock Lockable to protect the operation. A RWLock will be write locked
+     * @param obj Pointer to the object to set
+     * @param autoDelete Object autoDelete flag
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @param compact True to replace NULL values in list if possible
+     * @return A pointer to the inserted list item
+     */
+    ObjList* insert(Lockable& lock, const GenObject* obj, bool autoDelete = true,
+	long maxwait = -1, bool compact = true);
+
+    /**
+     * Append an object to the end of the list
+     * @param lock Lockable to protect the operation. A RWLock will be write locked
+     * @param obj Pointer to the object to set
+     * @param autoDelete Object autoDelete flag
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @param compact True to replace NULL values in list if possible
+     * @return A pointer to the inserted list item
+     */
+    ObjList* append(Lockable& lock, const GenObject* obj, bool autoDelete = true,
+	long maxwait = -1, bool compact = true);
+
+    /**
+     * Set unique entry in this list. If not found, append it to the list
+     * @param lock Lockable to protect the operation. A RWLock will be write locked
+     * @param obj Pointer to the object to set
+     * @param autoDelete Object autoDelete flag
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @param compact True to replace NULL values in list if possible
+     * @return A pointer to the set list item
+     */
+    ObjList* setUnique(Lockable& lock, const GenObject* obj, bool autoDelete = true,
+	long maxwait = -1, bool compact = true);
+
+    /**
+     * Delete this list item
+     * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
+     * @param delobj True to delete the object (default)
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return Pointer to the object if not destroyed
+     */
+    GenObject* remove(Lockable& lock, bool delobj = true, long maxwait = -1);
+
+    /**
+     * Delete the list item that holds a given object
+     * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
+     * @param obj Object to search in the list
+     * @param delobj True to delete the object (default)
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return Pointer to the object if not destroyed
+     */
+    GenObject* remove(Lockable& lock, GenObject* obj, bool delobj = true, long maxwait = -1);
+
+    /**
+     * Delete the first list item that holds an object with a iven value
+     * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
+     * @param str String value (toString) of the object to remove
+     * @param delobj True to delete the object (default)
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return Pointer to the object if not destroyed
+     */
+    GenObject* remove(Lockable& lock, const String& str, bool delobj = true, long maxwait = -1);
+
+    /**
+     * Safely clear the list and optionally delete all contained objects
+     * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     */
+    void clear(Lockable& lock, long maxwait = -1);
+
+    /**
+     * Safely remove all empty objects in the list
+     * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     */
+    void compact(Lockable& lock, long maxwait = -1);
+
+    /**
+     * Move or copy this list into another one
+     * autoDelete() is set in destination as found for each item in list
+     * @param dest Destination list. Create a new one if not given
+     * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return ObjList pointer ('dest' if given). The caller is owning the new list
+     */
+    ObjList* move(ObjList* dest, Lockable* lock = 0, long maxwait = -1);
+
+    /**
+     * Reference all items in this into another one
+     * @param dest Destination list. Create a new one if not given
+     * @param lock Optional Lockable to protect the operation. A RWLock will be read locked
+     * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @return ObjList pointer ('dest' if given). The caller is owning the new list
+     */
+    ObjList* copy(ObjList* dest, Lockable* lock = 0, long maxwait = -1) const;
 
     /**
      * A static empty object list
@@ -2305,6 +2438,13 @@ public:
      * @return Capacity of the vector
      */
     unsigned int resize(unsigned int len, bool keepData = false);
+
+    /**
+     * Compact vector, move non NULL pointers in front
+     * @param resizeToCount Resize to non null items count, clears the list if empty
+     * @return The number of non NULL pointers
+     */
+    unsigned int compact(bool resizeToCount = false);
 
     /**
      * Retrieve and remove an object from the vector

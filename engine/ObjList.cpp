@@ -114,12 +114,6 @@ GenObject* ObjList::at(int index) const
     return obj ? obj->get() : 0;
 }
 
-GenObject* ObjList::operator[](const String& str) const
-{
-    ObjList *obj = find(str);
-    return obj ? obj->get() : 0;
-}
-
 ObjList* ObjList::find(const GenObject* obj) const
 {
     XDebug(DebugAll,"ObjList::find(%p) [%p]",obj,this);
@@ -347,6 +341,122 @@ void ObjList::compact()
     }
 }
 
+GenObject* ObjList::find(Lockable& lock, const GenObject* obj, bool ref, long maxwait) const
+{
+    Lock lck(lock,maxwait,true);
+    ObjList* o = find(obj);
+    if (!o)
+	return 0;
+    if (ref) {
+	RefObject* r = YOBJECT(RefObject,o->get());
+	if (!(r && r->ref()))
+	    return 0;
+    }
+    return o->get();
+}
+
+GenObject* ObjList::find(Lockable& lock, const String& str, bool ref, long maxwait) const
+{
+    Lock lck(lock,maxwait,true);
+    ObjList* o = find(str);
+    if (!o)
+	return 0;
+    if (ref) {
+	RefObject* r = YOBJECT(RefObject,o->get());
+	if (!(r && r->ref()))
+	    return 0;
+    }
+    return o->get();
+}
+
+ObjList* ObjList::insert(Lockable& lock, const GenObject* obj, bool autoDelete, long maxwait,
+    bool compact)
+{
+    Lock lck(lock,maxwait,false);
+    ObjList* o = insert(obj,compact);
+    if (o)
+	o->setDelete(autoDelete);
+    return o;
+}
+
+ObjList* ObjList::append(Lockable& lock, const GenObject* obj, bool autoDelete, long maxwait,
+    bool compact)
+{
+    Lock lck(lock,maxwait,false);
+    ObjList* o = append(obj,compact);
+    if (o)
+	o->setDelete(autoDelete);
+    return o;
+}
+
+ObjList* ObjList::setUnique(Lockable& lock, const GenObject* obj, bool autoDelete, long maxwait,
+    bool compact)
+{
+    Lock lck(lock,maxwait,false);
+    ObjList* o = setUnique(obj,compact);
+    if (o)
+	o->setDelete(autoDelete);
+    return o;
+}
+
+GenObject* ObjList::remove(Lockable& lock, bool delobj, long maxwait)
+{
+    Lock lck(lock,maxwait,false);
+    return remove(delobj);
+}
+
+GenObject* ObjList::remove(Lockable& lock, GenObject* obj, bool delobj, long maxwait)
+{
+    Lock lck(lock,maxwait,false);
+    return remove(obj,delobj);
+}
+
+GenObject* ObjList::remove(Lockable& lock, const String& str, bool delobj, long maxwait)
+{
+    Lock lck(lock,maxwait,false);
+    return remove(str,delobj);
+}
+
+void ObjList::clear(Lockable& lock, long maxwait)
+{
+    Lock lck(lock,maxwait,false);
+    clear();
+}
+
+void ObjList::compact(Lockable& lock, long maxwait)
+{
+    Lock lck(lock,maxwait,false);
+    compact();
+}
+
+ObjList* ObjList::move(ObjList* dest, Lockable* lock, long maxwait)
+{
+    if (!dest)
+	dest = new ObjList;
+    ObjList* add = dest;
+    Lock lck(lock,maxwait,false);
+    for (ObjList* o = skipNull(); o; o = o->skipNull()) {
+	bool del = o->autoDelete();
+	add = add->append(o->remove(false));
+	add->setDelete(del);
+    }
+    return dest;
+}
+
+ObjList* ObjList::copy(ObjList* dest, Lockable* lock, long maxwait) const
+{
+    if (!dest)
+	dest = new ObjList;
+    ObjList* add = dest;
+    Lock lck(lock,maxwait,true);
+    for (ObjList* o = skipNull(); o; o = o->skipNext()) {
+	RefObject* r = YOBJECT(RefObject,o->get());
+	if (r && r->ref())
+	    add = add->append(r);
+    }
+    return dest;
+}
+
 static void merge(ObjList* first, ObjList* second,int (*compare)(GenObject* obj1, GenObject* obj2, void* data), void* dat)
 {
     if (!(first && second))
@@ -526,6 +636,38 @@ unsigned int ObjVector::resize(unsigned int len, bool keepData)
     m_objects = buf;
     m_length = len;
     return length();
+}
+
+unsigned int ObjVector::compact(bool resizeToCount)
+{
+    if (!m_objects)
+	return 0;
+    unsigned int n = 0;
+    GenObject** buf = m_objects;
+    for (unsigned int i = 0; i < m_length; ++i, ++buf) {
+	if (*buf) {
+	    ++n;
+	    continue;
+	}
+	if (i == m_length - 1)
+	    break;
+	GenObject** b = 0;
+	for (unsigned int j = i + 1; j < m_length; ++j) {
+	    if (!buf[j])
+		continue;
+	    b = buf + j;
+	    i = j;
+	    break;
+	}
+	if (!b)
+	    break;
+	*buf = *b;
+	*b = 0;
+	++n;
+    }
+    if (resizeToCount)
+	resize(n,true);
+    return n;
 }
 
 unsigned int ObjVector::count() const
