@@ -1111,6 +1111,42 @@ YATE_API inline uint32_t hashPtr(const void* ptr)
 #endif
 }
 
+/**
+ * Sort a vector
+ * Held object MUST implement the assignment operator
+ * @param buf Pointer to buffer
+ * @param len Buffer length
+ * @param callbackCompare Pointer to a callback function that should compare two objects
+ * <pre>
+ *     obj1 First object of the comparation
+ *     obj2 Second object of the comparation
+ *     context Context data
+ *     return 0 if the objects are equal; positive value if obj2 > obj1; negative value if obj1 > obj2
+ *     The callback may return the opposite value if sorting in descending order
+ *     Note: the function should expect receiving null pointers if sorting array of pointers
+ * </pre>
+ * @param context Context data to be passed to callback
+ */
+template <class Obj> void yateSort(Obj* buf, unsigned int len,
+    int (*callbackCompare)(Obj& obj1, Obj& obj2, void* context),
+    void* context = 0)
+{
+    if (!buf)
+	return;
+    while (len > 1) {
+	unsigned int n = len;
+	len = 0;
+        for (unsigned int i = 1; i < n; ++i) {
+	    if (callbackCompare(buf[i - 1],buf[i],context) <= 0)
+		continue;
+	    Obj tmp = buf[i - 1];
+	    buf[i - 1] = buf[i];
+	    buf[i] = tmp;
+	    len = i;
+	}
+    }
+}
+
 
 #undef YATOMIC_BUILTIN
 #define YATOMIC_LOCK
