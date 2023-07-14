@@ -8848,6 +8848,91 @@ private:
 };
 
 /**
+ * Helper template used to safely reference an object
+ * @param dest Destination
+ * @param obj Pointer to object to reference
+ * @param lock Lockable to protect the operation. A RWLock will be read locked
+ * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+ * @return Obj pointer on success, NULL on failure
+ */
+template <class Obj> Obj* ref(RefPointer<Obj>& dest, Obj* obj, Lockable& lock, long maxwait = -1)
+{
+    Lock lck(lock,maxwait,true);
+    dest = obj;
+    return dest;
+}
+
+/**
+ * Helper template used to safely find and reference an object
+ * @param dest Destination
+ * @param list List to search in
+ * @param name Object name to search
+ * @param lock Lockable to protect the operation. A RWLock will be read locked
+ * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+ * @return Obj pointer on success, NULL on failure
+ */
+template <class Obj> Obj* find(RefPointer<Obj>& dest, const ObjList& list,
+    const String& name, Lockable& lock, long maxwait = -1)
+{
+    Lock lck(lock,maxwait,true);
+    dest = static_cast<Obj*>(list[name]);
+    return dest;
+}
+
+/**
+ * Helper template used to safely find and reference an object
+ * @param dest Destination
+ * @param list List to search in
+ * @param name Object to search
+ * @param lock Lockable to protect the operation. A RWLock will be read locked
+ * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+ * @return Obj pointer on success, NULL on failure
+ */
+template <class Obj> Obj* find(RefPointer<Obj>& dest, const ObjList& list,
+    const GenObject* gen, Lockable& lock, long maxwait = -1)
+{
+    Lock lck(lock,maxwait,true);
+    dest = static_cast<Obj*>(list.findObj(gen));
+    return dest;
+}
+
+/**
+ * Helper template used to safely find and reference an object with virtual
+ *  inheritance (cast not possible, use getObject())
+ * @param dest Destination
+ * @param list List to search in
+ * @param name Object name to search
+ * @param lock Lockable to protect the operation. A RWLock will be read locked
+ * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+ * @return Obj pointer on success, NULL on failure
+ */
+template <class Obj> Obj* findObj(RefPointer<Obj>& dest, const ObjList& list,
+    const String& name, Lockable& lock, long maxwait = -1)
+{
+    Lock lck(lock,maxwait,true);
+    dest = YOBJECT(Obj,list[name]);
+    return dest;
+}
+
+/**
+ * Helper template used to safely find and reference an object with virtual
+ *  inheritance (cast not possible, use getObject())
+ * @param dest Destination
+ * @param list List to search in
+ * @param name Object to search
+ * @param lock Lockable to protect the operation. A RWLock will be read locked
+ * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+ * @return Obj pointer on success, NULL on failure
+ */
+template <class Obj> Obj* findObj(RefPointer<Obj>& dest, const ObjList& list,
+    const GenObject* gen, Lockable& lock, long maxwait = -1)
+{
+    Lock lck(lock,maxwait,true);
+    dest = YOBJECT(Obj,list.findObj(gen));
+    return dest;
+}
+
+/**
  * This class holds the action to execute a certain task, usually in a
  *  different execution thread.
  * @short Encapsulates a runnable task
