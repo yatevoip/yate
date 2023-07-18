@@ -8927,7 +8927,7 @@ template <class Obj> Obj* find(RefPointer<Obj>& dest, const ObjList& list,
  * Helper template used to safely find and reference an object
  * @param dest Destination
  * @param list List to search in
- * @param name Object to search
+ * @param gen Object to search
  * @param lock Lockable to protect the operation. A RWLock will be read locked
  * @param maxwait Time in microseconds to wait for locking, -1 wait forever
  * @return Obj pointer on success, NULL on failure
@@ -8963,7 +8963,7 @@ template <class Obj> Obj* findObj(RefPointer<Obj>& dest, const ObjList& list,
  *  inheritance (cast not possible, use getObject())
  * @param dest Destination
  * @param list List to search in
- * @param name Object to search
+ * @param gen Object to search
  * @param lock Lockable to protect the operation. A RWLock will be read locked
  * @param maxwait Time in microseconds to wait for locking, -1 wait forever
  * @return Obj pointer on success, NULL on failure
