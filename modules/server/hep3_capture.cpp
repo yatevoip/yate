@@ -899,7 +899,7 @@ void* Hep3CaptAgent::getObject(const String& name) const
 }
 
 Hep3Module::Hep3Module()
-    : Module("hep3_capture","misc"),
+    : Module("hep3_capture","misc",true),
       m_first(true), m_serversLck("Hep3Module")
 {
     Output("Loaded module HEP3/EEP capture");
