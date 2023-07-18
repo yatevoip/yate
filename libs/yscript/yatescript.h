@@ -2493,6 +2493,7 @@ public:
 	AssignSkipArrayIndex = 0x40,       // Do not copy Array indexes
 	AssignDeepCopy = 0x80,             // Make a deep copy of objects
 	AssignFreezeCopy = 0x100,          // Freeze destination after copy
+	AssignSkipExist = 0x200,           // Skip (ignore) existing (non undefined) properties in destination
 	// Masks
 	AssignFilled = AssignSkipNull | AssignSkipUndefined | AssignSkipEmpty,
 	AssignFilledSkipObject = AssignFilled | AssignSkipObject,
@@ -2930,9 +2931,10 @@ public:
     static ExpOperation* toJSON(const ExpOperation* oper, int spaces);
 
     /**
-     * 
+     * Resolve JSON references (replace objects with '#ref' properties)
+     * '#ref' is handled as JSON path relative to given object
      * @param oper Object to handle
-     * @return 
+     * @return True if all references were resolved, false if at least one failed
      */
     static bool resolveReferences(ExpOperation* oper);
 

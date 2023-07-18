@@ -50,6 +50,7 @@ public:
 	    MKASSIGN(SkipArrayIndex);
 	    MKASSIGN(DeepCopy);
 	    MKASSIGN(FreezeCopy);
+	    MKASSIGN(SkipExist);
 	    MKASSIGN(Filled);
 	    MKASSIGN(FilledSkipObject);
 	}
@@ -1270,6 +1271,20 @@ bool JsObject::getObjField(const String& name, JsObject*& obj)
     return false;
 }
 
+static inline bool getObjParams(JsObject* obj, const NamedList*& params, const HashList** hash = 0)
+{
+    if (!obj)
+	return false;
+    if (hash) {
+	*hash = obj->getHashListParams();
+	if (!*hash)
+	    params = &(obj->params());
+	return true;
+    }
+    params = obj->nativeParams();
+    return 0 != params;
+}
+
 int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int flags, ObjList* props,
     const String& prefix, const String& addPrefix, GenObject* context, GenObject* origContext,
     void* data, const String& path)
@@ -1287,6 +1302,7 @@ int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int fl
     bool skipUndef = 0 != (flags & AssignSkipUndefined);
     bool skipObject = 0 != (flags & AssignSkipObject);
     bool skipEmptyStr = 0 != (flags & AssignSkipEmpty);
+    bool skipExist = 0 != (flags & AssignSkipExist);
     JsArray* jsaSrc = YOBJECT(JsArray,src);
     bool jsaCpIdxOnly = true;
     if (jsaSrc) {
@@ -1319,6 +1335,8 @@ int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int fl
 	extra.append("object",",");
     if (skipEmptyStr)
 	extra.append("empty-str",",");
+    if (skipExist)
+	extra.append("existing",",");
     if (extra)
 	extra = " skip=" + extra;
     if (jsaSrc)
@@ -1334,19 +1352,18 @@ int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int fl
     int n = 0;
     bool native = false;
     bool checkFrozen = true;
+    const HashList* hashDest = 0;
+    const NamedList* paramsDest = 0;
+    const NamedList* nativeDest = 0;
+    if (skipExist) {
+	getObjParams(dest,paramsDest,&hashDest);
+	getObjParams(dest,nativeDest);
+    }
     while (true) {
 	const HashList* hash = 0;
 	const NamedList* params = 0;
-	if (!native) {
-	    hash = src->getHashListParams();
-	    if (!hash)
-		params = &(src->params());
-	}
-	else {
-	    params = src->nativeParams();
-	    if (!params)
-		break;
-	}
+	if (!getObjParams(src,params,native ? 0 : &hash))
+	    break;
 	unsigned int idx = 0;
 	ObjList* crt = hash ? hash->getList(0) : params->paramList()->skipNull();
 #ifdef DEBUG_JsObject_assignProps
@@ -1434,6 +1451,17 @@ int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int fl
 		else
 		    tmp << name;
 		newName = &tmp;
+	    }
+
+	    // Check if existing should be skipped
+	    if (skipExist) {
+		GenObject* exist = hashDest ? (*hashDest)[*newName] :
+		    (*paramsDest->paramList())[*newName];
+		if (!exist && nativeDest)
+		    exist = (*nativeDest->paramList())[*newName];
+		ExpOperation* ep = YOBJECT(ExpOperation,exist);
+		if (ep && !JsParser::isUndefined(*ep))
+		    JSOBJECT_ASSIGN_SKIP("exists in destination")
 	    }
 
 #ifdef DEBUG_JsObject_assignProps
