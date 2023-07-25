@@ -133,6 +133,11 @@ static bool s_abort = false;
 static u_int64_t s_startTime = 0;
 static u_int64_t s_timestamp = 0;
 static Debugger::Formatting s_fmtstamp = Debugger::None;
+#ifdef OUT_NO_TIMESTAMP
+static bool s_outputTimestamp = false;
+#else
+static bool s_outputTimestamp = true;
+#endif
 
 static const char* const s_colors[11] = {
     "\033[5;41;1;33m\033[K",// DebugFail - blinking yellow on red
@@ -282,8 +287,16 @@ void Output(const char* format, ...)
 	return;
     va_list va;
     va_start(va,format);
-    ::vsnprintf(buf,sizeof(buf)-2,format,va);
+    bool dbg = s_outputTimestamp;
+    if (dbg) {
+	Lock lck(ind_mux);
+	dbg_output(-1,"",format,va);
+    }
+    else
+	::vsnprintf(buf,sizeof(buf)-2,format,va);
     va_end(va);
+    if (dbg)
+	return;
     if (relay)
 	relay(-1,buf,0,0);
     else
