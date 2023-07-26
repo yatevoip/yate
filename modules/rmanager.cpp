@@ -399,6 +399,16 @@ void RManagerListener::run()
     }
 }
 
+static inline const char* dumpOutputTime(String& buf)
+{
+    if (Debugger::outputTimestamp())
+	return "";
+    char tmp[30];
+    Debugger::formatTime(tmp);
+    buf << " time: " << tmp;
+    return buf.safe();
+}
+
 Connection* RManagerListener::checkCreate(Socket* sock, const char* addr)
 {
     if (!sock->valid()) {
@@ -433,10 +443,9 @@ Connection* RManagerListener::checkCreate(Socket* sock, const char* addr)
     }
     // should check IP address here
     if (m_cfg.getBoolValue("logged",true)) {
-	char tmp[30];
-	Debugger::formatTime(tmp);
-	Output("Remote%s connection from %s to %s time: %s",
-	    (secure ? " secure" : ""),addr,m_address.c_str(),tmp);
+	String tmp;
+	Output("Remote%s connection from %s to %s%s",
+	    (secure ? " secure" : ""),addr,m_address.c_str(),dumpOutputTime(tmp));
     }
     Connection* conn = new Connection(sock,addr,this);
     if (conn->error()) {
@@ -472,9 +481,8 @@ Connection::~Connection()
     s_connList.remove(this,false);
     s_mutex.unlock();
     if (cfg().getBoolValue("logged",true)) {
-	char tmp[30];
-	Debugger::formatTime(tmp);
-	Output("Closing connection to %s time: %s",m_address.c_str(),tmp);
+	String tmp;
+	Output("Closing connection to %s%s",m_address.c_str(),dumpOutputTime(tmp));
     }
     Socket* tmp = m_socket;
     m_socket = 0;
