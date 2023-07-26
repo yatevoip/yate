@@ -856,6 +856,18 @@ public:
      */
     static void relayOutput(int level, char* buffer, const char* component = 0, const char* info = 0);
 
+    /**
+     * Set Output function display timestamp
+     * @param on True to enable, false to disable
+     */
+    static void outputTimestamp(bool on);
+
+    /**
+     * Check if Output function displays timestamp
+     * @return True if Output function displays timestamp, false if not
+     */
+    static bool outputTimestamp();
+
 private:
     const char* m_name;
     int m_level;

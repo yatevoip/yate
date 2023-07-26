@@ -2989,6 +2989,10 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 				case 'Z':
 				    tstamp = Debugger::TextLSep;
 				    break;
+				case 'K':
+				case 'N':
+				    Debugger::outputTimestamp(*pc == 'K');
+				    break;
 				default:
 				    initUsrPath(s_usrpath);
 				    badopt(client,*pc,argv[i]);

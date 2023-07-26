@@ -926,6 +926,16 @@ void Debugger::relayOutput(int level, char* buffer, const char* component, const
     }
 }
 
+void Debugger::outputTimestamp(bool on)
+{
+    s_outputTimestamp = on;
+}
+
+bool Debugger::outputTimestamp()
+{
+    return s_outputTimestamp;
+}
+
 
 u_int64_t Time::now()
 {
