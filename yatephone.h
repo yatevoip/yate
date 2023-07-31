@@ -1423,6 +1423,52 @@ public:
      */
     static bool itemComplete(String& itemList, const String& item, const String& partWord);
 
+    /**
+     * Helper function to complete a list if strings (use toString()) on a command line
+     * @param itemList Tab separated list of possible values to complete
+     * @param list Items to possibly insert in the list
+     * @param partWord Partial word to complete, may be empty
+     * @return True if at least one item was added to list, false if not
+     */
+    static inline bool itemComplete(String& itemList, const ObjList& list, const String& partWord) {
+	    bool ok = false;
+	    for (ObjList* o = list.skipNull(); o; o = o->skipNext())
+		ok = itemComplete(itemList,o->get()->toString(),partWord) || ok;
+	    return ok;
+	}
+
+    /**
+     * Helper function to complete a dictionary on a command line
+     * @param itemList Tab separated list of possible values to complete
+     * @param dict Items to possibly insert in the list
+     * @param partWord Partial word to complete, may be empty
+     * @return True if at least one item was added to list, false if not
+     */
+    static inline bool itemComplete(String& itemList, const TokenDict* dict, const String& partWord) {
+	    if (!dict)
+		return false;
+	    bool ok = false;
+	    for (; dict->token; ++dict)
+		ok = itemComplete(itemList,dict->token,partWord) || ok;
+	    return ok;
+	}
+
+    /**
+     * Helper function to complete a dictionary on a command line
+     * @param itemList Tab separated list of possible values to complete
+     * @param dict Items to possibly insert in the list
+     * @param partWord Partial word to complete, may be empty
+     * @return True if at least one item was added to list, false if not
+     */
+    static inline bool itemComplete(String& itemList, const TokenDict64* dict, const String& partWord) {
+	    if (!dict)
+		return false;
+	    bool ok = false;
+	    for (; dict->token; ++dict)
+		ok = itemComplete(itemList,dict->token,partWord) || ok;
+	    return ok;
+	}
+
 protected:
     /**
      * IDs of the installed relays
