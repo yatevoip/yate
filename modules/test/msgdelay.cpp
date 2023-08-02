@@ -19,7 +19,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
  */
 
-#include <yatengine.h>
+#include <yatephone.h>
 
 using namespace TelEngine;
 namespace { // anonymous
@@ -31,7 +31,7 @@ public:
     virtual bool received(Message &msg);
 };
 
-class MsgDelay : public Plugin
+class MsgDelay : public Module
 {
 public:
     MsgDelay();
@@ -58,23 +58,33 @@ bool DelayHandler::received(Message &msg)
     if (!p)
 	return false;
     int ms = p->toInteger();
+    bool force = false;
+    NamedString* fp = msg.getParam(YSTRING("message_delay_always"));
+    if (fp) {
+	force = fp->toBoolean();
+	msg.clearParam(fp);
+    }
     // make sure we don't get here again
     msg.clearParam(p);
-    if (ms > 0 && !Engine::exiting()) {
+    if (ms > 0 && (force || !Engine::exiting())) {
 	// delay maximum 10s
 	if (ms > 10000)
 	    ms = 10000;
 	Debug(DebugAll,"Delaying '%s' by %d ms in thread '%s'",msg.safe(),ms,Thread::currentName());
 	unsigned int n = (ms + Thread::idleMsec() - 1) / Thread::idleMsec();
-	while (n-- && !Engine::exiting())
-	    Thread::idle();
+	if (force)
+	    while (n-- && !Thread::check(false))
+		Thread::idle();
+	else
+	    while (n-- && !Engine::exiting())
+		Thread::idle();
     }
     return false;
 };
 
 
 MsgDelay::MsgDelay()
-    : Plugin("msgdelay","misc"),
+    : Module("msgdelay","misc"),
       m_handler(0)
 {
     Output("Loaded module MsgDelay");
@@ -103,6 +113,8 @@ void MsgDelay::initialize()
 	    m_handler = new DelayHandler(prio,"msgdelay");
 	    m_handler->setFilter(new NamedPointer("message_delay",new Regexp("^[1-9]")));
 	    Engine::install(m_handler);
+	    installRelay(Level);
+	    installRelay(Command);
 	}
     }
 }
