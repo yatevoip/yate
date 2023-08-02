@@ -317,6 +317,8 @@ static ObjList s_hooks;
 static Semaphore* s_semWorkers = 0;
 static NamedCounter* s_counter = 0;
 static NamedCounter* s_workCnt = 0;
+static String s_applicationStatus;
+static String s_applicationVersion;
 
 const TokenDict Engine::s_callAccept[] = {
     {"accept",      Engine::Accept},
@@ -574,6 +576,8 @@ bool EngineStatusHandler::received(Message &msg)
     msg.retValue() << ",revision=" << YATE_REVISION;
     msg.retValue() << ",githash=" << YATE_GIT_HASH;
     msg.retValue() << ",nodename=" << Engine::nodeName();
+    if (s_applicationStatus)
+	msg.retValue() << ',' << s_applicationStatus;
     msg.retValue() << ";plugins=" << plugins.count();
     msg.retValue() << ",inuse=" << Engine::self()->usedPlugins();
     msg.retValue() << ",handlers=" << Engine::self()->handlerCount();
@@ -783,6 +787,8 @@ void EngineCommand::doCompletion(Message &msg, const String& partLine, const Str
 	completeOne(msg.retValue(),YSTRING("logview"),partWord);
 	completeOne(msg.retValue(),YSTRING("runparam"),partWord);
 	completeOne(msg.retValue(),YSTRING("dispatcher"),partWord);
+	if (!partLine)
+	    completeOne(msg.retValue(),YSTRING("version"),partWord);
     }
     else if (partLine == YSTRING("status")) {
 	completeOne(msg.retValue(),YSTRING("engine"),partWord);
@@ -928,6 +934,14 @@ bool EngineCommand::received(Message &msg)
 	    }
 	    return false;
 	}
+	if (line == YSTRING("version")) {
+	    msg.retValue() << "version:  " << YATE_VERSION << "\r\n";
+	    msg.retValue() << "release:  " << YATE_STATUS YATE_RELEASE << "\r\n";
+	    msg.retValue() << "revision: " << YATE_REVISION << "\r\n";
+	    msg.retValue() << "githash:  " << YATE_GIT_HASH << "\r\n";
+	    msg.retValue() << s_applicationVersion;
+	    return true;
+	}
 	return false;
     }
 
@@ -996,6 +1010,7 @@ bool EngineHelp::received(Message &msg)
     String line = msg.getValue("line");
     if (line.null()) {
 	msg.retValue() << opts << s_evtsOpt << s_logvOpt << s_runpOpt << s_dispatcherOpt;
+	msg.retValue() << "  version\r\n";
 	return false;
     }
     if (line == YSTRING("module"))
@@ -1747,6 +1762,32 @@ int Engine::engineInit()
 	    s_params.addParam("workpath",buf);
     }
 #endif
+    // Handle application related parameters. Do not allow them to be overridden by command line
+    NamedList* app = s_cfg.getSection("application");
+    if (app) {
+	ObjList version;
+	(*app)[YSTRING("report_version")].split(version,',',false);
+	ObjList* ver = version.skipNull();
+	String prefix = (*app)[YSTRING("prefix")];
+	prefix = prefix.safe("application_");
+	for (ObjList* o = app->paramList()->skipNull(); o; o = o->skipNext()) {
+	    NamedString* ns = static_cast<NamedString*>(o->get());
+	    if (ns->name() == YSTRING("report_version")
+		|| ns->name() == YSTRING("report_status")
+		|| ns->name() == YSTRING("prefix"))
+		continue;
+	    if (!ver || ver->find(ns->name())) {
+		if (!s_applicationVersion)
+		    s_applicationVersion = "\r\nApplication:\r\n";
+		s_applicationVersion << ns->name() << ": " << *ns << "\r\n";
+	    }
+	    s_params.addParam(prefix + ns->name(),*ns);
+	}
+	s_applicationStatus = (*app)[YSTRING("report_status")];
+	app->replaceParams(s_applicationStatus);
+	if (s_applicationStatus)
+	    s_applicationStatus = "application=" + s_applicationStatus;
+    }
     // Apply and remove any 'runparam' commands here, before anything can use them
     for (ObjList* cmd = s_cmds ? s_cmds->skipNull() : 0; cmd; ) {
 	String* s = static_cast<String*>(cmd->get());
