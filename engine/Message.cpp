@@ -234,11 +234,33 @@ int Message::commonDecode(const char* str, int offs)
 }
 
 
+void MessageFilter::setFilter(NamedString* filter)
+{
+    Regexp* r = YOBJECT(Regexp,filter);
+    if (r)
+	setFilter(new MatchingItemRegexp(filter->name(),*r));
+    else if (filter)
+	setFilter(new MatchingItemString(filter->name(),*filter));
+    else
+	clearFilter();
+    TelEngine::destruct(filter);
+}
+
+void MessageFilter::set(MatchingItemBase*& dest, MatchingItemBase* src)
+{
+    if (dest == src)
+	return;
+    MatchingItemBase* tmp = dest;
+    dest = src;
+    TelEngine::destruct(tmp);
+}
+
+
 MessageHandler::MessageHandler(const char* name, unsigned priority,
 	const char* trackName, bool addPriority)
     : String(name),
       m_trackName(trackName), m_trackNameOnly(trackName), m_priority(priority),
-      m_dispatcher(0), m_filter(0), m_counter(0)
+      m_dispatcher(0), m_counter(0)
 {
     DDebug(DebugAll,"MessageHandler::MessageHandler('%s',%u,'%s',%s) [%p]",
 	name,priority,trackName,String::boolText(addPriority),this);
@@ -284,27 +306,6 @@ bool MessageHandler::receivedInternal(Message& msg)
     bool ok = received(msg);
     safeNowInternal();
     return ok;
-}
-
-void MessageHandler::setFilter(NamedString* filter)
-{
-    Regexp* r = YOBJECT(Regexp,filter);
-    if (r)
-	setFilter(new MatchingItemRegexp(filter->name(),*r));
-    else if (filter)
-	setFilter(new MatchingItemString(filter->name(),*filter));
-    else
-	clearFilter();
-    TelEngine::destruct(filter);
-}
-
-void MessageHandler::clearFilter()
-{
-    if (!m_filter)
-	return;
-    MatchingItemBase* tmp = m_filter;
-    m_filter = 0;
-    TelEngine::destruct(tmp);
 }
 
 
@@ -560,9 +561,11 @@ bool MessageDispatcher::dispatch(Message& msg)
 	RefPointer<MessagePostHook> ph = static_cast<MessagePostHook*>(l->get());
 	if (ph) {
 	    lck.drop();
-	    if (counting)
-		Thread::setCurrentObjCounter(ph->getObjCounter());
-	    ph->dispatched(msg,retv);
+	    if (ph->matchesMsg(msg)) {
+		if (counting)
+		    Thread::setCurrentObjCounter(ph->getObjCounter());
+		ph->dispatched(msg,retv);
+	    }
 	    ph = 0;
 	    lck.acquire(m_hooksLock);
 	}
@@ -641,19 +644,24 @@ void MessageDispatcher::getStats(u_int64_t& enqueued, u_int64_t& dequeued, u_int
     dispatched = m_dispatchCount;
 }
 
-void MessageDispatcher::setHook(MessagePostHook* hook, bool remove)
+bool MessageDispatcher::setHook(MessagePostHook* hook, bool remove)
 {
+    if (!hook)
+	return false;
     WLock lck(m_hooksLock);
+    ObjList* l = m_hooks.find(hook);
     if (remove) {
 	// zero the hook, we'll compact it later when safe
-	ObjList* l = m_hooks.find(hook);
-	if (l) {
-	    l->set(0,false);
-	    m_hookHole = true;
-	}
+	if (!l)
+	    return false;
+	l->set(0,false);
+	m_hookHole = true;
     }
+    else if (l)
+	return false;
     else
 	m_hookAppend = m_hookAppend->append(hook);
+    return true;
 }
 
 unsigned int MessageDispatcher::fillHandlersInfo(bool byName, const String& match,

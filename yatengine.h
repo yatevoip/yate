@@ -588,12 +588,105 @@ private:
 };
 
 /**
+ * This class holds a message filter
+ * @short A message filter
+ */
+class YATE_API MessageFilter
+{
+public:
+    /**
+     * Constructor
+     */
+    inline MessageFilter()
+	: m_filter(0), m_msgFilter(0)
+	{}
+
+    /**
+     * Destructor
+     */
+    inline ~MessageFilter()
+	{ set(m_filter); set(m_msgFilter); }
+
+    /**
+     * Check if a message matches this filter's rules
+     * @param msg The message to match
+     */
+    inline bool matchesMsg(const Message& msg) const {
+	    return (!m_msgFilter || m_msgFilter->matchString(msg))
+		&& (!m_filter || m_filter->matchListParam(msg));
+	}
+
+    /**
+     * Retrieve the message parameters filter
+     * @return MatchingItemBase pointer, NULL if not set
+     */
+    inline const MatchingItemBase* getFilter() const
+	{ return m_filter; }
+
+    /**
+     * Retrieve the message filter
+     * @return MatchingItemBase pointer, NULL if not set
+     */
+    inline const MatchingItemBase* getMsgFilter() const
+	{ return m_msgFilter; }
+
+    /**
+     * Set the message parameters filter
+     * @param filter Pointer to matching list to set, will be owned and
+     *  destroyed by the filter
+     */
+    inline void setFilter(MatchingItemBase* filter)
+	{ set(m_filter,filter); }
+
+    /**
+     * Set the message filter
+     * @param filter Pointer to matching list to set, will be owned and
+     *  destroyed by the filter
+     */
+    inline void setMsgFilter(MatchingItemBase* filter)
+	{ set(m_msgFilter,filter); }
+
+    /**
+     * Remove and destroy the message parameters filter
+     */
+    inline void clearFilter()
+	{ set(m_filter); }
+
+    /**
+     * Remove and destroy the message filter
+     */
+    inline void clearMsgFilter()
+	{ set(m_msgFilter); }
+
+    /**
+     * Set the message parameters filter
+     * @param filter Pointer to the filter to set, will be owned and
+     *  destroyed by this object. The filter may be a NamedPointer carrying a Regexp
+     */
+    void setFilter(NamedString* filter);
+
+    /**
+     * Set the message parameters filter
+     * @param name Name of the parameter to filter
+     * @param value Value of the parameter to filter
+     */
+    inline void setFilter(const char* name, const char* value)
+	{ setFilter(new MatchingItemString(name,value)); }
+
+private:
+    void set(MatchingItemBase*& dest, MatchingItemBase* src = 0);
+
+    MatchingItemBase* m_filter;
+    MatchingItemBase* m_msgFilter;
+};
+
+/**
  * The purpose of this class is to hold a message received method that is
  *  called for matching messages. It holds as well the matching criteria
  *  and priority among other handlers.
  * @short A message handler
  */
-class YATE_API MessageHandler : public String
+class YATE_API MessageHandler : public String, public MessageFilter
 {
     friend class MessageDispatcher;
     YNOCOPY(MessageHandler); // no automatic copies please
@@ -675,39 +768,7 @@ public:
      * @return MatchingItemBase pointer, NULL if not set
      */
     inline const MatchingItemBase* filter() const
-	{ return m_filter; }
-
-    /**
-     * Set a filters list associated to this handler
-     * @param filter Pointer to the filters list to install, will be owned and
-     *  destroyed by the handler
-     */
-    inline void setFilter(MatchingItemBase* filter) {
-	    if (filter == m_filter)
-		return;
-	    clearFilter();
-	    m_filter = filter;
-	}
-
-    /**
-     * Set a filter for this handler
-     * @param filter Pointer to the filter to install, will be owned and
-     *  destroyed by the handler. The filter may be a NamedPointer carrying a Regexp
-     */
-    void setFilter(NamedString* filter);
-
-    /**
-     * Set a filter for this handler
-     * @param name Name of the parameter to filter
-     * @param value Value of the parameter to filter
-     */
-    inline void setFilter(const char* name, const char* value)
-	{ setFilter(new MatchingItemString(name,value)); }
-
-    /**
-     * Remove and destroy any filter associated to this handler
-     */
-    void clearFilter();
+	{ return getFilter(); }
 
 protected:
     /**
@@ -734,7 +795,6 @@ private:
     unsigned m_priority;
     AtomicInt m_unsafe;
     MessageDispatcher* m_dispatcher;
-    MatchingItemBase* m_filter;
     NamedCounter* m_counter;
 };
 
@@ -833,7 +893,7 @@ public:
  * No new methods are provided - we only need the multiple inheritance.
  * @short Post-dispatching message hook that can be added to a list
  */
-class YATE_API MessagePostHook : public RefObject, public MessageNotifier
+class YATE_API MessagePostHook : public RefObject, public MessageNotifier, public MessageFilter
 {
 };
 
@@ -1035,8 +1095,9 @@ public:
      * Install or remove a hook to catch messages after being dispatched
      * @param hook Pointer to a post-dispatching message hook
      * @param remove Set to True to remove the hook instead of adding
+     * @return True on success, false on failure (may fail if already found in the list)
      */
-    void setHook(MessagePostHook* hook, bool remove = false);
+    bool setHook(MessagePostHook* hook, bool remove = false);
 
     /**
      * Fill handlers status info
@@ -1682,9 +1743,10 @@ public:
      * Install or remove a hook to catch messages after being dispatched
      * @param hook Pointer to a post-dispatching message hook
      * @param remove Set to True to remove the hook instead of adding
+     * @return True on success, false on failure (may fail if already found in the list)
      */
-    inline void setHook(MessagePostHook* hook, bool remove = false)
-	{ m_dispatcher.setHook(hook,remove); }
+    inline bool setHook(MessagePostHook* hook, bool remove = false)
+	{ return m_dispatcher.setHook(hook,remove); }
 
     /**
      * Retrieve the tracker parameter name
