@@ -93,9 +93,10 @@ eliza=eliza.js
 ; parameters_prefix: Prefix for handler parameters specified in separate section parameters
 ; filter: Message handler filter.
 ;     Format: filter_param=filter_value. Ignored if 'filter_param' is empty.
-;     filter_value starting with '^' char is handled as regular expression
+;     filter_value starting with '^' char is handled as extended POSIX regular expression
+;     filter_value with length greater than 1 and ending with ^ will be negated (match when regexp does not match)
 ; context: String to be passed to callback function
-; script_name: Name of the script. Used internally for debug purposes. Use 'script_file_name' if empty
+; script_name: Name of the script. Used internally for debug purposes. Use 'filename' if empty
 ;
 ; Notes:
 ; - The following parameters are used to identify a handler:
@@ -111,9 +112,51 @@ eliza=eliza.js
 ; context: string: Context to be passed to callback function
 ; filter: string: Message handler filter. See handler description for format
 ; track_priority: boolean: Add priority to tracked name. Default: true
-; load_extensions: boolean: Load extension in script context when a message is handled
+; load_extensions: boolean: Load extensions in script context when a message is handled
 ;   This parameter is applied on reload
 ;   Default: [general] 'auto_extensions'
+;   NOTE: Extensions won't be loaded if handled message is script.init
 ; keep_old_on_fail: boolean: Keep old code if failed to parse the new one
 ;   This parameter is used when handler is re-loaded and script changed
 ;   Default: [general] 'keep_old_on_fail'
+
+[posthooks]
+; Install singleton message posthooks
+; These posthooks are running using a separate context for each handled message
+;
+; Description:
+; id=filename,callback,parameters_prefix,filter,context,msg_name_filter,script_name
+;
+; Parameters (optional, unless otherwise specified):
+; id: Ignored
+; filename: Required. Script to load
+; callback: Required. Callback function. Function is required to be present in script code
+; parameters_prefix: Prefix for posthook parameters specified in separate section parameters
+; filter: Message parameters filter. See [handler] filter for description
+; msg_name_filter: Message name filter. Same as parameters filter
+; context: String to be passed to callback function
+; script_name: Name of the script. Used internally for debug purposes. Use 'filename' if empty
+;
+; Notes:
+; - The following parameters are used to identify a posthook:
+;   id,filename,callback,filter,context,msg_name_filter,script_name
+;   An existing posthook whose identity changed (not found in config) is removed at reload
+
+; handlerparam:<parameters_prefix>:<param_name>: string: Configure a parameters for a posthook
+; Some of these parameters may be set in posthook description also (ignored here if so)
+; They may be configured here since they may contain ',' in their contents
+; Parameters:
+; debug: string: Script debug (e.g. 'level 10'). This parameter is applied on reload
+; context: string: Context to be passed to callback function
+; filter: string: Message parameters filter. See posthook description for format
+; msg_name_filter: string: Message name filter. See posthook description for format
+; load_extensions: boolean: Load extensions in script context when a message is handled
+;   This parameter is applied on reload
+;   Default: [general] 'auto_extensions'
+;   NOTE: Extensions won't be loaded if handled message is script.init and posthook message name
+;         matches script.init
+; keep_old_on_fail: boolean: Keep old code if failed to parse the new one
+;   This parameter is used when posthook is re-loaded and script changed
+;   Default: [general] 'keep_old_on_fail'
+; engine.timer: boolean: Set it to true to force handling of engine.timer message
+;   engine.timer is ignore by default if a message name filter was not set

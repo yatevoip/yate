@@ -96,13 +96,6 @@ static inline const NamedList* getObjParams(GenObject* op)
     return jso ? (jso->nativeParams() ? jso->nativeParams() : &jso->params()) : 0;
 }
 
-static inline void moveList(ObjList& dest, ObjList& src)
-{
-    ObjList* add = &dest;
-    while (GenObject* gen = src.remove(false))
-	add = add->append(gen);
-}
-
 // Temporary class used to store an object from received parameter or build a new one to be used
 // Safely release created object
 template <class Obj> class ExpOpTmpObj
@@ -214,6 +207,7 @@ public:
 	{ return lookup(type(),s_type); }
     inline void fill(JsObject& jso) {
 	    jso.setIntField("type",type());
+	    jso.setStringField("type_name",typeName());
 	}
 
     static inline void set(JsObject& jso, ScriptInfo* si) {
@@ -529,9 +523,7 @@ public:
 	}
     inline void clear() {
 	    ObjList tmp;
-	    WLock lck(m_lock);
-	    moveList(tmp,m_objects);
-	    lck.drop();
+	    m_objects.move(&tmp,&m_lock);
 #ifdef JS_DEBUG_SharedJsObject
 	    if (tmp.skipNull())
 		Debug(&__plugin,DebugAll,"SharedObjList(%s) removed %u item(s) [%p]",c_str(),tmp.count(),this);
@@ -617,11 +609,13 @@ public:
 	int type, bool relPath = true, unsigned int instances = 0);
     static bool reloadScript(const String& scriptName);
     static void loadScripts(const NamedList* sect, const NamedList* instSect);
-    static void loadHandlers(const NamedList* sect);
+    static void loadHandlers(const NamedList* sect, bool handler = true);
     inline static ObjList& globals()
 	{ return s_globals; }
     inline static ObjList& handlers()
 	{ return s_handlers; }
+    inline static ObjList& posthooks()
+	{ return s_posthooks; }
     static inline void unloadAll() {
 	    unload(false);
 	    s_sharedObj.clear();
@@ -643,6 +637,7 @@ private:
     ObjList m_instances;
     static ObjList s_globals;
     static ObjList s_handlers;           // Global message handlers using single script runners
+    static ObjList s_posthooks;          // Global message posthooks using single script runners
 };
 
 class JsShared : public JsObject
@@ -1000,6 +995,8 @@ public:
 	const char** reason = 0, bool allowObjValue = true);
     static JsObject* buildJsObj(const MatchingItemBase* item,
 	GenObject* context, unsigned int line, ScriptMutex* mutex, bool forceBoolProps = false);
+    static MatchingItemBase* buildFilter(const String& name, GenObject* value,
+	GenObject* flt = 0, bool emptyValueOk = true);
 
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -1140,6 +1137,8 @@ public:
 	{ return m_worker; }
     inline const String& schedName() const
 	{ return m_schedName; }
+    inline const String& getDebugName() const
+	{ return m_debugName; }
     void setDebug(String str);
     inline void setConstructorPrototype(JsObject* jso, const String& name) {
 	    if (!jso)
@@ -1163,7 +1162,7 @@ public:
 	    *eng = YOBJECT(JsEngine,ctx->params().getParam(YSTRING("Engine")));
 	    return *eng;
 	}
-    // Retrieve a contructor prototype from Engine object held by running context
+    // Set a contructor prototype from Engine object held by running context
     static inline void setConstructorPrototype(GenObject* context, JsObject* jso, const String& name) {
 	    if (!(context && jso))
 		return;
@@ -1226,23 +1225,7 @@ public:
 	    XDebug(&__plugin,DebugAll,"JsMessage::JsMessage(%p) [%p]",message,this);
 	    setTrace();
 	}
-    virtual ~JsMessage()
-	{
-	    XDebug(&__plugin,DebugAll,"JsMessage::~JsMessage() [%p]",this);
-	    if (m_owned)
-		TelEngine::destruct(m_message);
-	    if (Engine::exiting()) {
-		while (m_handlers.remove(false))
-		    ;
-		while (m_handlersSingleton.remove(false))
-		    ;
-	    }
-	    for (ObjList* o = m_hooks.skipNull();o;o = o->skipNext()) {
-		MessageHook* hook = static_cast<MessageHook*>(o->get());
-		Engine::uninstallHook(hook);
-	    }
-	    TelEngine::destruct(m_traceLst);
-	}
+    virtual ~JsMessage();
     virtual void* getObject(const String& name) const;
     virtual NamedList* nativeParams() const
 	{ return m_message; }
@@ -1257,11 +1240,16 @@ public:
 	    construct->params().addParam(new ExpFunction("handlers"));
 	    construct->params().addParam(new ExpFunction("uninstallHook"));
 	    construct->params().addParam(new ExpFunction("installHook"));
+	    construct->params().addParam(new ExpFunction("installPostHook"));
+	    construct->params().addParam(new ExpFunction("uninstallPostHook"));
+	    construct->params().addParam(new ExpFunction("posthooks"));
 	    construct->params().addParam(new ExpFunction("trackName"));
 	    if (m_allowSingleton) {
 		construct->params().addParam(new ExpFunction("installSingleton"));
 		construct->params().addParam(new ExpFunction("uninstallSingleton"));
 		construct->params().addParam(new ExpFunction("handlersSingleton"));
+		construct->params().addParam(new ExpFunction("installPostHookSingleton"));
+		construct->params().addParam(new ExpFunction("posthooksSingleton"));
 	    }
 	}
     inline void clearMsg()
@@ -1293,9 +1281,11 @@ protected:
     void getResult(ObjList& stack, const ExpOperation& row, const ExpOperation& col, GenObject* context);
     bool install(ObjList& stack, const ExpOperation& oper, GenObject* context, bool regular);
     bool uninstall(ObjList& stack, const ExpOperation& oper, GenObject* context, bool regular);
-    bool listHandlers(ObjList& stack, const ExpOperation& oper, GenObject* context, bool regular);
+    bool setPostHook(ObjList& stack, const ExpOperation& oper, GenObject* context, bool set, bool regular = true);
+    bool listHandlers(ObjList& stack, const ExpOperation& oper, GenObject* context, bool regular,
+	bool post = false);
     bool installHook(ObjList& stack, const ExpOperation& oper, GenObject* context);
-    inline void setTrace() 
+    inline void setTrace()
     {
 	m_traceId = m_message ? m_message->getValue(YSTRING("trace_id")) : "";
 	m_traceLvl = m_message ? m_message->getIntValue(YSTRING("trace_lvl"),DebugInfo,DebugGoOn,DebugAll) : DebugInfo;
@@ -1305,6 +1295,7 @@ protected:
     ObjList m_handlers;
     ObjList m_hooks;
     ObjList m_handlersSingleton;
+    ObjList m_postHooks;
     String m_trackName;
     Message* m_message;
     bool m_dispatch;
@@ -1357,67 +1348,72 @@ protected:
     JsScriptRunBuild* m_dispatchedCb;    // Callback for message dispatched
 };
 
-class JsHandler : public MessageHandler, public ScriptInfoHolder
+class JsHandler;
+class JsMessageHandle : public ScriptInfoHolder
 {
-    YCLASS(JsHandler,MessageHandler)
 public:
     enum Type {
 	Regular = 0,                     // Regular handler in script
 	MsgHandlerGlobal,                // Singleton context: global
 	MsgHandlerScript,                // Singleton context: in script
     };
-    inline JsHandler(const char* name, unsigned priority, const String& func,
-	GenObject* context, unsigned int lineNo, const NamedList* params)
-	: MessageHandler(name,priority,__plugin.name()),
-	ScriptInfoHolder(ScriptInfo::get(context)),
-	m_type(Regular), m_function(func,2), m_lineNo(lineNo),
-	m_inUse(true), m_mutex(0), m_script(0)
+    inline JsMessageHandle(JsHandler* handler, const char* name, unsigned int priority,
+	const String& func, GenObject* context, unsigned int lineNo, const NamedList* params,
+	const char* id = 0)
+	: ScriptInfoHolder(ScriptInfo::get(context)),
+	m_type(Regular), m_function(func,handler ? 2 : 3), m_lineNo(lineNo),
+	m_inUse(true), m_mutex(0), m_script(0), m_handler(handler),
+	m_matchesScriptInit(false)
 	{
+	    if (!handler)
+		m_handlerContext = m_id = id;
 	    if (params)
 		initialize(*params);
 	    setFromContext(context);
 	    m_desc << name << '=' << func;
 	    m_desc.append(m_id,",");
-	    XDebug(&__plugin,DebugAll,"JsHandler::JsHandler('%s',%u,'%s',%p,%u) type=%d id='%s' [%p]",
-		name,priority,func.c_str(),context,lineNo,type(),m_id.safe(),this);
+	    trackLife(true,priority);
 	}
-    inline JsHandler(const String& id, const String& func, const String& desc,
-	const char* name, unsigned int priority, const String& handlerContext)
-	: MessageHandler(name,priority,__plugin.name()),
-	ScriptInfoHolder(0,ScriptInfo::MsgHandler),
-	m_type(MsgHandlerGlobal), m_function(func,2), m_lineNo(0),
-	m_inUse(true), m_mutex(new Mutex(false,"JsHandler")), m_id(id),
-	m_handlerContext(handlerContext), m_script(0), m_desc(desc)
+    inline JsMessageHandle(JsHandler* handler, const String& id, const String& func,
+	const String& desc, const char* name, unsigned int priority, const String& handlerContext)
+	: ScriptInfoHolder(0,ScriptInfo::MsgHandler),
+	m_type(MsgHandlerGlobal), m_function(func,handler ? 2 : 3), m_lineNo(0),
+	m_inUse(true), m_mutex(new Mutex(false,cls(handler))), m_id(id),
+	m_handlerContext(handlerContext), m_script(0), m_desc(desc), m_handler(handler),
+	m_matchesScriptInit(false)
 	{
-	    XDebug(&__plugin,DebugAll,"JsHandler type=%d %s created [%p]",type(),this->desc(),this);
+	    trackLife(true,priority);
 	}
-    inline JsHandler(GenObject* context, const String& id, const String& func,
-	const char* name, unsigned int priority,
+    inline JsMessageHandle(JsHandler* handler, GenObject* context, const String& id,
+	const String& func, const char* name, unsigned int priority,
 	const String& handlerContext, unsigned int lineNo, const NamedList* params)
-	: MessageHandler(name,priority,__plugin.name()),
-	ScriptInfoHolder(0,ScriptInfo::MsgHandler),
-	m_type(MsgHandlerScript), m_function(func,2), m_lineNo(lineNo),
-	m_inUse(true), m_mutex(new Mutex(false,"JsHandler")), m_id(id),
-	m_handlerContext(handlerContext), m_script(0), m_desc(id)
+	: ScriptInfoHolder(0,ScriptInfo::MsgHandler),
+	m_type(MsgHandlerScript), m_function(func,handler ? 2 : 3), m_lineNo(lineNo),
+	m_inUse(true), m_mutex(new Mutex(false,cls(handler))), m_id(id),
+	m_handlerContext(handlerContext), m_script(0), m_desc(id), m_handler(handler),
+	m_matchesScriptInit(false)
 	{
 	    if (params)
 		initialize(*params);
 	    setFromContext(context);
 	    if (m_code)
 		m_script = new JsGlobal("","",ScriptInfo::MsgHandler);
-	    XDebug(&__plugin,DebugAll,"JsHandler type=%d %s created [%p]",type(),desc(),this);
+	    trackLife(true,priority);
 	}
-    virtual ~JsHandler()
+    virtual ~JsMessageHandle()
 	{
-	    XDebug(&__plugin,DebugAll,"JsHandler type=%d %s destroyed [%p]",type(),desc(),this);
+	    trackLife(false);
 	    TelEngine::destruct(m_script);
 	    if (m_mutex)
 		delete m_mutex;
 	}
+
     inline int type() const
 	{ return m_type; }
     inline bool regular() const
 	{ return type() == Regular; }
+    inline JsHandler* handler() const
+	{ return m_handler; }
     inline const ExpFunction& function() const
 	{ return m_function; }
     inline const String& id() const
@@ -1438,44 +1434,27 @@ public:
 	}
     bool initialize(const NamedList& params, const String& scriptName = String::empty(),
 	const String& scriptFile = String::empty(), const String& prefix = String::empty());
-    virtual bool received(Message& msg)
-	{ return false; }
-    inline void setHandlerFilter(const String& param, GenObject* val) {
-	    if (!(param && val))
-		return;
-	    if (YOBJECT(ExpOperation,val)) {
-		JsRegExp* rexp = YOBJECT(JsRegExp,val);
-		if (rexp)
-		    MessageHandler::setFilter(new MatchingItemRegexp(param,rexp->regexp()));
-		else
-		    MessageHandler::setFilter(param,static_cast<ExpOperation*>(val)->c_str());
-	    }
-	    else {
-		const String& s = val->toString();
-		if (s.startsWith("regexp:"))
-		    MessageHandler::setFilter(new MatchingItemRegexp(param,s.substr(7)));
-		else
-		    MessageHandler::setFilter(param,s);
-	    }
-	}
-    inline void setTrackName(const String& str, bool prio) {
-	    if (!str)
-		return;
-	    if (prio)
-		trackName(str + ":" + String(priority()));
-	    else
-		trackName(str);
-	}
+    void prepare(GenObject* name, GenObject* value, const NamedList* params = 0,
+	GenObject* msgName = 0, const String& trackName = String::empty(), bool trackPrio = true);
 
-    static inline ObjList* findId(const String& id, ObjList& list) {
-	    for (ObjList* o = list.skipNull(); o; o = o->skipNext())
-		if (id == static_cast<JsHandler*>(o->get())->id())
-		    return o;
-	    return 0;
+    static bool install(GenObject* gen);
+    static bool uninstall(GenObject* gen);
+    static inline void uninstall(ObjList& list, const String& id) {
+	    ObjList* o = findId(id,list);
+	    if (o)
+		uninstall(o->remove(false));
 	}
+    static inline void uninstall(ObjList& list) {
+	    for (ObjList* o = list.skipNull(); o; o = o->skipNull())
+		uninstall(o->remove(false));
+	}
+    static ObjList* findId(const String& id, ObjList& list);
+    static inline const char* cls(bool handler)
+	{ return handler ? "JsHandler" : "JsPostHook"; }
+    static inline const char* clsType(bool handler)
+	{ return handler ? "handler" : "posthook"; }
 
 protected:
-    virtual bool receivedInternal(Message& msg);
     inline void setFromContext(GenObject* context) {
 	    ScriptRun* runner = YOBJECT(ScriptRun,context);
 	    if (!runner)
@@ -1483,8 +1462,20 @@ protected:
 	    m_context = runner->context();
 	    m_code = runner->code();
 	}
+    bool handle(Message& msg, bool handled = false);
 
 private:
+    inline void trackLife(bool create = true, unsigned int prio = 0) {
+#ifdef XDEBUG
+	    String extra;
+	    if (create) {
+		if (m_handler)
+		    extra << " priority=" << prio;
+	    }
+	    Debug(&__plugin,DebugAll,"%s type=%d %s%s %s [%p]",
+		cls(handler()),type(),desc(),extra.safe(),create ? "created" : "destroyed",this);
+#endif
+	}
     int m_type;
     ExpFunction m_function;
     RefPointer<ScriptContext> m_context;
@@ -1498,6 +1489,58 @@ private:
     String m_handlerContext;             // Context to be passed to script
     JsGlobal* m_script;                  // Parsed script
     String m_desc;
+    JsHandler* m_handler;                // Pointer to derived message handler
+    bool m_matchesScriptInit;            // Handler matches script.init
+};
+
+class JsHandler : public MessageHandler, public JsMessageHandle
+{
+    YCLASS(JsHandler,MessageHandler)
+    friend class JsMessageHandle;
+public:
+    inline JsHandler(const char* name, unsigned priority, const String& func,
+	GenObject* context, unsigned int lineNo, const NamedList* params)
+	: MessageHandler(name,priority,__plugin.name()),
+	JsMessageHandle(this,name,priority,func,context,lineNo,params)
+	{}
+    inline JsHandler(const String& id, const String& func, const String& desc,
+	const char* name, unsigned int priority, const String& handlerContext)
+	: MessageHandler(name,priority,__plugin.name()),
+	JsMessageHandle(this,id,func,desc,name,priority,handlerContext)
+	{}
+    inline JsHandler(GenObject* context, const String& id, const String& func,
+	const char* name, unsigned int priority,
+	const String& handlerContext, unsigned int lineNo, const NamedList* params)
+	: MessageHandler(name,priority,__plugin.name()),
+	JsMessageHandle(this,context,id,func,name,priority,handlerContext,lineNo,params)
+	{}
+    virtual bool received(Message& msg)
+	{ return false; }
+
+protected:
+    virtual bool receivedInternal(Message& msg)
+	{ return handle(msg); }
+};
+
+class JsPostHook : public MessagePostHook, public JsMessageHandle
+{
+    YCLASS(JsPostHook,MessagePostHook)
+public:
+    inline JsPostHook(const String& func, const String& id,
+	GenObject* context, unsigned int lineNo, const NamedList* params)
+	: JsMessageHandle(0,(const char*)0,(unsigned int)0,func,context,lineNo,params,id)
+	{}
+    inline JsPostHook(const String& id, const String& func, const String& desc,
+	const String& handlerContext)
+	: JsMessageHandle(0,id,func,desc,(const char*)0,(unsigned int)0,handlerContext)
+	{}
+    inline JsPostHook(GenObject* context, const String& id, const String& func,
+	const String& handlerContext, unsigned int lineNo, const NamedList* params)
+	: JsMessageHandle(0,context,id,func,(const char*)0,(unsigned int)0,
+	    handlerContext,lineNo,params)
+	{}
+    virtual void dispatched(const Message& msg, bool handled)
+	{ handle((Message&)msg,handled); }
 };
 
 class JsMessageQueue : public MessageQueue, public ScriptInfoHolder
@@ -3594,6 +3637,21 @@ JsObject* JsSharedObjects::runConstructor(ObjList& stack, const ExpOperation& op
 }
 
 
+JsMessage::~JsMessage()
+{
+    XDebug(&__plugin,DebugAll,"JsMessage::~JsMessage() [%p]",this);
+    if (m_owned)
+	TelEngine::destruct(m_message);
+    JsMessageHandle::uninstall(m_handlers);
+    JsMessageHandle::uninstall(m_handlersSingleton);
+    JsMessageHandle::uninstall(m_postHooks);
+    for (ObjList* o = m_hooks.skipNull();o;o = o->skipNext()) {
+	MessageHook* hook = static_cast<MessageHook*>(o->get());
+	Engine::uninstallHook(hook);
+    }
+    TelEngine::destruct(m_traceLst);
+}
+
 void* JsMessage::getObject(const String& name) const
 {
     void* obj = (name == YATOM("JsMessage")) ? const_cast<JsMessage*>(this) : JsObject::getObject(name);
@@ -3729,15 +3787,14 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    return false;
 	const String& name = *static_cast<ExpOperation*>(args[0]);
 	const ExpOperation& val = *static_cast<const ExpOperation*>(args[1]);
-	if (m_message && name) {
+	bool ok = m_message && name && !frozen();
+	if (ok) {
 	    if (JsParser::isUndefined(val))
 		m_message->clearParam(name);
 	    else
 		m_message->setParam(name,val);
-	    ExpEvaluator::pushOne(stack,new ExpOperation(true));
 	}
-	else
-	    ExpEvaluator::pushOne(stack,new ExpOperation(false));
+	ExpEvaluator::pushOne(stack,new ExpOperation(ok));
     }
     else if (oper.name() == YSTRING("getColumn")) {
 	ObjList args;
@@ -3821,14 +3878,24 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	return install(stack,oper,context,true);
     else if (oper.name() == YSTRING("installSingleton"))
 	return install(stack,oper,context,false);
+    else if (oper.name() == YSTRING("installPostHook"))
+	return setPostHook(stack,oper,context,true,true);
+    else if (oper.name() == YSTRING("installPostHookSingleton"))
+	return setPostHook(stack,oper,context,true,false);
     else if (oper.name() == YSTRING("uninstall"))
 	return uninstall(stack,oper,context,true);
     else if (oper.name() == YSTRING("uninstallSingleton"))
 	return uninstall(stack,oper,context,false);
+    else if (oper.name() == YSTRING("uninstallPostHook"))
+	return setPostHook(stack,oper,context,false);
     else if (oper.name() == YSTRING("handlers"))
 	return listHandlers(stack,oper,context,true);
     else if (oper.name() == YSTRING("handlersSingleton"))
 	return listHandlers(stack,oper,context,false);
+    else if (oper.name() == YSTRING("posthooks"))
+	return listHandlers(stack,oper,context,true,true);
+    else if (oper.name() == YSTRING("posthooksSingleton"))
+	return listHandlers(stack,oper,context,false,true);
     else if (oper.name() == YSTRING("installHook"))
 	return installHook(stack,oper,context);
     else if (oper.name() == YSTRING("uninstallHook")) {
@@ -3967,12 +4034,14 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 		String* name = static_cast<String*>(args[0]);
 		if (TelEngine::null(name))
 		    return true;
-		m_message->clearParam(*name,sep);
+		if (!frozen())
+		    m_message->clearParam(*name,sep);
 		break;
 	    }
 	    default:
 		return false;
 	}
+	ExpEvaluator::pushOne(stack,new ExpOperation(!frozen()));
     }
     else if (oper.name() == YSTRING("trace")) {
 	if (!m_message)
@@ -4094,22 +4163,16 @@ bool JsMessage::install(ObjList& stack, const ExpOperation& oper, GenObject* con
 	new JsHandler(*name,prio,func->name(),context,oper.lineNumber(),params) :
 	new JsHandler(context,*handlerContext,func->name(),*name,prio,*handlerContext,
 	    oper.lineNumber(),params);
-    if (filterName) {
-	JsMatchingItem* mi = YOBJECT(JsMatchingItem,filterName);
-	if (mi)
-	    h->setFilter(mi->copyMatching(true));
-	else
-	    h->setHandlerFilter(*filterName,filterValue);
+    h->prepare(filterName,filterValue,params,0,m_trackName,m_trackPrio);
+    if (JsMessageHandle::install(h)) {
+	ObjList& lst = h->regular() ? m_handlers: m_handlersSingleton;
+	if (h->id())
+	    JsMessageHandle::uninstall(lst,h->id());
+	lst.append(h);
     }
-    h->setTrackName(m_trackName,m_trackPrio);
-    Engine::install(h);
-    ObjList& lst = h->regular() ? m_handlers: m_handlersSingleton;
-    if (h->id()) {
-	ObjList* old = JsHandler::findId(h->id(),lst);
-	if (old)
-	    old->remove();
-    }
-    lst.append(h);
+    else
+	TelEngine::destruct(h);
+    ExpEvaluator::pushOne(stack,new ExpOperation(!!h));
     return true;
 }
 
@@ -4119,61 +4182,127 @@ bool JsMessage::uninstall(ObjList& stack, const ExpOperation& oper, GenObject* c
     // Message.uninstall(nameOrId[,byId]])
     // Message.uninstallSingleton(id)
     ExpOperVector args;
-    if (!extractStackArgs(0,regular ? 2 : 1,args,this,stack,oper,context))
+    if (!extractStackArgs(1,regular ? 2 : 1,args,this,stack,oper,context))
 	return false;
     ObjList& lst = regular ? m_handlers : m_handlersSingleton;
     if (!args.length()) {
-	lst.clear();
+	JsMessageHandle::uninstall(lst);
 	return true;
     }
     if (!args[0])
 	return false;
-    if (regular && !(args[1] && args[1]->valBoolean())) {
-	lst.remove(*args[0]);
+    ObjList* rm = 0;
+    // Remove regular handler by name
+    if (regular && !(args[1] && args[1]->valBoolean()))
+	rm = lst.find(*args[0]);
+    else
+	rm = JsMessageHandle::findId(*args[0],lst);
+    if (rm)
+	JsMessageHandle::uninstall(rm->remove(false));
+    return true;
+}
+
+bool JsMessage::setPostHook(ObjList& stack, const ExpOperation& oper, GenObject* context,
+    bool set, bool regular)
+{
+    // Message.installPostHook(func,id[,filterMsg[,filterName[,filterValue[,params]]]])
+    // Message.installPostHookSingleton(func,id[,filterMsg[,filterName[,filterValue[,params]]]])
+    // Message.uninstallPostHook(id)
+    ExpOperVector args;
+    if (!extractStackArgs(set ? 2 : 1,set ? 6 : 1,args,this,stack,oper,context))
+	return false;
+
+    ExpOperation* id = args[set ? 1 : 0];
+    if (!set) {
+	if (args.length()) {
+	    if (!(id && *id))
+		return false;
+	    JsMessageHandle::uninstall(m_postHooks,*id);
+	}
+	else
+	    JsMessageHandle::uninstall(m_postHooks);
 	return true;
     }
-    ObjList* o = JsHandler::findId(*args[0],lst);
-    if (o)
-	o->remove();
+
+    const ExpFunction* func = getFunction(args[0]);
+    if (!(id && *id && func))
+	return false;
+    ExpOperation* filterMsg = args[2];
+    ExpOperation* filterName = args[3];
+    ExpOperation* filterValue = args[4];
+    const NamedList* params = getObjParams(args[5]);
+    JsPostHook* h = regular ?
+	new JsPostHook(func->name(),*id,context,oper.lineNumber(),params) :
+	new JsPostHook(context,*id,func->name(),*id,oper.lineNumber(),params);
+    h->prepare(filterName,filterValue,params,filterMsg);
+    if (JsMessageHandle::install(h)) {
+	// Remove old
+	JsMessageHandle::uninstall(m_postHooks,*id);
+	m_postHooks.append(h);
+    }
+    else
+	TelEngine::destruct(h);
+    ExpEvaluator::pushOne(stack,new ExpOperation(!!h));
     return true;
 }
 
 bool JsMessage::listHandlers(ObjList& stack, const ExpOperation& oper, GenObject* context,
-    bool regular)
+    bool regular, bool post)
 {
     // Message.handlers([filter])
     // Message.handlersSingleton([filter])
+    // Message.posthooks()
     ObjList args;
     ExpOperation* name = 0;
     if (!extractStackArgs(0,this,stack,oper,context,args,&name))
 	return false;
     JsRegExp* rexp = YOBJECT(JsRegExp,name);
     JsArray* jsa = 0;
-    ObjList& lst = regular ? m_handlers : m_handlersSingleton;
+    ObjList& lst = post ? m_postHooks : (regular ? m_handlers : m_handlersSingleton);
+    JsHandler* h = 0;
+    JsPostHook* hPost = 0;
     for (ObjList* l = lst.skipNull(); l; l = l->skipNext()) {
-	const JsHandler* h = static_cast<JsHandler*>(l->get());
-	if (rexp) {
-	    if (!rexp->regexp().matches(*h))
+	if (post) {
+	    hPost = static_cast<JsPostHook*>(l->get());
+	    if (regular != !!hPost->regular())
 		continue;
 	}
-	else if (name && (*h != *name))
-	    continue;
+	else {
+	    h = static_cast<JsHandler*>(l->get());
+	    if (rexp) {
+		if (!rexp->regexp().matches(*h))
+		    continue;
+	    }
+	    else if (name && (*h != *name))
+		continue;
+	}
+	JsMessageHandle* common = post ?
+	    static_cast<JsMessageHandle*>(hPost) :
+	    static_cast<JsMessageHandle*>(h);
 	if (!jsa)
 	    jsa = new JsArray(context,oper.lineNumber(),mutex());
 	JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
-	jso->params().setParam(new ExpOperation(*h,"name"));
-	jso->params().setParam(new ExpOperation((int64_t)h->priority(),"priority"));
-	JsObject* f = JsMatchingItem::buildJsObj(h->filter(),context,oper.lineNumber(),mutex());
+	if (hPost)
+	    jso->params().setParam(new ExpOperation(common->id(),"id"));
+	if (h) {
+	    jso->params().setParam(new ExpOperation(*h,"name"));
+	    jso->params().setParam(new ExpOperation((int64_t)h->priority(),"priority"));
+	}
+	JsObject* f = JsMatchingItem::buildJsObj(hPost ? hPost->getMsgFilter() : h->getMsgFilter(),
+	    context,oper.lineNumber(),mutex());
+	if (f)
+	    jso->setObjField("msg_filter",f);
+	f = JsMatchingItem::buildJsObj(hPost ? hPost->getFilter() : h->getFilter(),
+	    context,oper.lineNumber(),mutex());
 	if (f)
 	    jso->setObjField("filter",f);
-	if (h->trackName())
+	if (h && h->trackName())
 	    jso->params().setParam(new ExpOperation(h->trackName(),"trackName"));
-	if (h->regular())
-	    jso->params().setParam(new ExpOperation(h->function().name(),"handler"));
-	if (h->handlerContext())
-	    jso->params().setParam(new ExpOperation(h->handlerContext(),"message_context"));
-	if (h->id())
-	    jso->params().setParam(new ExpOperation(h->id(),"id"));
+	jso->params().setParam(new ExpOperation(common->function().name(),"handler"));
+	if (common->handlerContext())
+	    jso->params().setParam(new ExpOperation(common->handlerContext(),"message_context"));
+	if (h && common->id())
+	    jso->params().setParam(new ExpOperation(common->id(),"id"));
 	jsa->push(new ExpWrapper(jso));
     }
     pushStackResNull(stack,jsa ? new ExpWrapper(jsa,oper.name()) : 0);
@@ -4454,29 +4583,30 @@ void JsMessage::initialize(ScriptContext* context, bool allowSingleton)
 }
 
 
-bool JsHandler::receivedInternal(Message& msg)
+bool JsMessageHandle::handle(Message& msg, bool handled)
 {
+    bool postHook = !handler();
     bool doHandle = !s_engineStop;
+    bool regular = this->regular();
     if (doHandle) {
-	if (regular())
+	if (regular)
 	    doHandle = m_code;
 	else
 	    doHandle = m_script || m_code;
     }
     if (!doHandle) {
-	safeNowInternal();
+	if (m_handler)
+	    m_handler->safeNowInternal();
 	return false;
     }
-    XDebug(&__plugin,DebugAll,"Running %s message handler for '%s' [%p]",
-	m_function.name().c_str(),desc(),this);
+    XDebug(&__plugin,DebugAll,"Running %s message %s for '%s' [%p]",
+	m_function.name().c_str(),clsType(handler()),desc(),this);
 #ifdef JS_DEBUG_JsMessage_received
     uint64_t tm = Time::now();
-    String hDesc = desc();
 #endif
     String dbg, loadExt;
     ScriptRun* runner = 0;
-    bool regularHandler = regular();
-    if (regularHandler) {
+    if (regular) {
 	runner = m_code->createRunner(m_context,NATIVE_TITLE);
 	attachScriptInfo(runner);
     }
@@ -4498,15 +4628,19 @@ bool JsHandler::receivedInternal(Message& msg)
 	}
     }
     if (!runner) {
-	safeNowInternal();
+	if (m_handler)
+	    m_handler->safeNowInternal();
 	return false;
     }
     
-    if (!regularHandler) {
+    if (!regular) {
 	// TODO: Track object creation if we implement a mechanism to investigate it
 	//       It is useless to enable tracking for now: the context will be destroyed on return
 	//runner->context()->trackObjs(s_trackCreation);
-	contextInit(runner,"MessageHandler",loadExt.toBoolean(s_autoExt));
+	// Avoid recursive handling of script.init
+	bool autoExt = loadExt.toBoolean(s_autoExt) &&
+	    (!m_matchesScriptInit || msg != YSTRING("script.init"));
+	contextInit(runner,postHook ? "MessagePostHook" : "MessageHandler",autoExt);
 	if (dbg || m_context) {
 	    JsEngine* eng = JsEngine::get(runner);
 	    if (eng) {
@@ -4530,17 +4664,23 @@ bool JsHandler::receivedInternal(Message& msg)
     String name = m_function.name();
     String handlerCtx = m_handlerContext;
     // Starting from here the handler may be safely uninstalled and destroyed
-    safeNowInternal();
+    if (m_handler)
+	m_handler->safeNowInternal();
+    else
+	// Freeze the message
+	jm->freeze();
 
     ObjList args;
     args.append(new ExpWrapper(jm,"message"));
-    if (handlerCtx || !regularHandler)
+    if (postHook)
+	args.append(new ExpOperation(handled));
+    if (handlerCtx || !regular)
 	args.append(new ExpOperation(handlerCtx));
 #ifdef JS_DEBUG_JsMessage_received
     uint64_t run = Time::now();
 #endif
     ScriptRun::Status rval = ScriptRun::Succeeded;
-    if (regularHandler)
+    if (regular)
 	rval = runner->call(name,args);
     else {
 	// Init globals and call the function handling the message
@@ -4550,13 +4690,19 @@ bool JsHandler::receivedInternal(Message& msg)
     }
 #ifdef JS_DEBUG_JsMessage_received
     run = Time::now() - run;
+    String info(postHook ? "PostHook" : "Handler");
+    info << " type=" << type();
+    // NOTE: The following is not thread safe
+    JsEngine* eng = JsEngine::get(runner); if (eng) info << " engine='" << eng->getDebugName() << "'";
+    info << " for '" << msg.safe() << "' desc='" << desc() << "'";
 #endif
     jm->clearMsg();
-    bool ok = false;
+    bool ok = postHook;
     if (ScriptRun::Succeeded == rval) {
 	ExpOperation* op = ExpEvaluator::popOne(runner->stack());
 	if (op) {
-	    ok = op->valBoolean();
+	    if (!postHook)
+		ok = op->valBoolean();
 	    TelEngine::destruct(op);
 	}
     }
@@ -4564,21 +4710,21 @@ bool JsHandler::receivedInternal(Message& msg)
     // Clear now the arguments list: the context may be destroyed
     args.clear();
     // Using a singleton context: cleanup the context
-    if (!regularHandler)
+    if (!regular)
 	runner->context()->cleanup();
     TelEngine::destruct(runner);
 
 #ifdef JS_DEBUG_JsMessage_received
     tm = Time::now() - tm;
     uint64_t rest = tm - run;
-    Debug(&__plugin,DebugInfo,"Handler for '%s' ran for %u.%03ums (+%u.%03ums) [%p]",
-	hDesc.c_str(),(unsigned int)(run / 1000),(unsigned int)(run % 1000),
+    Debug(&__plugin,DebugInfo,"%s ran for %u.%03ums (+%u.%03ums) [%p]",info.safe(),
+	(unsigned int)(run / 1000),(unsigned int)(run % 1000),
 	(unsigned int)(rest / 1000),(unsigned int)(rest % 1000),this);
 #endif
     return ok;
 }
 
-bool JsHandler::initialize(const NamedList& params, const String& scriptName,
+bool JsMessageHandle::initialize(const NamedList& params, const String& scriptName,
     const String& scriptFile, const String& prefix)
 {
     Lock lck(m_mutex);
@@ -4586,7 +4732,8 @@ bool JsHandler::initialize(const NamedList& params, const String& scriptName,
 	case MsgHandlerGlobal:
 	    break;
 	case Regular:
-	    m_handlerContext = m_id = params[YSTRING("id")];
+	    if (handler())
+		m_handlerContext = m_id = params[YSTRING("id")];
 	    return true;
 	case MsgHandlerScript:
 	    m_loadExt = params[YSTRING("load_extensions")];
@@ -4634,11 +4781,109 @@ bool JsHandler::initialize(const NamedList& params, const String& scriptName,
     TelEngine::destruct(old);
     if (ok)
 	return true;
-    Debug(&__plugin,DebugNote,"Failed to load script for message handler %s (%p)%s",
-	desc(),this,err.safe());
+    Debug(&__plugin,DebugNote,"Failed to load script for message %s %s (%p)%s",
+	handler() ? "handler" : "posthook",desc(),this,err.safe());
     return false;
 }
 
+void JsMessageHandle::prepare(GenObject* name, GenObject* value, const NamedList* params,
+    GenObject* msgName, const String& trackName, bool trackPrio)
+{
+    JsPostHook* post = m_handler ? 0 : static_cast<JsPostHook*>(this);
+    MessageFilter* flt = m_handler ? static_cast<MessageFilter*>(m_handler)
+	: static_cast<MessageFilter*>(post);
+    if (name) {
+	ExpOperation* op = YOBJECT(ExpOperation,name);
+	const String& n = op ? (const String&)*op : name->toString();
+	flt->setFilter(JsMatchingItem::buildFilter(n,value,name));
+    }
+    if (m_handler) {
+	m_matchesScriptInit = *m_handler == YSTRING("script.init");
+        if (trackName) {
+	    if (trackPrio)
+		m_handler->trackName(trackName + ":" + String(m_handler->priority()));
+	    else
+		m_handler->trackName(trackName);
+	}
+    }
+    else if (post) {
+	MatchingItemBase* f = JsMatchingItem::buildFilter("message",msgName,msgName,false);
+	const NamedList& p = params ? *params : NamedList::empty();
+	// engine.timer MUST be explicily allowed if no other message name filter is given
+	if (!p.getBoolValue(YSTRING("engine.timer"),!!f)) {
+	    MatchingItemString* mi = new MatchingItemString("","engine.timer",false,true);
+	    if (f) {
+		MatchingItemList* l = new MatchingItemList("");
+		l->append(f);
+		l->append(mi);
+		f = l;
+	    }
+	    else
+		f = mi;
+	}
+	post->setMsgFilter(f);
+	m_matchesScriptInit = post->getMsgFilter() &&
+	    post->getMsgFilter()->matchString("script.init");
+    }
+#if 0
+    MatchingItemDump mid;
+    mid.m_regexpBasic = 'b';
+    mid.m_caseInsentive = 'i';
+    String mf, pf;
+    mid.dump(flt->getFilter(),pf,"\r\n");
+    mid.dump(post ? post->getMsgFilter() : 0,mf,"\r\n");
+    if (mf)
+	mf = "\r\nMessage filter:" + mf;
+    if (pf)
+	pf = "\r\nParameters filter:" + pf;
+    if (mf || pf) {
+	mf = "\r\n-----\r\nid: " + id() + mf + pf + "\r\n-----";
+	Debug(&__plugin,DebugTest,"Prepared %s%s",clsType(handler()),mf.safe());
+    }
+#endif
+}
+
+bool JsMessageHandle::install(GenObject* gen)
+{
+    if (!gen)
+	return false;
+    JsHandler* h = YOBJECT(JsHandler,gen);
+    if (h)
+	return Engine::install(h);
+    JsPostHook* hPost = YOBJECT(JsPostHook,gen);
+    return hPost && Engine::self() && Engine::self()->setHook(hPost);
+}
+
+bool JsMessageHandle::uninstall(GenObject* gen)
+{
+    if (!gen || Engine::exiting())
+	return false;
+    JsHandler* h = YOBJECT(JsHandler,gen);
+    bool ok = false;
+    if (h)
+	ok = Engine::uninstall(h);
+    else {
+	JsPostHook* hPost = YOBJECT(JsPostHook,gen);
+	ok = hPost && Engine::self() && Engine::self()->setHook(hPost,true);
+    }
+    TelEngine::destruct(gen);
+    return ok;
+}
+
+ObjList* JsMessageHandle::findId(const String& id, ObjList& list)
+{
+    for (ObjList* o = list.skipNull(); o; o = o->skipNext()) {
+	JsHandler* h = YOBJECT(JsHandler,o->get());
+	JsPostHook* hPost = h ? 0 : YOBJECT(JsPostHook,o->get());
+	if (h) {
+	    if (id == h->id())
+		return o;
+	}
+	else if (hPost && id == hPost->id())
+	    return o;
+    }
+    return 0;
+}
 
 void JsMessageQueue::received(Message& msg)
 {
@@ -6691,6 +6936,38 @@ JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
     return jso;
 }
 
+MatchingItemBase* JsMatchingItem::buildFilter(const String& name, GenObject* value,
+    GenObject* flt, bool emptyValueOk)
+{
+    if (flt) {
+	JsMatchingItem* mi = YOBJECT(JsMatchingItem,flt);
+	if (mi)
+	    return mi->copyMatching(true);
+    }
+    if (!(value && name))
+	return 0;
+    ExpOperation* op = YOBJECT(ExpOperation,value);
+    if (op) {
+	JsRegExp* rexp = YOBJECT(JsRegExp,op);
+	if (rexp)
+	    return new MatchingItemRegexp(name,rexp->regexp());
+	return (*op || emptyValueOk) ? new MatchingItemString(name,*op) : 0;
+    }
+    Regexp* rexp = YOBJECT(Regexp,value);
+    if (rexp)
+	return new MatchingItemRegexp(name,*rexp);
+    const String& s = value->toString();
+    if (!s.startsWith("^"))
+	return (s || emptyValueOk) ? new MatchingItemString(name,s) : 0;
+    Regexp r("",true);
+    bool negated = s.length() > 1 && s.endsWith("^");
+    if (negated)
+	r = s.substr(0,s.length() - 1);
+    else
+	r = s;
+    return new MatchingItemRegexp(name,r,negated);
+}
+
 
 bool JsJSON::runNative(ObjList& stack, const ExpOperation& oper, GenObject* context)
 {
@@ -7811,6 +8088,7 @@ void JsGlobalInstance::scheduleInitEvent()
 
 ObjList JsGlobal::s_globals;
 ObjList JsGlobal::s_handlers;
+ObjList JsGlobal::s_posthooks;
 Mutex JsGlobal::s_mutex(false,"JsGlobal");
 bool JsGlobal::s_keepOldOnFail = false;
 SharedObjList JsGlobal::s_sharedObj("Global");
@@ -7883,6 +8161,8 @@ void JsGlobal::markUnused()
     }
     for (ObjList* o = s_handlers.skipNull(); o; o = o->skipNext())
 	static_cast<JsHandler*>(o->get())->setInUse(false);
+    for (ObjList* o = s_posthooks.skipNull(); o; o = o->skipNext())
+	static_cast<JsPostHook*>(o->get())->setInUse(false);
 }
 
 void JsGlobal::reloadDynamic()
@@ -7957,19 +8237,24 @@ void JsGlobal::loadScripts(const NamedList* sect, const NamedList* instSect)
     }
 }
 
-void JsGlobal::loadHandlers(const NamedList* sect)
+void JsGlobal::loadHandlers(const NamedList* sect, bool handler)
 {
     ObjList seen;
     ObjList* o = sect ? sect->paramList()->skipNull() : 0;
+    ObjList& listH = handler ? s_handlers : s_posthooks;
+    const char* what = JsMessageHandle::clsType(handler);
     for (; o; o = o->skipNext()) {
 	const NamedString* ns = static_cast<const NamedString*>(o->get());
 	if (!ns->name() || ns->name().startsWith("handlerparam:"))
 	    continue;
-	// name=filename,callback,priority,trackname,parameters_prefix,filter,context,script_name
-	DDebug(&__plugin,DebugAll,"Processing handler %s=%s",ns->name().c_str(),ns->safe());
-	String scriptFile, callback, priority, trackName, prefix, filter, context, scriptName;
+	// Handler: name=filename,callback,priority,trackname,parameters_prefix,filter,context,script_name
+	// Posthook: id=filename,callback,parameters_prefix,filter,context,msg_name_filter,script_name
+	XDebug(&__plugin,DebugAll,"Processing %s %s=%s",what,ns->name().c_str(),ns->safe());
+	String scriptFile, callback, priority, trackName, prefix, filter, context,
+	    scriptName, msgName;
+	String* stringsPost[] = {&scriptFile,&callback,&prefix,&filter,&context,&msgName,&scriptName,0};
 	String* strings[] = {&scriptFile,&callback,&priority,&trackName,&prefix,&filter,&context,&scriptName,0};
-	String** setStr = strings;
+	String** setStr = handler ? strings : stringsPost;
 	ObjList* params = ns->split(',');
 	for (ObjList* o = params; *setStr && o; o = o->next(), ++setStr) {
 	    String* str = static_cast<String*>(o->get());
@@ -7980,8 +8265,8 @@ void JsGlobal::loadHandlers(const NamedList* sect)
 
 	Engine::runParams().replaceParams(scriptFile);
 	if (!(scriptFile && callback)) {
-	    Debug(&__plugin,DebugConf,"Ignoring handler %s='%s': empty script filename or callback",
-		ns->name().c_str(),ns->safe());
+	    Debug(&__plugin,DebugConf,"Ignoring %s %s='%s': empty script filename or callback",
+		what,ns->name().c_str(),ns->safe());
 	    continue;
 	}
 	if (prefix) {
@@ -7990,34 +8275,64 @@ void JsGlobal::loadHandlers(const NamedList* sect)
 		filter = (*sect)[prefix + "filter"];
 	    if (!context)
 		context = (*sect)[prefix + "context"];
+	    if (!handler && !msgName)
+		msgName = (*sect)[prefix + "msg_name_filter"];
 	}
-	int prio = priority.toInteger(100,0,0);
 	if (!scriptName)
 	    scriptName = scriptFile;
-
+	int prio = 0;
 	NamedList nl(ns->name());
-	nl.addParam("filename",scriptFile);
-	nl.addParam("callback",callback);
-	nl.addParam("priority",prio);
-	nl.addParam("trackname",trackName);
-	nl.addParam("filter",filter);
-	nl.addParam("context",context);
-	nl.addParam("script_name",scriptName);
+	if (handler) {
+	    prio = priority.toInteger(100,0,0);
+	    if (!trackName)
+		trackName = __plugin.name();
+	    else if (trackName.isBoolean()) {
+		if (trackName.toBoolean())
+		    trackName = __plugin.name();
+		else
+		    trackName = "";
+	    }
+	    nl.addParam("filename",scriptFile);
+	    nl.addParam("callback",callback);
+	    nl.addParam("priority",prio);
+	    nl.addParam("trackname",trackName);
+	    nl.addParam("filter",filter);
+	    nl.addParam("context",context);
+	    nl.addParam("script_name",scriptName);
+	}
+	else {
+	    nl.addParam("filename",scriptFile);
+	    nl.addParam("callback",callback);
+	    nl.addParam("filter",filter);
+	    nl.addParam("context",context);
+	    nl.addParam("script_name",scriptName);
+	    nl.addParam("msg_name_filter",msgName);
+	}
 	String id;
 	nl.dump(id,"|",'"',true);
 	if (seen.find(id))
 	    continue;
+	DDebug(&__plugin,DebugAll,"Handling global %s id: %s",what,id.safe());
 	seen.insert(new String(id));
 
 	Lock lck(s_mutex);
+	JsPostHook* hPost = 0;
 	JsHandler* h = 0;
-	ObjList* exist = JsHandler::findId(id,s_handlers);
-	if (exist)
-	    h = static_cast<JsHandler*>(exist->get());
+	ObjList* old = JsMessageHandle::findId(id,listH);
+	if (old) {
+	    if (handler)
+		h = static_cast<JsHandler*>(old->get());
+	    else
+		hPost = static_cast<JsPostHook*>(old->get());
+	}
 	else {
 	    String desc, filterName, filterValue;
 	    desc << ns->name() << '=' << scriptName << ',' << callback
-		<< ',' << context << ',' << prio;
+		<< ',' << context;
+	    if (handler)
+		desc << ',' << prio;
+	    else if (msgName)
+		desc << ',' >> msgName;
 	    if (filter) {
 		int pos = filter.find('=');
 		if (pos > 0) {
@@ -8026,25 +8341,45 @@ void JsGlobal::loadHandlers(const NamedList* sect)
 		    filterValue = filter.substr(pos + 1);
 		}
 	    }
-	    h = new JsHandler(id,callback,desc,ns->name(),prio,context);
-	    h->setHandlerFilter(filterName,&filterValue);
-	    h->setTrackName(trackName,
-		!prefix ? true : sect->getBoolValue(prefix + "track_priority",true));
+	    if (handler) {
+		h = new JsHandler(id,callback,desc,ns->name(),prio,context);
+		bool prio = !prefix ? true : sect->getBoolValue(prefix + "track_priority",true);
+		h->prepare(&filterName,&filterValue,sect,0,trackName,prio);
+	    }
+	    else {
+		hPost = new JsPostHook(id,callback,desc,context);
+		const NamedString* ns = prefix ? sect->getParam(prefix + "engine.timer") : 0;
+		if (!ns)
+		    hPost->prepare(&filterName,&filterValue,sect,&msgName);
+		else {
+		    NamedList p("");
+		    p.copyParams(false,*sect);
+		    hPost->prepare(&filterName,&filterValue,&p,&msgName);
+		}
+	    }
 	}
-	if (h->initialize(*sect,scriptName,scriptFile,prefix)) {
-	    if (exist)
+	JsMessageHandle* common = h ? static_cast<JsMessageHandle*>(h) :
+	    static_cast<JsMessageHandle*>(hPost);
+	GenObject* gen = h ? static_cast<GenObject*>(h) : static_cast<GenObject*>(hPost);
+	if (common->initialize(*sect,scriptName,scriptFile,prefix)) {
+	    if (old)
 		continue;
-	    s_handlers.append(h);
-	    Debug(&__plugin,DebugInfo,"Added message handler %s (%p)",h->desc(),h);
+	    old = listH.append(gen);
 	    lck.drop();
-	    if (Engine::install(h))
-		continue;
-	    Debug(&__plugin,DebugWarn,"Failed to install message handler %s (%p)",h->desc(),h);
+	    bool ok = JsMessageHandle::install(gen);
 	    lck.acquire(s_mutex);
+	    if (old != listH.find(gen))
+		continue;
+	    if (ok) {
+		Debug(&__plugin,DebugInfo,"Added global message %s %s (%p)",what,common->desc(),common);
+		continue;
+	    }
+	    Debug(&__plugin,DebugWarn,"Failed to install global message %s %s (%p)",
+		what,common->desc(),common);
 	}
-	s_handlers.remove(h,false);
+	listH.remove(gen,false);
 	lck.drop();
-	TelEngine::destruct(h);
+	JsMessageHandle::uninstall(gen);
     }
 }
 
@@ -8097,7 +8432,7 @@ bool JsGlobal::runMain()
 
 void JsGlobal::unload(bool freeUnused)
 {
-    ObjList scripts, handlers;
+    ObjList scripts, handlers, posthooks;
     Lock lck(s_mutex);
     if (freeUnused) {
 	for (ObjList* o = s_globals.skipNull(); o;) {
@@ -8122,21 +8457,36 @@ void JsGlobal::unload(bool freeUnused)
 		o = o->skipNull();
 	    }
 	}
+	for (ObjList* o = s_posthooks.skipNull(); o;) {
+	    JsPostHook* h = static_cast<JsPostHook*>(o->get());
+	    if (h->inUse())
+		o = o->skipNext();
+	    else {
+		Debug(&__plugin,DebugInfo,"Removing unused/replaced message posthook %s (%p)",
+		    h->desc(),h);
+		posthooks.append(o->remove(false));
+		o = o->skipNull();
+	    }
+	}
     }
     else {
-	moveList(scripts,s_globals);
-	moveList(handlers,s_handlers);
+	s_globals.move(&scripts);
+	s_handlers.move(&handlers);
+	s_posthooks.move(&posthooks);
 	String info;
 	if (scripts.skipNull())
 	    info << " " << scripts.count() << " script(s)";
 	if (handlers.skipNull())
 	    info << " " << handlers.count() << " handler(s)";
+	if (posthooks.skipNull())
+	    info << " " << posthooks.count() << " posthooks(s)";
 	if (info)
 	    Debug(&__plugin,DebugAll,"Exiting with%s",info.c_str());
     }
     lck.drop();
     scripts.clear();
-    handlers.clear();
+    JsMessageHandle::uninstall(handlers);
+    JsMessageHandle::uninstall(posthooks);
 }
 
 bool JsGlobal::buildNewScript(Lock& lck, ObjList* old, const String& scriptName,
@@ -8224,7 +8574,8 @@ void JsModule::statusParams(String& str)
 {
     Lock lck(JsGlobal::s_mutex);
     str << "globals=" << JsGlobal::globals().count()
-	<< ",handlers=" << JsGlobal::handlers().count();
+	<< ",handlers=" << JsGlobal::handlers().count()
+	<< ",posthooks=" << JsGlobal::posthooks().count();
     lck.acquire(this);
     str << ",routing=" << calls().count();
 }
@@ -8249,6 +8600,11 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 	for (ObjList* o = JsGlobal::handlers().skipNull(); o ; o = o->skipNext()) {
 	    retVal << "Handler ";
 	    static_cast<JsHandler*>(o->get())->fillInfo(retVal);
+	    retVal << "\r\n";
+	}
+	for (ObjList* o = JsGlobal::posthooks().skipNull(); o ; o = o->skipNext()) {
+	    retVal << "PostHook ";
+	    static_cast<JsPostHook*>(o->get())->fillInfo(retVal);
 	    retVal << "\r\n";
 	}
 	lck.acquire(this);
@@ -8674,7 +9030,8 @@ void JsModule::initialize()
     }
     JsGlobal::markUnused();
     lck.drop();
-    JsGlobal::loadHandlers(cfg.getSection("handlers"));
+    JsGlobal::loadHandlers(cfg.getSection(YSTRING("handlers")),true);
+    JsGlobal::loadHandlers(cfg.getSection(YSTRING("posthooks")),false);
     JsGlobal::loadScripts(cfg.getSection("scripts"),cfg.getSection("instances"));
     if (m_started)
 	JsGlobal::loadScripts(cfg.getSection("late_scripts"),cfg.getSection("instances"));
