@@ -206,7 +206,7 @@ public:
     virtual void dispatched(const Message& msg, bool handled);
 };
 
-static bool s_active = true;
+static bool s_active = false;
 static bool s_timer = false;
 static const String s_command = "sniffer";
 static const String s_onOff[] = {"on", "off", ""};
