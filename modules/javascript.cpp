@@ -4179,18 +4179,19 @@ bool JsMessage::install(ObjList& stack, const ExpOperation& oper, GenObject* con
 bool JsMessage::uninstall(ObjList& stack, const ExpOperation& oper, GenObject* context,
     bool regular)
 {
-    // Message.uninstall(nameOrId[,byId]])
+    // Message.uninstall([nameOrId[,byId]])
     // Message.uninstallSingleton(id)
     ExpOperVector args;
-    if (!extractStackArgs(1,regular ? 2 : 1,args,this,stack,oper,context))
+    if (!extractStackArgs(regular ? 0 : 1,regular ? 2 : 1,args,this,stack,oper,context))
 	return false;
-    ObjList& lst = regular ? m_handlers : m_handlersSingleton;
     if (!args.length()) {
-	JsMessageHandle::uninstall(lst);
+	JsMessageHandle::uninstall(m_handlers);
+	JsMessageHandle::uninstall(m_handlersSingleton);
 	return true;
     }
     if (!args[0])
 	return false;
+    ObjList& lst = regular ? m_handlers : m_handlersSingleton;
     ObjList* rm = 0;
     // Remove regular handler by name
     if (regular && !(args[1] && args[1]->valBoolean()))
