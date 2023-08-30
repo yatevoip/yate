@@ -171,7 +171,6 @@ void DumbDriver::initialize()
 {
     Output("Initializing module DumbChannel");
     setup();
-    Output("DumbChannel initialized");
 }
 
 }; // anonymous namespace

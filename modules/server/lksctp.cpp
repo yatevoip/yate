@@ -616,7 +616,7 @@ LKModule::LKModule()
       m_rtoMin(200), m_rtoInitial(400), m_hbInterval(0),m_hbEnabled(true),
       m_sackDelay(50), m_sackFreq(0), m_maxRetrans(0)
 {
-    Output("Loading module LKSCTP");
+    Output("Loaded module LKSCTP");
 }
 
 LKModule::~LKModule()
@@ -626,7 +626,7 @@ LKModule::~LKModule()
 
 void LKModule::initialize()
 {
-    Output("Initialize module LKSCTP");
+    Output("Initializing module LKSCTP");
     if (!m_init) {
 	m_init = true;
 	Engine::install(new LKHandler());
