@@ -82,7 +82,8 @@ APIDOCS := apidocs
 endif
 
 GIT_TAG := $(shell LANG=C LC_MESSAGES=C git tag  2>/dev/null | tail -1)
-GIT_HASH := $(shell LANG=C LC_MESSAGES=C git rev-list -n1 HEAD 2>/dev/null)
+GIT_HASH := $(shell LANG=C LC_MESSAGES=C git rev-list -n1 HEAD 2>tmp.txt)
+GIT_ERR := $(shell LANG=C LC_MESSAGES=C cat tmp.txt 2>/dev/null; rm -f tmp.txt 2>/dev/null )
 
 
 .PHONY: all everything debug ddebug xdebug ndebug
@@ -295,7 +296,7 @@ uninstall uninstall-root:
 
 install-root uninstall-root: LDCONFIG:=ldconfig
 
-.PHONY: snapshot tarball rpm srpm rpm-tag srpm-tag rpm-head srpm-head revision check-gittag
+.PHONY: snapshot tarball rpm srpm rpm-tag srpm-tag rpm-head srpm-head revision check-gittag check-githash
 snapshot tarball: check-topdir revision clean windows apidocs
 	@if [ $@ = snapshot ]; then ver="`date '+GIT-%Y%m%d'`"; else ver="@PACKAGE_VERSION@-@PACKAGE_STATUS@@PACKAGE_RELEASE@"; fi ; \
 	wd=`pwd|sed 's,^.*/,,'`; \
@@ -346,14 +347,14 @@ srpm-tag: check-gittag tarball
 
 
 # build packages from GIT HEAD
-rpm-head: tarball
+rpm-head: check-githash tarball
 	rpmbuild -tb --define 'revision $(GIT_HASH)git' $(RPMOPT) packing/tarballs/@PACKAGE_TARNAME@-@PACKAGE_VERSION@-@PACKAGE_STATUS@@PACKAGE_RELEASE@.tar.gz
 
-srpm-head: tarball
+srpm-head: check-githash tarball
 	rpmbuild -ta --define 'revision $(GIT_HASH)git' $(RPMOPT) packing/tarballs/@PACKAGE_TARNAME@-@PACKAGE_VERSION@-@PACKAGE_STATUS@@PACKAGE_RELEASE@.tar.gz
 
 
-check-gittag revision: check-topdir
+check-gittag revision: check-topdir check-githash
 	@tag_hash=""; \
 	if [ "" != "$(GIT_TAG)" ]; then \
 	    tag_hash=`LANG=C LC_MESSAGES=C git rev-list -n1 $(GIT_TAG) 2>/dev/null`; \
@@ -370,6 +371,15 @@ check-gittag revision: check-topdir
 	fi; \
 	test -z "$(GIT_TAG)" || echo "$(GIT_TAG)" > packing/revision.txt ; \
 	test -z "$(GIT_HASH)" || echo "$(GIT_HASH)" > packing/git_commit.txt
+
+
+check-githash:
+	@if [ "x" = "x$(GIT_HASH)" ]; then \
+	    echo "Could not obtain last GIT commit hash. GIT Error:"; \
+	    echo "$(GIT_ERR)"; \
+	    exit 1; \
+    fi;
+
 
 %.o: @srcdir@/%.cpp $(MKDEPS) @srcdir@/yatengine.h
 	$(COMPILE) -c $<
