@@ -1114,6 +1114,17 @@ bool ZapDevice::open(unsigned int numbufs, unsigned int bufsize)
 		break;
 	    DDebug(m_owner,DebugAll,"%sBlock size set to %u on channel %u [%p]",
 		m_name.safe(),bufsize,m_channel,m_owner);
+
+            // B channels can use the WHEN_FULL policy (higher latency, less/no loss)
+            struct dahdi_bufferinfo bi;
+            bi.txbufpolicy = DAHDI_POLICY_WHEN_FULL;
+            bi.rxbufpolicy = DAHDI_POLICY_WHEN_FULL;
+            bi.numbufs = numbufs;
+            bi.bufsize = bufsize;
+            if (ioctl(SetBuffers,&bi))
+                DDebug(m_owner,DebugNote,"%snumbufs=%u bufsize=%u on channel %u [%p]",
+                    m_name.safe(),numbufs,bufsize,m_channel,m_owner);
+
 	    return true;
 	}
 
@@ -1127,6 +1138,7 @@ bool ZapDevice::open(unsigned int numbufs, unsigned int bufsize)
 	}
 	// Set buffers
 	struct dahdi_bufferinfo bi;
+	// D channel needs to be run in IMMEDIATE mode
 	bi.txbufpolicy = DAHDI_POLICY_IMMEDIATE;
 	bi.rxbufpolicy = DAHDI_POLICY_IMMEDIATE;
 	bi.numbufs = numbufs;
