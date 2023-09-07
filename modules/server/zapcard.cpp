@@ -1125,6 +1125,11 @@ bool ZapDevice::open(unsigned int numbufs, unsigned int bufsize)
                 DDebug(m_owner,DebugNote,"%snumbufs=%u bufsize=%u on channel %u [%p]",
                     m_name.safe(),numbufs,bufsize,m_channel,m_owner);
 
+            // Treat all B channels as clear data channels.
+            // No echo cancellation, no conferencing hacks, no volume control
+            int x = 0;
+            ioctl(SetAudioMode, &x);
+
 	    return true;
 	}
 
