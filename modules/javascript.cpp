@@ -43,6 +43,8 @@
 #else
 //#define JS_DEBUG_JsMessage_received
 #endif
+//#define JS_DEBUG_JsMessage_received_explicit
+
 #ifdef XDEBUG
 #define JS_DEBUG_SharedJsObject
 #define JS_DEBUG_EVENT_NON_TIME
@@ -4603,6 +4605,11 @@ bool JsMessageHandle::handle(Message& msg, bool handled)
     XDebug(&__plugin,DebugAll,"Running %s message %s for '%s' [%p]",
 	m_function.name().c_str(),clsType(handler()),desc(),this);
 #ifdef JS_DEBUG_JsMessage_received
+#ifdef JS_DEBUG_JsMessage_received_explicit
+    bool reportDuration = msg.getBoolValue(YSTRING("report_js_duration"));
+#else
+    bool reportDuration = true;
+#endif
     uint64_t tm = Time::now();
 #endif
     String dbg, loadExt;
@@ -4679,18 +4686,27 @@ bool JsMessageHandle::handle(Message& msg, bool handled)
 	args.append(new ExpOperation(handlerCtx));
 #ifdef JS_DEBUG_JsMessage_received
     uint64_t run = Time::now();
+    uint64_t runScriptInit = 0;
 #endif
     ScriptRun::Status rval = ScriptRun::Succeeded;
     if (regular)
 	rval = runner->call(name,args);
     else {
 	// Init globals and call the function handling the message
+#ifdef JS_DEBUG_JsMessage_received
+	runScriptInit = Time::now();
+#endif
 	rval = runner->run();
+#ifdef JS_DEBUG_JsMessage_received
+	runScriptInit = Time::now() - runScriptInit;
+#endif
 	if (rval == ScriptRun::Succeeded)
 	    rval = runner->call(name,args);
     }
 #ifdef JS_DEBUG_JsMessage_received
     run = Time::now() - run;
+    if (!regular)
+	run -= runScriptInit;
     String info(postHook ? "PostHook" : "Handler");
     info << " type=" << type();
     // NOTE: The following is not thread safe
@@ -4716,11 +4732,18 @@ bool JsMessageHandle::handle(Message& msg, bool handled)
     TelEngine::destruct(runner);
 
 #ifdef JS_DEBUG_JsMessage_received
-    tm = Time::now() - tm;
-    uint64_t rest = tm - run;
-    Debug(&__plugin,DebugInfo,"%s ran for %u.%03ums (+%u.%03ums) [%p]",info.safe(),
-	(unsigned int)(run / 1000),(unsigned int)(run % 1000),
-	(unsigned int)(rest / 1000),(unsigned int)(rest % 1000),this);
+    if (reportDuration) {
+	tm = Time::now() - tm;
+	uint64_t rest = tm - (run + runScriptInit);
+	String extra;
+	if (!regular)
+	    extra.printf(" init=%u.%03ums",(unsigned int)(runScriptInit / 1000),
+		(unsigned int)(runScriptInit % 1000));
+	extra.printfAppend(" (+%u.%03ums)",(unsigned int)(rest / 1000),
+	    (unsigned int)(rest % 1000));
+	Debug(&__plugin,DebugInfo,"%s ran for %u.%03ums%s [%p]",info.safe(),
+	    (unsigned int)(run / 1000),(unsigned int)(run % 1000),extra.safe(),this);
+    }
 #endif
     return ok;
 }
