@@ -69,9 +69,8 @@ public:
 		    }
 		}
 	    }
-	    if (m_matchName && !m_matchName->runMatchString(list,params))
-		return false;
-	    return !m_matchParams || m_matchParams->runMatchListParam(list,params);
+	    return (!m_matchName || m_matchName->matchString(list,params))
+		&& (!m_matchParams || m_matchParams->matchListParam(list,params));
 	}
     virtual MatchingItemBase* copy() const {
 	    return new MatchingItemMessage(name(),m_matchName ? m_matchName->copy() : 0,
