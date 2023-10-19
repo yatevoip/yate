@@ -3361,6 +3361,16 @@ bool YateSIPTransport::init(const NamedList& params, const NamedList& defs,
     return true;
 }
 
+static inline const char* printMsgEnd(const String& buf)
+{
+    bool extra = false;
+    if (buf) {
+	char last = buf.at(buf.length() - 1);
+	extra = '\r' != last && '\n' != last;
+    }
+    return extra ? "\r\n-----" : "-----";
+}
+
 void YateSIPTransport::printSendMsg(const SIPMessage* msg, const SocketAddr* addr)
 {
     if (!msg)
@@ -3375,12 +3385,14 @@ void YateSIPTransport::printSendMsg(const SIPMessage* msg, const SocketAddr* add
     if (addr)
 	raddr = " to " + addr->addr();
     String buf((char*)msg->getBuffer().data(),msg->getBuffer().length());
-    TraceDebug(msg->traceId(),&plugin,DebugInfo,"'%s' sending %s %p%s [%p]\r\n------\r\n%s------",
-	m_protoAddr.c_str(),tmp.c_str(),msg,raddr.safe(),this,buf.c_str());
+    TraceDebug(msg->traceId(),&plugin,DebugInfo,
+	"'%s' sending %u bytes %s %p%s [%p]\r\n-----\r\n%s%s",
+	m_protoAddr.c_str(),msg->getBuffer().length(),tmp.c_str(),msg,raddr.safe(),
+	this,buf.safe(),printMsgEnd(buf));
 }
 
 // Print received messages to output
-void YateSIPTransport::printRecvMsg(const char* buf, int len,const String& traceId)
+void YateSIPTransport::printRecvMsg(const char* buf, int len, const String& traceId)
 {
     if (!buf)
 	return;
@@ -3388,17 +3400,14 @@ void YateSIPTransport::printRecvMsg(const char* buf, int len,const String& trace
 	return;
     if (!plugin.filterDebug(m_remote.addr()))
 	return;
-    String tmp;
     String raddr;
     if (udpTransport())
 	raddr = " from " + m_remote.addr();
-    else {
-	tmp.assign(buf,len);
-	buf = tmp;
-    }
+    String tmp;
+    tmp.assign(buf,len);
     TraceDebug(traceId,&plugin,DebugInfo,
-	"'%s' received %d bytes SIP message%s [%p]\r\n------\r\n%s------",
-	m_protoAddr.c_str(),len,raddr.safe(),this,buf);
+	"'%s' received %d bytes SIP message%s [%p]\r\n-----\r\n%s%s",
+	m_protoAddr.c_str(),len,raddr.safe(),this,tmp.safe(),printMsgEnd(tmp));
 }
 
 // Add transport data yate message
