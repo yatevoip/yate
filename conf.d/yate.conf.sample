@@ -149,6 +149,14 @@
 ; The time will be added to message handler name as #<MSEC>.<USEC>
 ;trace_msg_handler_time=no
 
+; uri_parse_tel_rfc: boolean/keyword: Set 'tel' uri parse bahavior
+; This parameter is handled on engine start only 
+; Boolean true: Parse using strict RFC 3966 
+; Boolean false: Use old (generic) parse. May fail for some URIs
+; Keyword 'local': Parse a failed 'global-number' value as 'local-number'
+; Defaults to boolean true if missing or invalid
+;uri_parse_tel_rfc=yes
+
 
 [modules]
 ; This section should hold one line for each module whose loading behaviour

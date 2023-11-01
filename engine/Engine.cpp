@@ -1635,10 +1635,13 @@ int Engine::engineInit()
     CapturedEvent::capturing(s_capture);
     s_cfg = configFile(s_cfgfile);
     s_cfg.loadMain();
+    NamedList* genTmp = s_cfg.getSection(YSTRING("general"));
+    const NamedList& general = genTmp ? (const NamedList&)(*genTmp) : NamedList::empty();
     s_capture = s_cfg.getBoolValue("general","startevents",s_capture);
     CapturedEvent::capturing(s_capture);
     if (s_capture && s_startMsg)
 	CapturedEvent::append(-1,s_startMsg);
+    URI::setup(general);
     String track = s_cfg.getValue("general","trackparam");
     if (track.null() || track.toBoolean(false))
 	track = "handlers";

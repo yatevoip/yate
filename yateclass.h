@@ -7465,6 +7465,12 @@ public:
     inline const String& getExtra() const
 	{ parse(); return m_extra; }
 
+    /**
+     * Initialize the URI global options
+     * @param params Parameters list
+     */
+    static void setup(const NamedList& params);
+
 protected:
     /**
      * Notification method called whenever the string URI has changed.
@@ -7472,6 +7478,12 @@ protected:
      *  method inherited from @ref String.
      */
     virtual void changed();
+
+    /**
+     * Clear held data
+     */
+    virtual void clearData() const;
+
     mutable bool m_parsed;
     mutable String m_desc;
     mutable String m_proto;
