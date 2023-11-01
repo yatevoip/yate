@@ -3687,6 +3687,35 @@ public:
     bool startSkip(const char* what, bool wordBreak = true, bool caseInsensitive = false);
 
     /**
+     * Replace and/or remove chars in string
+     * Replace and remove may be done in the same function call by giving a shorter 'repl':
+     * s="a-(bc)"; s.replaceChars("-()","_") will result in 'a_bc'
+     * @param what Characters to search for
+     * @param repl Characters to replace with. Found characters are removed if there is no replacement
+     * @param inPlace In place replace. This parameter is ignored if search and replace
+     *  strings have different length
+     * @param wLen Length of characters to search string, negative to detect.
+     *  No replace is done if this parameter is 0
+     * @param rLen Length of characters to replace with string, negative to detect.
+     *  Found characters will be removed if this parameter is 0
+     * @param chg Optional pointer to flag to be set if changes are done (not set if no changes)
+     * @return Reference to this string
+     */
+    String& replaceChars(const char* what, const char* repl, bool inPlace = false,
+	int wLen = -1, int rLen = -1, bool* chg = 0);
+
+    /**
+     * Remove chars in string
+     * @param what Characters to remove
+     * @param wLen Length of characters to search string, negative to detect.
+     *  No remove is done if this parameter is 0
+     * @param chg Optional pointer to flag to be set if changes are done (not set if no changes)
+     * @return Reference to this string
+     */
+    inline String& removeChars(const char* what, int wLen = -1, bool* chg = 0)
+	{ return replaceChars(what,0,false,wLen,-1,chg); }
+
+    /**
      * Extract a substring up to a separator
      * @param sep Separator string to match after extracted fragment
      * @param store Reference to String variable to store extracted fragment
@@ -4046,6 +4075,27 @@ public:
      */
     static unsigned int c_skip_chars(const char*& str, const char* what,
 	int len = -1, bool skipFound = true);
+
+    /**
+     * Replace and/or remove chars in a string
+     * Replace and remove may be done in the same function call by giving a shorter 'repl':
+     * c_replace_chars("a-(bc)","-()","_") will return 'a_bc'
+     * @param str String to replace in
+     * @param what Characters to search for
+     * @param repl Characters to replace with. Found characters are removed if there is no replacement
+     * @param inPlace In place replace. This parameter is ignored if search and replace
+     *  strings have different length
+     * @param wLen Length of characters to search string, negative to detect.
+     *  No replace is done if this parameter is 0
+     * @param rLen Length of characters to replace with string, negative to detect.
+     *  Found characters will be removed if this parameter is 0
+     * @param chg Optional pointer to flag to be set if changes are done (not set if no changes)
+     * @return String with chars replaced/removed.
+     *   May be different from the given string if changed. The caller is owning the new string
+     *   May return NULL if string is empty after replace or memory allocation failure
+     */
+    static char* c_replace_chars(const char* str, const char* what, const char* repl = 0,
+	bool inPlace = false, int wLen = -1, int rLen = -1, bool* chg = 0);
 
 protected:
     /**
