@@ -459,9 +459,9 @@ bool ISDNQ931IEData::processCalledNo(ISDNQ931Message* msg, bool add,
     if (add) {
 	ISDNQ931IE* ie = new ISDNQ931IE(ISDNQ931IE::CalledNo);
 	ie->addParam("number",m_calledNo);
-	if (!m_callerType.null())
+	if (!m_calledType.null())
 	    ie->addParam("type",m_calledType);
-	if (!m_callerPlan.null())
+	if (!m_calledPlan.null())
 	    ie->addParam("plan",m_calledPlan);
 	msg->appendSafe(ie);
 	return true;
