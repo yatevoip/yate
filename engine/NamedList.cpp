@@ -374,6 +374,56 @@ void NamedList::dump(String& str, const char* separator, char quote, bool force)
     }
 }
 
+bool NamedList::dump(String& str, unsigned int flags, const char* separator,
+    const char* nameSep, const char* prefix, char quote) const
+{
+    ObjList data;
+    if ((0 != (flags & DumpName)) && (*this || (0 != (flags & DumpEmptyName)))) {
+	String* tmp = 0;
+	if (quote && 0 != (flags & DumpQuoteName)) {
+	    tmp = new String;
+	    *tmp << quote << *this << quote;
+	}
+	else if (*this)
+	    tmp = new String(*this);
+	if (tmp)
+	    data.append(tmp);
+    }
+    if (!nameSep)
+	nameSep = "=";
+    bool quotePname = quote && 0 != (flags & DumpQuoteParamName);
+    bool quotePvalue = quote && 0 == (flags & DumpDontQuoteParamValue);
+    for (const ObjList* o = m_params.skipNull(); o; o = o->skipNext()) {
+        const NamedString* s = static_cast<const NamedString *>(o->get());
+	String* tmp = 0;
+	if (quotePname) {
+	    tmp = new String;
+	    *tmp << quote << s->name() << quote;
+	}
+	else
+	    tmp = new String(s->name());
+	*tmp << nameSep;
+	if (quotePvalue)
+	    *tmp << quote << *s << quote;
+	else
+	    *tmp << *s;
+	if (*tmp)
+	    data.append(tmp);
+	else
+	    TelEngine::destruct(tmp);
+    }
+    unsigned int len = str.length();
+    bool haveData = data.skipNull();
+    if (haveData || 0 != (flags & DumpForcePrefix))
+	str << prefix;
+    if (haveData) {
+	if (0 != (flags & DumpAddSeparator))
+	    str << separator;
+	str.append(data,separator,true);
+    }
+    return len != str.length();
+}
+
 int NamedList::getIndex(const NamedString* param) const
 {
     if (!param)

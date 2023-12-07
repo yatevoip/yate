@@ -6775,6 +6775,19 @@ class YATE_API NamedList : public String
     friend class NamedIterator;
 public:
     /**
+     * List dump flags
+     */
+    enum DumpFlags {
+	DumpAddSeparator = 0x0001,       // Add separator before dumped list data
+	DumpForcePrefix = 0x0001,        // Force given prefix even if dumped data is empty
+	DumpName = 0x0002,               // Dump list name
+	DumpQuoteName = 0x0004,          // Quote list name
+	DumpEmptyName = 0x0008,          // Dump empty list name
+	DumpQuoteParamName = 0x0010,     // Quote parameter name
+	DumpDontQuoteParamValue = 0x0020,// Do not quote parameter value
+    };
+
+    /**
      * Creates a new named list.
      * @param name Name of the list - must not be NULL or empty
      */
@@ -7268,6 +7281,19 @@ public:
      * @param force True to insert the separator even in an empty string
      */
     void dump(String& str, const char* separator, char quote = 0, bool force = false) const;
+
+    /**
+     * List dump
+     * @param str String to which the name and parameters are appended
+     * @param flags Dump flags
+     * @param separator Separator string to use before each parameter
+     * @param nameSep Name/value separator, use "=" if NULL
+     * @param prefix String to be added to destination before dumped data
+     * @param quote String quoting character, usually single or double quote
+     * @return True if destination string changed, false otherwise
+     */
+    bool dump(String& str, unsigned int flags, const char* separator,
+	const char* nameSep = 0, const char* prefix = 0, char quote = 0) const;
 
     /**
      * A static empty named list
