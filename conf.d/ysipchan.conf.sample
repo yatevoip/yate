@@ -448,6 +448,19 @@
 ; in case of outgoing TCP connections.
 ;capture_compress=false
 
+; update_route_set_early: keyword: Update early dialog route set behavior
+; update_route_set_2xx: keyword: 2xx update dialog route set behavior
+; These parameters controls update of outgoing calls dialog route set
+; These parameters are applied on reload and can be overridden when call is routed to sip
+; NOTE: These parameters were added to maintain old (wrong) bahavior
+; Values:
+; - always: Always replace (use) route set from handled response
+; - never: Never replace (don't use)
+; - first: Replace on first non empty route set (old bahavior)
+; - present: Replace only if present
+;update_route_set_early=always
+;update_route_set_2xx=always
+
 
 [options]
 ; Controls the behaviour for SIP options retrieval

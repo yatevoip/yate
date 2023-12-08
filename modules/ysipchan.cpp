@@ -1184,6 +1184,17 @@ private:
 		m_referUpdate = m_refer && params.getBoolValue(YSTRING("refer_update"),m_referUpdate);
 	    }
 	}
+    inline void setRoutes(ObjList* routes, bool validOnly = false, bool force = true) {
+	    if (validOnly && !routes)
+		return;
+	    Lock lck(driver());
+	    if (!m_routes || force) {
+		TelEngine::destruct(m_routes);
+		m_routes = routes;
+	    }
+	    else
+		TelEngine::destruct(routes);
+	}
 
     SIPTransaction* m_tr;
     SIPTransaction* m_tr2;
@@ -1207,7 +1218,9 @@ private:
     String m_line;
     int m_port;
     Message* m_route;
-    ObjList* m_routes;
+    ObjList* m_routes;                   // Dialog route set
+    int m_updateRouteSetEarly;           // Early dialog route set update behavior
+    int m_updateRouteSet2xx;             // 2xx route set update behavior
     bool m_authBye;
     bool m_autoChangeParty;              // Auto change party from received message
     bool m_checkAllowInfo;               // Check Allow in INVITE and OK for INFO support
@@ -1217,10 +1230,8 @@ private:
     bool m_referring;                    // REFER already running
     bool m_refer;                        // REFER enabled
     bool m_referUpdate;                  // Send call.update on REFER
-    // reINVITE requested or in progress
-    int m_reInviting;
-    // sequence number of last transmitted PRACK
-    int m_lastRseq;
+    int m_reInviting;                    // reINVITE requested or in progress
+    int m_lastRseq;                      // sequence number of last transmitted PRACK
     // PRACK parameters
     ObjList m_prackQueue;
     uint64_t m_prackTimer;
@@ -1262,6 +1273,12 @@ public:
     enum Relay {
 	Stop = Private,
 	Start = Private << 1,
+    };
+    enum UpdateRouteSet {
+	UpdateRouteSetNever = 0,
+	UpdateRouteSetFirst = 1,
+	UpdateRouteSetAlways = 2,
+	UpdateRouteSetPresent = 3,
     };
     SIPDriver();
     ~SIPDriver();
@@ -1412,6 +1429,8 @@ static String s_tcpOutRtpip;             // RTP ip for outgoing tcp/tls transpor
 static bool s_lineKeepTcpOffline = true; // Lines: keep TCP transports when offline
 static String s_sslCertFile;             // File containing the SSL client certificate to present if requested by the server
 static String s_sslKeyFile;              // File containing the key of the SSL client certificate
+static int s_updateRouteSetEarly = SIPDriver::UpdateRouteSetFirst; // Update early dialog route set
+static int s_updateRouteSet2xx = SIPDriver::UpdateRouteSetAlways;  // Update 2xx route set
 
 static int s_expires_min = EXPIRES_MIN;
 static int s_expires_def = EXPIRES_DEF;
@@ -1486,6 +1505,21 @@ const TokenDict SipHandler::s_bodyEnc[] = {
     { "hexs",   BodyHexS},
     { 0, 0 },
 };
+
+const TokenDict s_updateRouteSetDict[] = {
+    {"never",   SIPDriver::UpdateRouteSetNever},
+    {"first",   SIPDriver::UpdateRouteSetFirst},
+    {"always",  SIPDriver::UpdateRouteSetAlways},
+    {"present", SIPDriver::UpdateRouteSetPresent},
+    {0,0},
+};
+
+static inline int getUpdateRouteSet(const NamedList& params, bool early,
+    int defVal = SIPDriver::UpdateRouteSetAlways)
+{
+    return lookup(params[early ? YSTRING("update_route_set_early") :
+	YSTRING("update_route_set_2xx")],s_updateRouteSetDict,defVal);
+}
 
 static inline String& getGlobal(String& dest, String& src)
 {
@@ -6586,6 +6620,8 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
       YateSIPPartyHolder(this,driver(),tr->traceId()),
       m_tr(tr), m_tr2(0), m_hungup(false), m_byebye(true), m_cancel(false), m_update(false),
       m_state(Incoming), m_port(0), m_route(0), m_routes(0),
+      m_updateRouteSetEarly(s_updateRouteSetEarly),
+      m_updateRouteSet2xx(s_updateRouteSet2xx),
       m_authBye(true), m_autoChangeParty(tr->getEngine()->autoChangeParty()),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
@@ -6799,6 +6835,8 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
       YateSIPPartyHolder(this,driver(),msg.getValue(YSTRING("trace_id"))),
       m_tr(0), m_tr2(0), m_hungup(false), m_byebye(true), m_cancel(true), m_update(false),
       m_state(Outgoing), m_port(0), m_route(0), m_routes(0),
+      m_updateRouteSetEarly(getUpdateRouteSet(msg,true,s_updateRouteSetEarly)),
+      m_updateRouteSet2xx(getUpdateRouteSet(msg,false,s_updateRouteSet2xx)),
       m_authBye(false), m_autoChangeParty(true),
       m_checkAllowInfo(s_checkAllowInfo), m_missingAllowInfoDefVal(s_missingAllowInfoDefVal),
       m_honorDtmfDetect(s_honorDtmfDetect),
@@ -7211,7 +7249,10 @@ SIPMessage* YateSIPConnection::createDlgMsg(const char* method, const char* uri)
 	uri = m_uri;
     SIPMessage* m = new SIPMessage(method,uri);
     m->msgTraceId = m_traceId;
-    m->addRoutes(m_routes);
+    if (m_routes) {
+	Lock lck(driver());
+	m->addRoutes(m_routes);
+    }
     setSipParty(m,plugin.findLine(m_line),true,m_host,m_port);
     if (!m->getParty()) {
 	TraceDebug(m_traceId,this,DebugWarn,"Could not create party for '%s' [%p]",
@@ -7603,8 +7644,20 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	if (m_rtpForward && plugin.parser().sdpForward() && !(msg->isACK() || tr->autoAck()))
 	    m_sdpForward = true;
     }
-    if ((!m_routes) && msg->isAnswer() && (msg->code > 100) && (msg->code < 300))
-	m_routes = msg->getRoutes();
+    if (msg->isAnswer() && (msg->code > 100) && (msg->code < 300)) {
+	switch (msg->code >= 200 ? m_updateRouteSet2xx : m_updateRouteSetEarly) {
+	    case SIPDriver::UpdateRouteSetAlways:
+		setRoutes(msg->getRoutes());
+		break;
+	    case SIPDriver::UpdateRouteSetFirst:
+		if (!m_routes)
+		    setRoutes(msg->getRoutes(),true,false);
+		break;
+	    case SIPDriver::UpdateRouteSetPresent:
+		setRoutes(msg->getRoutes(),true);
+		break;
+	}
+    }
 
     if (msg->isAnswer() && m_externalAddr.null() && m_line) {
 	// see if we should detect our external address
@@ -10299,8 +10352,10 @@ void SIPDriver::initialize()
     s_initialHeaders = s_cfg.getBoolValue("general","initial_headers");
     s_reinviteWait = s_cfg.getBoolValue("general","reinvite_wait_initial");
     s_provNonReliable = s_cfg.getBoolValue("general","mixed_provisional",true);
-    m_parser.initialize(s_cfg.getSection("codecs"),s_cfg.getSection("hacks"),s_cfg.getSection("general"));
+    m_parser.initialize(s_cfg.getSection("codecs"),s_cfg.getSection("hacks"),general);
     s_trace = s_cfg.getBoolValue("general","trace");
+    s_updateRouteSetEarly = getUpdateRouteSet(gen,true);
+    s_updateRouteSet2xx = getUpdateRouteSet(gen,false);
     if (!m_endpoint) {
 	Thread::Priority prio = Thread::priority(s_cfg.getValue("general","thread"));
 	unsigned int partyMutexCount = s_cfg.getIntValue("general","party_mutexcount",47,13,101);
