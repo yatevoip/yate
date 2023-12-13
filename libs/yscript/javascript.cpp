@@ -636,7 +636,7 @@ GenObject* JsContext::resolve(ObjList& stack, String& name, GenObject* context)
 	    if (ext) {
 		GenObject* adv = ext->getField(stack,name,context);
 		XDebug(DebugAll,"JsContext::resolve advanced to '%s' of %p for '%s'",
-		    (adv ? adv->toString().c_str() : 0),ext,s->c_str());
+		    (adv ? adv->toString().c_str() : ""),ext,s->c_str());
 		if (adv) {
 		    if (YOBJECT(ExpExtender,adv)) {
 			obj = adv;

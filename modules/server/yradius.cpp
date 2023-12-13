@@ -310,7 +310,6 @@ class RadAttrib : public GenObject
 {
 public:
     RadAttrib(const rad_dict* type, int vendor, void* value, unsigned int length);
-    RadAttrib(const rad_dict* type, int vendor, const char* value);
     RadAttrib(const char* name, const char* value);
     RadAttrib(const char* name, int value);
     RadAttrib(const char* name, unsigned char subType, const char* value);
@@ -615,14 +614,6 @@ RadAttrib::RadAttrib(const rad_dict* type, int vendor, void* value, unsigned int
     : m_type(type), m_vendor(vendor), m_value(value,length)
 {
     XDebug(&__plugin,DebugAll,"RadAttrib::RadAttrib(%p,%d,%p,%u) [%p]",type,vendor,value,length,this);
-}
-
-RadAttrib::RadAttrib(const rad_dict* type, int vendor, const char* value)
-    : m_type(type), m_vendor(vendor)
-{
-    XDebug(&__plugin,DebugAll,"RadAttrib::RadAttrib(%p,%d,'%s') [%p]",type,vendor,value,this);
-    if (m_type && value)
-	assign(value);
 }
 
 RadAttrib::RadAttrib(const char* name, const char* value)

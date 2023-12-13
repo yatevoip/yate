@@ -330,8 +330,6 @@ public:
 	}
     // Initiate an aoutgoing call.
     IAXTransaction* call(SocketAddr& addr, NamedList& params);
-    // Initiate a test of existence of a remote IAX peer.
-    IAXTransaction* poke(SocketAddr& addr);
     // Cancel threads
     void cancelThreads(unsigned int waitTerminateMs = 100);
     // Add engine data to message
@@ -1398,7 +1396,11 @@ void YIAXEngine::processMedia(IAXTransaction* transaction, DataBlock& data,
 		unsigned long flags = 0;
 		if (mark)
 		    flags = DataNode::DataMark;
-		src->Forward(data,tStamp,flags);
+		YIAXSource* y = YOBJECT(YIAXSource,src);
+		if (y)
+		    y->Forward(data,tStamp,flags);
+		else
+		    src->Forward(data,tStamp,flags);
 	    }
 	    else
 		DDebug(this,DebugAll,"processMedia. No media source [%p]",this);
@@ -1457,15 +1459,6 @@ IAXTransaction* YIAXEngine::call(SocketAddr& addr, NamedList& params)
     if (params.getBoolValue("calltoken_out",s_callTokenOut))
 	ieList.appendBinary(IAXInfoElement::CALLTOKEN,0,0);
     return startLocalTransaction(IAXTransaction::New,addr,ieList,true,false);
-}
-
-// Create a POKE transaction
-IAXTransaction* YIAXEngine::poke(SocketAddr& addr)
-{
-    Debug(this,DebugAll,"Outgoing POKE: Host: %s Port: %d [%p]",
-	addr.host().c_str(),addr.port(),this);
-    IAXIEList ieList;
-    return startLocalTransaction(IAXTransaction::Poke,addr,ieList);
 }
 
 // Cancel threads
@@ -2961,7 +2954,7 @@ void YIAXConnection::startMedia(bool in, int type)
     const char* dir = in ? "incoming" : "outgoing";
     if (exists || format)
 	Debug(this,DebugAll,"Starting %s media '%s' format '%s' (%u) [%p]",
-	    dir,epName.c_str(),formatText,format,this);
+	    dir,epName.safe(),TelEngine::c_safe(formatText),format,this);
     bool ok = true;
     if (in) {
 	YIAXSource* src = 0;

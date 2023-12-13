@@ -915,7 +915,7 @@ bool IAXTransaction::sendReject(const char* cause, u_int8_t code)
 	    return false;
     }
     Debug(m_engine,DebugAll,"Transaction(%u,%u). Reject cause='%s' code=%u [%p]",
-	localCallNo(),remoteCallNo(),cause,code,this);
+	localCallNo(),remoteCallNo(),TelEngine::c_safe(cause),code,this);
     IAXIEList* ies = new IAXIEList;
     if (cause)
 	ies->appendString(IAXInfoElement::CAUSE,cause);

@@ -830,7 +830,7 @@ void JBConnect::terminated(Socket* sock, bool final)
     }
     JBStream* stream = engine->findStream(m_stream,m_streamType);
     if (!final)
-	Debug(engine,DebugAll,"JBConnect(%s) terminated [%p]",m_stream.c_str(),this);
+	Debug(engine,DebugAll,"JBConnect(%s) terminated [%p]",m_stream.safe(),this);
     else if (stream)
 	Debug(engine,DebugWarn,"JBConnect(%s) abnormally terminated! [%p]",
 	    m_stream.c_str(),this);
@@ -1729,7 +1729,8 @@ JBClientStream* JBClientEngine::create(const String& account, const NamedList& p
 	domain = params.getValue("server",params.getValue("address"));
     JabberID jid(username,domain,params.getValue("resource"));
     if (!jid.bare()) {
-	Debug(this,DebugNote,"Can't create client stream: invalid jid=%s",jid.bare().c_str());
+	Debug(this,DebugNote,"Can't create client stream: invalid jid username='%s' domain='%s'",
+	    username.safe(),domain.safe());
 	return 0;
     }
     Lock lock(this);

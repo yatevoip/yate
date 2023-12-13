@@ -2722,9 +2722,7 @@ void QtWindow::setVisible(bool visible)
     bool changed = (m_visible != visible);
     m_visible = visible;
     if (changed && Client::self()) {
-	QVariant var;
-	if (this)
-	    var = this->property("dynamicUiActionVisibleChanged");
+	QVariant var = property("dynamicUiActionVisibleChanged");
 	if (!var.toBool())
 	    Client::self()->toggle(this,YSTRING("window_visible_changed"),m_visible);
 	else {
@@ -3290,7 +3288,7 @@ QtDialog::~QtDialog()
     if (w && m_notifyOnClose && Client::valid())
 	QtClient::self()->action(w,buildActionName(m_notifyOnClose,m_notifyOnClose));
     DDebug(QtDriver::self(),DebugAll,"QtWindow(%s) QtDialog(%s) destroyed [%p]",
-	w ? w->id().c_str() : "",YQT_OBJECT_NAME(this),w);
+	w ? w->id().c_str() : "",YQT_OBJECT_NAME_SAFE(*this),w);
 }
 
 // Initialize dialog. Load the widget.

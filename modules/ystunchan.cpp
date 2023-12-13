@@ -290,9 +290,7 @@ public:
     inline void addAttribute(YStunAttribute* attr)
 	{ m_attributes.append(attr); }
     YStunAttribute* getAttribute(u_int16_t attrType, bool remove = false);
-    void toMessage(Message& msg) const;
     bool toBuffer(DataBlock& buffer) const;
-    void print();
     static TokenDict s_tokens[];
 private:
     Type m_type;                         // Message type
@@ -306,7 +304,6 @@ private:
 class YStunUtils
 {
 public:
-    YStunUtils();
     static bool isStun(const void* data, u_int32_t len, YStunMessage::Type& type);
     static YStunMessage* decode(const void* data, u_int32_t len, bool& isStun);
     // Create an id used to send a binding request
@@ -650,20 +647,6 @@ YStunAttribute* YStunMessage::getAttribute(u_int16_t attrType, bool remove)
     return 0;
 }
 
-void YStunMessage::toMessage(Message& msg) const
-{
-    msg.addParam("message_type",text());
-    msg.addParam("message_id",m_id);
-    // Add attributes
-    ObjList* obj = m_attributes.skipNull();
-    for (; obj; obj = obj->skipNext()) {
-	YStunAttribute* attr = static_cast<YStunAttribute*>(obj->get());
-	String tmp;
-	attr->toString(tmp);
-	msg.addParam(attr->text(),tmp);
-    }
-}
-
 bool YStunMessage::toBuffer(DataBlock& buffer) const
 {
     // Create attributes
@@ -682,30 +665,12 @@ bool YStunMessage::toBuffer(DataBlock& buffer) const
     return true;
 }
 
-void YStunMessage::print()
-{
-    Debug(&iplugin,DebugAll,"YStunMessage [%p]. Type: '%s'. ID: '%s'.",
-	this,text(),m_id.c_str());
-    // Print attributes
-    ObjList* obj = m_attributes.skipNull();
-    for (; obj; obj = obj->skipNext()) {
-	YStunAttribute* attr = static_cast<YStunAttribute*>(obj->get());
-	String tmp;
-	attr->toString(tmp);
-	Debug(&iplugin,DebugAll,"YStunMessage [%p]. Attribute: %s=%s",
-	    this,attr->text(),tmp.c_str());
-    }
-}
 
 /**
  * YStunUtils
  */
 unsigned int YStunUtils::m_id = 1;
 Mutex YStunUtils::s_idMutex(true,"YStunUtils::id");
-
-YStunUtils::YStunUtils()
-{
-}
 
 bool YStunUtils::isStun(const void* data, u_int32_t len,
 	YStunMessage::Type& type)

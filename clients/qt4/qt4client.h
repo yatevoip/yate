@@ -81,6 +81,7 @@ class QtBusyWidget;                      // Busy widget to show over controls
 // Macro used to get a QT object's name
 // Can't use an inline function: the QByteArray object returned by toUtf8()
 //  would be destroyed on exit
+#define YQT_OBJECT_NAME_SAFE(qobject) ((qobject).objectName().toUtf8().constData())
 #define YQT_OBJECT_NAME(qobject) ((qobject) ? (qobject)->objectName().toUtf8().constData() : "")
 
 
@@ -1169,7 +1170,7 @@ public:
      * @return The destination string
      */
     inline String& buildActionName(String& buf, const String& action) {
-	    buf = String("dialog:") + YQT_OBJECT_NAME(this) + ":" + action;
+	    buf = String("dialog:") + YQT_OBJECT_NAME_SAFE(*this) + ":" + action;
 	    return buf;
 	}
 

@@ -886,7 +886,7 @@ bool QtCustomTree::setSelect(const String& item)
 {
     QtTreeItem* it = item ? find(item) : 0;
     DDebug(ClientDriver::self(),DebugAll,"QtCustomTree(%s)::setSelect(%s) found=%p [%p]",
-	name().c_str(),item.c_str(),it,this);
+	name().c_str(),item.safe(),it,this);
     if (it)
 	setCurrentItem(it);
     else if (item)
