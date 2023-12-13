@@ -39,7 +39,6 @@
 #include <fcntl.h>
 #include <signal.h>
 
-
 using namespace TelEngine;
 namespace { // anonymous
 
@@ -73,6 +72,9 @@ static bool s_settime = false;
 static bool s_timebomb = false;
 static bool s_pluginSafe = true;
 static const char* s_trackName = 0;
+static bool s_execPrintf = false;
+static AtomicUInt s_recvCleanupWaitPid;
+static AtomicUInt s_recvDieWaitPid;
 
 static const char* s_cmds[] = {
     "info",
@@ -88,6 +90,11 @@ static const char s_helpExternalInfo[] = "List, (re)start and stop scripts or ex
 
 class ExtModReceiver;
 class ExtModChan;
+
+static inline unsigned int idleIntervals(unsigned int ms)
+{
+    return Thread::idleMsec() ? ((ms + Thread::idleMsec() - 1) / Thread::idleMsec()) : 0;
+}
 
 class ExtModSource : public ThreadedSource
 {
@@ -241,7 +248,10 @@ public:
     bool flush();
     void die(bool clearChan = true);
     bool useUnlocked();
-    bool use();
+    inline bool use() {
+	    Lock lck(s_uses);
+	    return useUnlocked();
+	}
     bool unuse();
     inline const String& scriptFile() const
 	{ return m_script; }
@@ -253,6 +263,8 @@ public:
 	{ m_restart = restart; }
     inline bool dead() const
 	{ return m_dead || m_quit || (m_use <= 0); }
+    inline const char* desc() const
+	{ return m_desc; }
     void describe(String& rval) const;
 
 private:
@@ -265,6 +277,8 @@ private:
     void closeOut();
     void closeAudio();
     bool outputLineInternal(const char* line, int len);
+    void debugMsgInstResult(bool ok, const char* oper, const char* name, const char* extra = 0);
+
     int m_role;
     bool m_dead;
     bool m_quit;
@@ -294,6 +308,7 @@ private:
     String m_trackName;
     String m_reason;
     String m_debugName;
+    String m_desc;
 };
 
 class ExtThread : public Thread
@@ -312,18 +327,27 @@ private:
 
 class ExtModHandler;
 
-class ExtModulePlugin : public Plugin
+class ExtModulePlugin : public Module
 {
 public:
     ExtModulePlugin();
     ~ExtModulePlugin();
     virtual void initialize();
     virtual bool isBusy() const;
+
+protected:
+    virtual bool commandExecute(String& retVal, const String& line);
+    virtual bool commandComplete(Message& msg, const String& partLine, const String& partWord);
+    virtual void statusParams(String& str);
+    virtual bool received(Message& msg, int id);
+    void cleanup(bool fromDestruct = false);
+
 private:
     ExtModHandler *m_handler;
 };
 
 INIT_PLUGIN(ExtModulePlugin);
+static const Regexp s_callto("^external/\\([^/]*\\)/\\([^ ]*\\)\\(.*\\)$");
 
 class ExtModHandler : public MessageHandler
 {
@@ -332,35 +356,6 @@ public:
 	: MessageHandler(name,prio,__plugin.name())
 	{ }
     virtual bool received(Message &msg);
-};
-
-class ExtModCommand : public MessageHandler
-{
-public:
-    ExtModCommand()
-	: MessageHandler("engine.command",100,__plugin.name())
-	{ }
-    virtual bool received(Message &msg);
-private:
-    bool complete(const String& partLine, const String& partWord, String& rval) const;
-};
-
-class ExtModStatus : public MessageHandler
-{
-public:
-    ExtModStatus()
-	: MessageHandler("engine.status",110,__plugin.name())
-	{ }
-    virtual bool received(Message &msg);
-};
-
-class ExtModHelp : public MessageHandler
-{
-public:
-    ExtModHelp()
-	: MessageHandler("engine.help",100,__plugin.name())
-	{ }
-    virtual bool received(Message& msg);
 };
 
 class ExtListener : public Thread
@@ -379,18 +374,49 @@ protected:
 };
 
 
+static inline const char* fillScriptInfo(String& tmp, const char* name, const char* args = 0)
+{
+    tmp.printfAppend("'%s'",TelEngine::c_safe(name));
+    if (args)
+	tmp.printfAppend(" args='%s'",args);
+    return tmp.safe();
+}
+
+static inline void debugExec(bool start, const char* info, const char* what = "script")
+{
+    String tmp;
+    int level = DebugInfo;
+    if (!start) {
+	tmp.printf("Failed to execute %s %s: %d %s",what,info,errno,strerror(errno));
+	level = DebugWarn;
+    }
+    else if (__plugin.debugAt(DebugInfo))
+	tmp << "Executing " << what << ' ' << info;
+    else
+	return;
+    if (s_execPrintf)
+	::fprintf(stderr,"%s",tmp.safe());
+    else
+	Debug(&__plugin,level,"%s",tmp.safe());
+}
+
+
 static bool runProgram(const char *script, const char *args)
 {
+    String info;
+    fillScriptInfo(info,script,args);
 #ifdef _WINDOWS
     int pid = ::_spawnl(_P_DETACH,script,args,NULL);
     if (pid < 0) {
-	Debug(DebugWarn, "Failed to _spawnl(): %d: %s", errno, strerror(errno));
+	Debug(&__plugin,DebugWarn,"Failed to _spawnl() program %s: %d %s",
+	    info.c_str(),errno,strerror(errno));
 	return false;
     }
 #else
     int pid = ::fork();
     if (pid < 0) {
-	Debug(DebugWarn, "Failed to fork(): %d: %s", errno, strerror(errno));
+	Debug(&__plugin,DebugWarn,"Failed to fork() program %s: %d %s",
+	    info.c_str(),errno,strerror(errno));
 	return false;
     }
     if (!pid) {
@@ -407,15 +433,14 @@ static bool runProgram(const char *script, const char *args)
 	for (int f=STDERR_FILENO+1;f<1024;f++)
 	    ::close(f);
 	// Execute script
-	if (debugAt(DebugInfo))
-	    ::fprintf(stderr, "Execing program '%s' '%s'\n", script, args);
+	debugExec(true,info,"program");
         ::execl(script, script, args, (char *)NULL);
-	::fprintf(stderr, "Failed to execute '%s': %d: %s\n", script, errno, strerror(errno));
+	debugExec(false,info,"program");
 	// Shit happened. Die as quick and brutal as possible
 	::_exit(1);
     }
 #endif
-    Debug(DebugInfo,"Launched external program %s", script);
+    Debug(&__plugin,DebugAll,"Launched external program %s",info.c_str());
     return true;
 }
 
@@ -435,7 +460,7 @@ static void adjustPath(String& script)
 ExtModSource::ExtModSource(Stream* str, ExtModChan* chan)
     : m_str(str), m_brate(16000), m_total(0), m_chan(chan)
 {
-    Debug(DebugAll,"ExtModSource::ExtModSource(%p) [%p]",str,this);
+    Debug(&__plugin,DebugAll,"ExtModSource(%p) [%p]",str,this);
     if (m_str) {
 	chan->setRunning(true);
 	start("ExtMod Source");
@@ -444,7 +469,7 @@ ExtModSource::ExtModSource(Stream* str, ExtModChan* chan)
 
 ExtModSource::~ExtModSource()
 {
-    Debug(DebugAll,"ExtModSource::~ExtModSource() [%p] total=%u",this,m_total);
+    Debug(&__plugin,DebugAll,"~ExtModSource() [%p] total=%u",this,m_total);
     m_chan->setRunning(false);
     if (m_str) {
 	Stream* tmp = m_str;
@@ -474,7 +499,7 @@ void ExtModSource::run()
 	// TODO: allow data to provide its own rate
 	int64_t dly = tpos - Time::now();
 	if (dly > 0) {
-	    XDebug("ExtModSource",DebugAll,"Sleeping for " FMT64 " usec",dly);
+	    XDebug(&__plugin,DebugAll,"ExtModSource sleeping for " FMT64 " usec [%p]",dly,this);
 	    Thread::usleep((unsigned long)dly);
 	}
 	if (r <= 0)
@@ -485,7 +510,7 @@ void ExtModSource::run()
 	m_total += r;
 	tpos += (r*(u_int64_t)1000000/m_brate);
     }
-    Debug(DebugAll,"ExtModSource [%p] end of data total=%u",this,m_total);
+    Debug(&__plugin,DebugAll,"ExtModSource end of data total=%u [%p]",m_total,this);
     m_chan->setRunning(false);
 }
 
@@ -493,12 +518,12 @@ void ExtModSource::run()
 ExtModConsumer::ExtModConsumer(Stream* str)
     : m_str(str), m_total(0)
 {
-    Debug(DebugAll,"ExtModConsumer::ExtModConsumer(%p) [%p]",str,this);
+    Debug(&__plugin,DebugAll,"ExtModConsumer(%p) [%p]",str,this);
 }
 
 ExtModConsumer::~ExtModConsumer()
 {
-    Debug(DebugAll,"ExtModConsumer::~ExtModConsumer() [%p] total=%u",this,m_total);
+    Debug(&__plugin,DebugAll,"~ExtModConsumer() [%p] total=%u",this,m_total);
     if (m_str) {
 	Stream* tmp = m_str;
 	m_str = 0;
@@ -532,7 +557,7 @@ ExtModChan::ExtModChan(const char* file, const char* args, int type)
       m_recv(0), m_waitRet(0), m_type(type),
       m_running(false), m_disconn(false), m_waiting(false)
 {
-    Debug(DebugAll,"ExtModChan::ExtModChan(%d) [%p]",type,this);
+    Debug(&__plugin,DebugAll,"ExtModChan(%d) [%p]",type,this);
     File* reader = 0;
     File* writer = 0;
     switch (m_type) {
@@ -574,7 +599,7 @@ ExtModChan::ExtModChan(ExtModReceiver* recv)
       m_recv(recv), m_waitRet(0), m_type(DataNone),
       m_running(false), m_disconn(false), m_waiting(false)
 {
-    Debug(DebugAll,"ExtModChan::ExtModChan(%p) [%p]",recv,this);
+    Debug(&__plugin,DebugAll,"ExtModChan(%p) [%p]",recv,this);
     s_mutex.lock();
     s_chans.append(this);
     s_mutex.unlock();
@@ -596,7 +621,7 @@ ExtModChan::~ExtModChan()
 
 void ExtModChan::disconnected(bool final, const char *reason)
 {
-    Debug(DebugAll,"ExtModChan::disconnected() '%s' [%p]",reason,this);
+    Debug(&__plugin,DebugAll,"ExtModChan::disconnected() '%s' [%p]",reason,this);
     if (final || Engine::exiting())
 	return;
     if (m_disconn) {
@@ -773,16 +798,6 @@ bool ExtModReceiver::useUnlocked()
     return true;
 }
 
-bool ExtModReceiver::use()
-{
-    s_uses.lock();
-    bool ok = (m_use > 0);
-    if (ok)
-	++m_use;
-    s_uses.unlock();
-    return ok;
-}
-
 bool ExtModReceiver::unuse()
 {
     s_uses.lock();
@@ -806,9 +821,10 @@ ExtModReceiver::ExtModReceiver(const char* script, const char* args, File* ain, 
 {
     debugChain(&__plugin);
     debugName(m_script);
-    Debug(DebugAll,"ExtModReceiver::ExtModReceiver(\"%s\",\"%s\") [%p]",script,args,this);
     m_script.trimBlanks();
     m_args.trimBlanks();
+    m_desc << "ExtMod[" << m_script << "]";
+    Debug(&__plugin,DebugAll,"%s args='%s' created [%p]",desc(),m_args.safe(),this);
     m_role = chan ? RoleChannel : RoleGlobal;
     s_mutex.lock();
     s_modules.append(this);
@@ -826,9 +842,11 @@ ExtModReceiver::ExtModReceiver(const char* name, Stream* io, ExtModChan* chan, i
 {
     debugChain(&__plugin);
     debugName(m_script);
-    Debug(DebugAll,"ExtModReceiver::ExtModReceiver(\"%s\",%p,%p) [%p]",name,io,chan,this);
     m_script.trimBlanks();
     m_args.trimBlanks();
+    m_desc << "ExtModChan[" << m_script << "]";
+    Debug(&__plugin,DebugAll,"%s args='%s' io=(%p) chan=(%p) created [%p]",
+	desc(),m_args.safe(),io,chan,this);
     if (chan)
 	m_role = RoleChannel;
     s_mutex.lock();
@@ -838,7 +856,7 @@ ExtModReceiver::ExtModReceiver(const char* name, Stream* io, ExtModChan* chan, i
 
 void ExtModReceiver::destruct()
 {
-    Debug(DebugAll,"ExtModReceiver::destruct() pid=%d [%p]",m_pid,this);
+    DDebug(&__plugin,DebugAll,"%s destruct() pid=%d [%p]",desc(),m_pid,this);
     lock();
     // One destruction is plenty enough
     m_use = -1;
@@ -847,7 +865,7 @@ void ExtModReceiver::destruct()
     s_mutex.unlock();
     die();
     if (m_pid > 1)
-	Debug(DebugWarn,"ExtModReceiver::destruct() pid=%d [%p]",m_pid,this);
+	Debug(&__plugin,DebugWarn,"%s destruct() pid=%d [%p]",desc(),m_pid,this);
     closeAudio();
     Stream* tmp = m_in;
     m_in = 0;
@@ -858,6 +876,7 @@ void ExtModReceiver::destruct()
     m_out = 0;
     delete tmp;
     unlock();
+    Debug(&__plugin,DebugAll,"%s args='%s' destroyed [%p]",desc(),m_args.safe(),this);
     Thread::yield();
     GenObject::destruct();
 }
@@ -893,6 +912,8 @@ bool ExtModReceiver::start()
     if (m_pid < 0) {
 	ExtThread *ext = new ExtThread(this);
 	if (!ext->startup()) {
+	    Debug(&__plugin,DebugWarn,"%s failed to start worker thread [%p]",desc(),this);
+	    delete ext;
 	    // self destruct here since there is no thread to do it later
 	    unuse();
 	    return false;
@@ -926,7 +947,7 @@ bool ExtModReceiver::flush()
     }
     bool flushed = false;
     if (m_waiting.get()) {
-	Debug(DebugInfo,"ExtModReceiver releasing %u pending messages [%p]",m_qLength,this);
+	Debug(&__plugin,DebugInfo,"%s releasing %u pending messages [%p]",desc(),m_qLength,this);
 	m_waiting.clear();
 	m_qLength = 0;
 	needWait = flushed = true;
@@ -937,7 +958,7 @@ bool ExtModReceiver::flush()
 	// During shutdown longer delays are not acceptable
 	if ((ms > WAIT_FLUSH) && Engine::exiting())
 	    ms = WAIT_FLUSH;
-	DDebug(DebugAll,"ExtModReceiver sleeping %d ms [%p]",ms,this);
+	DDebug(&__plugin,DebugAll,"%s sleeping %d ms [%p]",desc(),ms,this);
 	Thread::msleep(ms);
     }
     return flushed;
@@ -948,17 +969,17 @@ void ExtModReceiver::die(bool clearChan)
 #ifdef DEBUG
     Debugger debug(DebugAll,"ExtModReceiver::die()"," pid=%d dead=%s [%p]",
 	m_pid,m_dead ? "yes" : "no",this);
-#else
-    Debug(DebugAll,"ExtModReceiver::die() pid=%d dead=%s [%p]",
-	m_pid,m_dead ? "yes" : "no",this);
 #endif
-    if (m_dead)
-	return;
-    Lock mylock(this);
+    Lock lck(0);
+    if (!m_dead)
+	lck.acquire(this);
     if (m_dead) {
-	DDebug(DebugInfo,"ExtModReceiver::die() pid=%d is already dead [%p]",m_pid,this);
+	DDebug(&__plugin,DebugAll,"%s die() pid=%d is already dead [%p]",desc(),m_pid,this);
 	return;
     }
+#ifndef DEBUG
+    Debug(&__plugin,DebugAll,"%s die() pid=%d [%p]",desc(),m_pid,this);
+#endif
     m_dead = true;
     m_quit = true;
     use();
@@ -967,22 +988,24 @@ void ExtModReceiver::die(bool clearChan)
     m_chan = 0;
     if (chan)
 	chan->setRecv(0);
-    mylock.drop();
+    lck.drop();
 
     if (m_scripted && (m_role == RoleGlobal))
 	Output("Unloading external module '%s' '%s'",m_script.c_str(),m_args.safe());
     // Give the external script a chance to die gracefully
     closeOut();
     if (m_pid > 1) {
-	Debug(DebugAll,"ExtModReceiver::die() waiting for pid=%d to die [%p]",m_pid,this);
-	for (int i=0; i<100; i++) {
-	    Thread::yield();
-	    if (m_pid <= 0)
-		break;
-	}
+	Debug(&__plugin,DebugAll,"%s die() waiting for pid=%d to die [%p]",desc(),m_pid,this);
+	unsigned int n = idleIntervals(s_recvDieWaitPid);
+	if (n)
+	    while (n-- && m_pid > 0)
+		Thread::idle();
+	else
+	    for (; n < 100 && m_pid > 0; ++n)
+		Thread::yield();
     }
     if (m_pid > 1)
-	Debug(DebugInfo,"ExtModReceiver::die() pid=%d did not exit? [%p]",m_pid,this);
+	Debug(&__plugin,DebugInfo,"%s die() pid=%d did not exit? [%p]",desc(),m_pid,this);
 
     // Close the stdout pipe before terminating the process
     closeIn();
@@ -995,7 +1018,7 @@ void ExtModReceiver::die(bool clearChan)
     if (chan && clearChan)
 	chan->disconnect(m_reason);
     if (m_restart && !Engine::exiting()) {
-	Debug(DebugMild,"Restarting external '%s' '%s'",m_script.safe(),m_args.safe());
+	Debug(&__plugin,DebugMild,"Restarting external '%s' '%s'",m_script.safe(),m_args.safe());
 	ExtModReceiver::build(m_script,m_args);
     }
     unuse();
@@ -1006,9 +1029,9 @@ bool ExtModReceiver::received(Message &msg, int id)
     if (m_dead || m_quit)
 	return false;
     if (!lock(m_timeout > 0 ? ((long)m_timeout * 1000) : -1)) {
-	Alarm("extmodule","performance",DebugWarn,
-	    "Failed to lock to queue message (%p) '%s' for %d msec [%p]",
-	    &msg,msg.c_str(),m_timeout,this);
+	Alarm(&__plugin,"performance",DebugWarn,
+	    "%s Failed to lock to queue message (%p) '%s' for %d msec [%p]",
+	    desc(),&msg,msg.c_str(),m_timeout,this);
 	return false;
     }
     // check if we are no longer running
@@ -1020,7 +1043,7 @@ bool ExtModReceiver::received(Message &msg, int id)
 	    ok = false;
     }
     if (ok && m_maxQueue && (m_qLength >= m_maxQueue)) {
-	Debug(DebugWarn,"ExtMod already having %u queued messages [%p]",m_qLength,this);
+	Debug(&__plugin,DebugWarn,"%s already having %u queued messages [%p]",desc(),m_qLength,this);
 	ok = false;
     }
     if (!ok) {
@@ -1035,10 +1058,10 @@ bool ExtModReceiver::received(Message &msg, int id)
     if (outputLine(msg.encode(h.m_id))) {
 	m_qLength++;
 	m_waiting.append(&h)->setDelete(false);
-	DDebug(DebugAll,"ExtMod queued message #%u %p '%s' [%p]",m_qLength,&msg,msg.c_str(),this);
+	DDebug(&__plugin,DebugAll,"%s queued message #%u %p '%s' [%p]",desc(),m_qLength,&msg,msg.c_str(),this);
     }
     else {
-	Debug(DebugWarn,"ExtMod could not queue message %p '%s' [%p]",&msg,msg.c_str(),this);
+	Debug(&__plugin,DebugWarn,"%s could not queue message %p '%s' [%p]",desc(),&msg,msg.c_str(),this);
 	ok = false;
 	fail = true;
     }
@@ -1051,8 +1074,9 @@ bool ExtModReceiver::received(Message &msg, int id)
 	lock();
 	ok = (m_waiting.find(&h) != 0);
 	if (ok && tout && (Time::now() > tout)) {
-	    Alarm("extmodule","performance",DebugWarn,"Message %p '%s' did not return in %d msec [%p]",
-		&msg,msg.c_str(),m_timeout,this);
+	    Alarm(&__plugin,"performance",DebugWarn,
+		"%s message %p '%s' did not return in %d msec [%p]"
+		,desc(),&msg,msg.c_str(),m_timeout,this);
 	    if (m_waiting.remove(&h,false) && (m_qLength > 0))
 		m_qLength--;
 	    ok = false;
@@ -1060,8 +1084,8 @@ bool ExtModReceiver::received(Message &msg, int id)
 	}
 	unlock();
     }
-    DDebug(DebugAll,"ExtMod message %p '%s' returning %s [%p]",
-	&msg,msg.c_str(),String::boolText(h.m_ret),this);
+    DDebug(&__plugin,DebugAll,"%s message %p '%s' returning %s [%p]",
+	desc(),&msg,msg.c_str(),String::boolText(h.m_ret),this);
     if (fail && m_timebomb)
 	die();
     unuse();
@@ -1073,6 +1097,8 @@ bool ExtModReceiver::create(const char *script, const char *args)
 #ifdef _WINDOWS
     return false;
 #else
+    String info;
+    fillScriptInfo(info,script,args);
     String tmp(script);
     int pid;
     HANDLE ext2yate[2];
@@ -1081,18 +1107,21 @@ bool ExtModReceiver::create(const char *script, const char *args)
     adjustPath(tmp);
     script = tmp.c_str();
     if (::pipe(ext2yate)) {
-	Debug(DebugWarn, "Unable to create ext->yate pipe: %s",strerror(errno));
+	Debug(&__plugin,DebugWarn,"Unable to create ext->yate pipe for %s: %d %s",
+	    info.safe(),errno,strerror(errno));
 	return false;
     }
     if (pipe(yate2ext)) {
-	Debug(DebugWarn, "unable to create yate->ext pipe: %s", strerror(errno));
+	Debug(&__plugin,DebugWarn,"Unable to create yate->ext pipe for %s: %d %s",
+	    info.safe(),errno,strerror(errno));
 	::close(ext2yate[0]);
 	::close(ext2yate[1]);
 	return false;
     }
     pid = ::fork();
     if (pid < 0) {
-	Debug(DebugWarn, "Failed to fork(): %s", strerror(errno));
+	Debug(&__plugin,DebugWarn,"Failed to fork() %s: %d %s",
+	    info.safe(),errno,strerror(errno));
 	::close(yate2ext[0]);
 	::close(yate2ext[1]);
 	::close(ext2yate[0]);
@@ -1124,17 +1153,16 @@ bool ExtModReceiver::create(const char *script, const char *args)
 	for (x=STDERR_FILENO+3;x<1024;x++)
 	    ::close(x);
 	// Execute script
-	if (debugAt(DebugInfo))
-	    ::fprintf(stderr, "Execing '%s' '%s'\n", script, args);
+	debugExec(true,info);
         ::execl(script, script, args, (char *)NULL);
-	::fprintf(stderr, "Failed to execute '%s': %s\n", script, strerror(errno));
+	debugExec(false,info);
 	// Shit happened. Die as quick and brutal as possible
 	::_exit(1);
     }
     if (m_role == RoleGlobal)
-	Output("Loading external module '%s' '%s'",m_script.c_str(),args);
+	Output("Loading external module %s",info.safe());
     else
-	Debug(DebugInfo,"Launched External Script '%s' '%s'",script,args);
+	Debug(&__plugin,DebugInfo,"Launched external script %s",info.safe());
     m_in = new File(ext2yate[0]);
     m_out = new File(yate2ext[1]);
 
@@ -1158,18 +1186,28 @@ void ExtModReceiver::cleanup()
     if (m_pid > 1) {
 	// No thread switching if possible
 	closeOut();
-	Thread::yield();
+	unsigned int n = s_recvCleanupWaitPid;
+	if (n)
+	    Thread::msleep(n);
+	else
+	    Thread::yield();
 	int w = ::waitpid(m_pid, 0, WNOHANG);
 	if (w == 0) {
-	    Debug(DebugWarn,"Process %d has not exited on closing stdin - we'll kill it",m_pid);
+	    Debug(&__plugin,DebugWarn,
+		"%s process %d has not exited on closing stdin - we'll kill it [%p]",
+		desc(),m_pid,this);
 	    ::kill(m_pid,SIGTERM);
 	    Thread::yield();
 	    w = ::waitpid(m_pid, 0, WNOHANG);
 	}
 	if (w == 0)
-	    Debug(DebugWarn,"Process %d has still not exited yet?",m_pid);
+	    Debug(&__plugin,DebugWarn,"%s process %d has still not exited yet? [%p]",
+		desc(),m_pid,this);
 	else if ((w < 0) && (errno != ECHILD))
-	    Debug(DebugMild,"Failed waitpid on %d: %s",m_pid,strerror(errno));
+	    Debug(&__plugin,DebugMild,"%s failed waitpid on %d: %d %s [%p]",
+		desc(),m_pid,errno,strerror(errno),this);
+	else
+	    Debug(&__plugin,DebugAll,"%s pid %d died [%p]",desc(),m_pid,this);
     }
     if (m_pid > 0)
 	m_pid = 0;
@@ -1188,12 +1226,14 @@ void ExtModReceiver::run()
 	return;
     }
     if (m_in && !m_in->setBlocking(false))
-	Debug("ExtModule",DebugWarn,"Failed to set nonblocking mode, expect trouble [%p]",this);
+	Debug(&__plugin,DebugWarn,"%s failed to set nonblocking mode, expect trouble [%p]",
+	    desc(),this);
     int posinbuf = 0;
     bool invalid = true;
-    DDebug(DebugAll,"ExtModReceiver::run() entering loop [%p]",this);
+    DDebug(&__plugin,DebugAll,"%s run() entering loop [%p]",desc(),this);
     for (;;) {
-	use();
+	if (!use())
+	    return;
 	lock();
 	char* buffer = static_cast<char*>(m_buffer.data());
 	int bufspace = m_buffer.length() - posinbuf - 1;
@@ -1202,18 +1242,18 @@ void ExtModReceiver::run()
 	if (unuse() || m_dead)
 	    return;
 	if (!bufspace) {
-	    Debug("ExtModule",DebugWarn,"Overflow reading in buffer of length %u, closing [%p]",
-		m_buffer.length(),this);
+	    Debug(&__plugin,DebugWarn,"%s overflow reading in buffer of length %u, closing [%p]",
+		desc(),m_buffer.length(),this);
 	    return;
 	}
 	if (!readsize) {
 	    if (m_in)
-		Debug("ExtModule",DebugInfo,"Read EOF on %p [%p]",m_in,this);
+		Debug(&__plugin,DebugInfo,"%s read EOF on %p [%p]",desc(),m_in,this);
 	    closeIn();
 	    flush();
 	    if (invalid)
-		Debug("ExtModule",DebugWarn,"Never got anything valid from terminated '%s' '%s'",
-		    m_script.c_str(),m_args.safe());
+		Debug(&__plugin,DebugWarn,"%s terminating args='%s'. Never got anything [%p]",
+		    desc(),m_args.safe(),this);
 	    if (m_chan && m_chan->running())
 		Thread::sleep(1);
 	    break;
@@ -1226,14 +1266,14 @@ void ExtModReceiver::run()
 		continue;
 	    }
 	    if (!m_quit)
-		Debug("ExtModule",DebugWarn,"Read error %d on %p [%p]",errno,m_in,this);
+		Debug(&__plugin,DebugWarn,"%s read error %d on %p [%p]",desc(),errno,m_in,this);
 	    break;
 	}
-	XDebug(DebugAll,"ExtModReceiver::run() read %d [%p]",readsize,this);
+	XDebug(&__plugin,DebugAll,"%s run() read %d [%p]",desc(),readsize,this);
 	int totalsize = readsize + posinbuf;
 	if (totalsize >= (int)m_buffer.length()) {
-	    Debug("ExtModule",DebugWarn,"Overflow reading in buffer of length %u, closing [%p]",
-		m_buffer.length(),this);
+	    Debug(&__plugin,DebugWarn,"%s overflow reading in buffer of length %u, closing [%p]",
+		desc(),m_buffer.length(),this);
 	    return;
 	}
 	buffer[totalsize] = 0;
@@ -1249,13 +1289,14 @@ void ExtModReceiver::run()
 	    readsize = eoline-buffer+1;
 	    if (buffer[0]) {
 		invalid = invalid && (buffer[0] != '%' || buffer[1] != '%');
-		use();
+		if (!use())
+		    return;
 		bool goOut = processLine(buffer);
 		if (unuse() || goOut)
 		    return;
 		if (totalsize >= (int)m_buffer.length()) {
-		    Debug("ExtModule",DebugWarn,"Lost data shrinking read buffer to %u, closing [%p]",
-			m_buffer.length(),this);
+		    Debug(&__plugin,DebugWarn,"%s lost data shrinking read buffer to %u, closing [%p]",
+			desc(),m_buffer.length(),this);
 		    return;
 		}
 	    }
@@ -1287,8 +1328,8 @@ bool ExtModReceiver::outputLine(const char* line)
 	}
 	if (tout && tout < Time::now()) {
 	    if (!m_quit)
-		Alarm("extmodule","performance",DebugWarn,"Timeout %d msec for %d characters [%p]",
-		    m_timeout,len,this);
+		Alarm(&__plugin,"performance",DebugWarn,"%s timeout %d msec for %d characters [%p]",
+		    desc(),m_timeout,len,this);
 	    unuse();
 	    return false;
 	}
@@ -1303,7 +1344,7 @@ bool ExtModReceiver::outputLine(const char* line)
 
 bool ExtModReceiver::outputLineInternal(const char* line, int len)
 {
-    DDebug("ExtModReceiver",DebugAll,"outputLine len=%d '%s' [%p]",len,line,this);
+    DDebug(&__plugin,DebugAll,"%s outputLine len=%d '%s' [%p]",desc(),len,line,this);
     // since m_out can be non-blocking (the socket) we have to loop
     while (m_out && m_out->valid() && (len > 0) && !m_dead) {
 	int w = m_out->writeData(line,len);
@@ -1335,7 +1376,7 @@ bool ExtModReceiver::outputLineInternal(const char* line, int len)
 
 void ExtModReceiver::reportError(const char* line)
 {
-    Debug("ExtModReceiver",DebugWarn,"Error: '%s'", line);
+    Debug(&__plugin,DebugWarn,"%s error: '%s' [%p]",desc(),line,this);
     outputLine("Error in: " + String(line));
 }
 
@@ -1372,7 +1413,7 @@ bool ExtModReceiver::processLine(const char* line)
 	return false;
     if (m_quit)
 	return true;
-    DDebug("ExtModReceiver",DebugAll,"processLine '%s'", line);
+    DDebug(&__plugin,DebugAll,"%s processLine '%s' [%p]",desc(),line,this);
     String id(line);
     if (m_role == RoleUnknown) {
 	if (id.startSkip("%%>connect:",false)) {
@@ -1393,8 +1434,8 @@ bool ExtModReceiver::processLine(const char* line)
 	    }
 	    else
 		role = id;
-	    DDebug("ExtModReceiver",DebugAll,"role '%s' chan '%s' type '%s'",
-		role.c_str(),chan.c_str(),type.c_str());
+	    DDebug(&__plugin,DebugAll,"%s role '%s' chan '%s' type '%s' [%p]",
+		desc(),role.c_str(),chan.c_str(),type.c_str(),this);
 	    if (role == "global") {
 		m_role = RoleGlobal;
 		return false;
@@ -1403,10 +1444,11 @@ bool ExtModReceiver::processLine(const char* line)
 		m_role = RoleChannel;
 		return false;
 	    }
-	    Debug(DebugWarn,"Unknown role '%s' received [%p]",role.c_str(),this);
+	    Debug(&__plugin,DebugWarn,"%s unknown role '%s' received [%p]",desc(),role.c_str(),this);
 	}
 	else
-	    Debug(DebugWarn,"Expecting %%%%>connect, received '%s' [%p]",id.c_str(),this);
+	    Debug(&__plugin,DebugWarn,"%s expecting %%%%>connect, received '%s' [%p]",
+		desc(),id.c_str(),this);
 	return true;
     }
     else if (id.startsWith("%%<message:")) {
@@ -1415,9 +1457,10 @@ bool ExtModReceiver::processLine(const char* line)
 	for (; p; p=p->next()) {
 	    MsgHolder *msg = static_cast<MsgHolder *>(p->get());
 	    if (msg && msg->decode(line)) {
-		DDebug("ExtModReceiver",DebugInfo,"Matched message %p [%p]",msg->msg(),this);
+		DDebug(&__plugin,DebugInfo,"%s matched message %p [%p]",desc(),msg->msg(),this);
 		if (m_chan && (m_chan->waitMsg() == msg->msg())) {
-		    DDebug("ExtModReceiver",DebugNote,"Entering wait mode on channel %p [%p]",m_chan,this);
+		    DDebug(&__plugin,DebugNote,"%s entering wait mode on channel %p [%p]",
+			desc(),m_chan,this);
 		    m_chan->waitMsg(0);
 		    m_chan->waiting(true);
 		}
@@ -1427,8 +1470,8 @@ bool ExtModReceiver::processLine(const char* line)
 		return false;
 	    }
 	}
-	Debug("ExtModReceiver",(m_dead ? DebugInfo : DebugWarn),
-	    "Unmatched%s message: %s [%p]",(m_dead ? " dead" : ""),line,this);
+	Debug(&__plugin,(m_dead ? DebugInfo : DebugWarn),
+	    "%s unmatched%s message: %s [%p]",desc(),(m_dead ? " dead" : ""),line,this);
 	return false;
     }
     else if (id.startSkip("%%>install:",false)) {
@@ -1454,14 +1497,13 @@ bool ExtModReceiver::processLine(const char* line)
 	    Engine::install(r);
 	}
 	unlock();
+	String tmp;
 	if (debugAt(DebugAll)) {
-	    String tmp;
+	    tmp << " priority=" << prio;
 	    if (fname)
-		tmp << "filter: '" << fname << "'='" << fvalue << "' ";
-	    tmp << (ok ? "ok" : "failed");
-	    Debug("ExtModReceiver",DebugAll,"Install '%s', prio %d %s",
-		id.c_str(),prio,tmp.c_str());
+		tmp << " filter: '" << fname << "'='" << fvalue << "'";
 	}
+	debugMsgInstResult(ok,"install",id,tmp);
 	String out("%%<install:");
 	out << prio << ":" << id << ":" << ok;
 	outputLine(out);
@@ -1482,7 +1524,7 @@ bool ExtModReceiver::processLine(const char* line)
 	    }
 	}
 	unlock();
-	Debug("ExtModReceiver",DebugAll,"Uninstall '%s' %s", id.c_str(),ok ? "ok" : "failed");
+	debugMsgInstResult(ok,"uninstall",id);
 	String out("%%<uninstall:");
 	out << prio << ":" << id << ":" << ok;
 	outputLine(out);
@@ -1490,7 +1532,7 @@ bool ExtModReceiver::processLine(const char* line)
     }
     else if (id.startSkip("%%>watch:",false)) {
 	bool ok = addWatched(id);
-	Debug("ExtModReceiver",DebugAll,"Watch '%s' %s", id.c_str(),ok ? "ok" : "failed");
+	debugMsgInstResult(ok,"watch",id);
 	String out("%%<watch:");
 	out << id << ":" << ok;
 	outputLine(out);
@@ -1498,7 +1540,7 @@ bool ExtModReceiver::processLine(const char* line)
     }
     else if (id.startSkip("%%>unwatch:",false)) {
 	bool ok = delWatched(id);
-	Debug("ExtModReceiver",DebugAll,"Unwatch '%s' %s", id.c_str(),ok ? "ok" : "failed");
+	debugMsgInstResult(ok,"unwatch",id);
 	String out("%%<unwatch:");
 	out << id << ":" << ok;
 	outputLine(out);
@@ -1650,8 +1692,8 @@ bool ExtModReceiver::processLine(const char* line)
 		else
 		    val = debugName();
 	    }
-	    DDebug("ExtModReceiver",DebugAll,"Set '%s'='%s' %s",
-		id.c_str(),val.c_str(),ok ? "ok" : "failed");
+	    DDebug(&__plugin,DebugAll,"%s set '%s'='%s' %s [%p]",
+		desc(),id.c_str(),val.c_str(),ok ? "ok" : "failed",this);
 	    String out("%%<setlocal:");
 	    out << id << ":" << val << ":" << ok;
 	    outputLine(out);
@@ -1666,14 +1708,15 @@ bool ExtModReceiver::processLine(const char* line)
     else {
 	ExtMessage* m = new ExtMessage;
 	if (m->decode(line) == -2) {
-	    DDebug("ExtModReceiver",DebugAll,"Created message %p '%s' [%p]",m,m->c_str(),this);
+	    DDebug(&__plugin,DebugAll,"%s created message %p '%s' [%p]",desc(),m,m->c_str(),this);
 	    lock();
 	    bool note = true;
 	    while (!m_dead && m_chan && m_chan->waiting()) {
 		if (note) {
 		    note = false;
-		    Debug("ExtModReceiver",DebugNote,"Waiting before enqueueing new message %p '%s' [%p]",
-			m,m->c_str(),this);
+		    Debug(&__plugin,DebugNote,
+			"%s waiting before enqueueing new message %p '%s' [%p]",
+			desc(),m,m->c_str(),this);
 		}
 		unlock();
 		Thread::yield();
@@ -1703,8 +1746,8 @@ bool ExtModReceiver::processLine(const char* line)
 		    MsgHolder *h = static_cast<MsgHolder *>(p->get());
 		    if (h && (h->m_id == id)) {
 			RefObject* ud = h->m_msg.userData();
-			Debug("ExtModReceiver",DebugAll,"Copying data pointer %p from %p '%s' [%p]",
-			    ud,h->msg(),h->msg()->c_str(),this);
+			Debug(&__plugin,DebugAll,"%s copying data pointer %p from %p '%s' [%p]",
+			    desc(),ud,h->msg(),h->msg()->c_str(),this);
 			m->userData(ud);
 			break;
 		    }
@@ -1750,14 +1793,20 @@ void ExtModReceiver::describe(String& rval) const
     rval << "\r\n";
 }
 
+void ExtModReceiver::debugMsgInstResult(bool ok, const char* oper, const char* name,
+    const char* extra)
+{
+    Debug(&__plugin,ok ? DebugAll : DebugNote,"%s %s%s '%s'%s [%p]",
+	desc(),ok ? "" : "failed ",oper,name,TelEngine::c_safe(extra),this);
+}
+
 
 bool ExtModHandler::received(Message& msg)
 {
     String dest(msg.getValue("callto"));
     if (dest.null())
 	return false;
-    static const Regexp r("^external/\\([^/]*\\)/\\([^ ]*\\)\\(.*\\)$");
-    if (!dest.matches(r))
+    if (!dest.matches(s_callto))
 	return false;
     CallEndpoint* ch = YOBJECT(CallEndpoint,msg.userData());
     String t = dest.matchString(1);
@@ -1773,7 +1822,7 @@ bool ExtModHandler::received(Message& msg)
     else if (t == "playrec")
 	typ = ExtModChan::DataBoth;
     else {
-	Debug(DebugConf,"Invalid ExtModule method '%s', use 'nochan', 'nodata', 'play', 'record' or 'playrec'",
+	Debug(&__plugin,DebugConf,"Invalid method '%s', use 'nochan', 'nodata', 'play', 'record' or 'playrec'",
 	    t.c_str());
 	return false;
     }
@@ -1790,7 +1839,7 @@ bool ExtModHandler::received(Message& msg)
     ExtModChan *em = ExtModChan::build(dest.matchString(2).c_str(),
 				       dest.matchString(3).c_str(),typ);
     if (!em) {
-	Debug(DebugCrit,"Failed to create ExtMod for '%s'",dest.matchString(2).c_str());
+	Debug(&__plugin,DebugCrit,"Failed to create ExtMod for '%s'",dest.matchString(2).c_str());
 	return false;
     }
     ExtModReceiver* recv = em->receiver();
@@ -1802,7 +1851,7 @@ bool ExtModHandler::received(Message& msg)
 	int level = DebugWarn;
 	if (msg.getValue("error") || msg.getValue("reason"))
 	    level = DebugNote;
-	Debug(level,"ExtMod '%s' did not handle call message",dest.matchString(2).c_str());
+	Debug(&__plugin,level,"ExtMod '%s' did not handle call message",dest.matchString(2).c_str());
 	em->waiting(false);
 	if (recv)
 	    recv->unuse();
@@ -1820,153 +1869,6 @@ bool ExtModHandler::received(Message& msg)
 }
 
 
-bool ExtModCommand::received(Message& msg)
-{
-    String line(msg.getValue("line"));
-    if (!line.startsWith("external",true))
-	return complete(msg.getValue("partline"),msg.getValue("partword"),msg.retValue());;
-    line >> "external";
-    line.trimBlanks();
-    if (line.null() || line == "info") {
-	msg.retValue() = "";
-	int n = 0;
-	Lock lock(s_mutex);
-	ObjList *l = &s_modules;
-	for (; l; l=l->next()) {
-	    ExtModReceiver *r = static_cast<ExtModReceiver *>(l->get());
-	    if (r) {
-		msg.retValue() << ++n << ". " << r->scriptFile() << " " << r->commandArg() << "\r\n";
-		if (line)
-		    r->describe(msg.retValue());
-	    }
-	}
-	return true;
-    }
-    int blank = line.find(' ');
-    bool start = line.startSkip("start");
-    bool restart = start || line.startSkip("restart");
-    if (restart || line.startSkip("stop")) {
-	if (line.null())
-	    return false;
-	blank = line.find(' ');
-	String arg;
-	if (blank >= 0)
-	    arg = line.substr(blank+1);
-	ExtModReceiver *r = ExtModReceiver::find(line.substr(0,blank),arg);
-	if (r) {
-	    if (start) {
-		msg.retValue() = "External already running\r\n";
-		return true;
-	    }
-	    else {
-		r->setRestart(false);
-		r->die();
-		msg.retValue() = "External command stopped\r\n";
-	    }
-	}
-	else
-	    msg.retValue() = "External not running\r\n";
-	if (!restart)
-	    return true;
-    }
-    else if (line.startSkip("execute")) {
-	if (line.null())
-	    return false;
-	blank = line.find(' ');
-	String exe = line.substr(0,blank);
-	adjustPath(exe);
-	if (blank >= 0)
-	    line = line.substr(blank+1);
-	else
-	    line.clear();
-	bool ok = runProgram(exe,line);
-	msg.retValue() = ok ? "External exec attempt\r\n" : "External exec failed\r\n";
-	return true;
-    }
-    ExtModReceiver *r = ExtModReceiver::build(line.substr(0,blank),
-	(blank >= 0) ? line.substr(blank+1).c_str() : (const char*)0);
-    msg.retValue() = r ? "External start attempt\r\n" : "External command failed\r\n";
-    return true;
-}
-
-bool ExtModCommand::complete(const String& partLine, const String& partWord, String& rval) const
-{
-    if (partLine.null() && partWord.null())
-	return false;
-    if (partLine.null() || partLine == YSTRING("status") || partLine == YSTRING("help"))
-	Module::itemComplete(rval,"external",partWord);
-    else if (partLine == YSTRING("external")) {
-	for (const char** list = s_cmds; *list; list++)
-	    Module::itemComplete(rval,*list,partWord);
-	return true;
-    }
-    else if (partLine == YSTRING("external restart") || partLine == YSTRING("external stop")) {
-	ObjList mod;
-	s_mutex.lock();
-	ObjList *l = &s_modules;
-	for (; l; l=l->next()) {
-	    ExtModReceiver *r = static_cast<ExtModReceiver *>(l->get());
-	    if (!r)
-		continue;
-	    if (mod.find(r->scriptFile()))
-		continue;
-	    mod.append(new String(r->scriptFile()));
-	}
-	s_mutex.unlock();
-	for (l = mod.skipNull(); l; l = l->skipNext())
-	    Module::itemComplete(rval,l->get()->toString(),partWord);
-    }
-    else if (partLine.startsWith("external ")) {
-	String scr = partLine.substr(9);
-	if (!(scr.startSkip("restart") || scr.startSkip("stop")))
-	    return false;
-	if (scr.null() || (scr.find(' ') >= 0))
-	    return false;
-	ObjList arg;
-	s_mutex.lock();
-	ObjList *l = &s_modules;
-	for (; l; l=l->next()) {
-	    ExtModReceiver *r = static_cast<ExtModReceiver *>(l->get());
-	    if (!r || r->commandArg().null() || (r->scriptFile() != scr))
-		continue;
-	    if (arg.find(r->commandArg()))
-		continue;
-	    arg.append(new String(r->commandArg()));
-	}
-	s_mutex.unlock();
-	for (l = arg.skipNull(); l; l = l->skipNext())
-	    Module::itemComplete(rval,l->get()->toString(),partWord);
-    }
-    return false;
-}
-
-
-bool ExtModStatus::received(Message& msg)
-{
-    const String& dest = msg[YSTRING("module")];
-    if (dest && (dest != YSTRING("external")))
-	return false;
-    s_mutex.lock();
-    msg.retValue() << "name=" << __plugin.name()
-	<< ",type=misc;scripts=" << s_modules.count()
-	<< ",chans=" << s_chans.count() << "\r\n";
-    s_mutex.unlock();
-    return !dest.null();
-}
-
-
-bool ExtModHelp::received(Message& msg)
-{
-    const String& line = msg[YSTRING("line")];
-    if (line && (line != YSTRING("external")))
-	return false;
-    msg.retValue() << "  " << s_helpExternalCmd << "\r\n";
-    if (line)
-	msg.retValue() << s_helpExternalInfo << "\r\n";
-    return !line.null();
-}
-
-
 ExtListener::ExtListener(const char* name)
     : Thread("ExtMod Listener"),
       m_name(name), m_role(ExtModReceiver::RoleUnknown)
@@ -1981,7 +1883,7 @@ bool ExtListener::init(const NamedList& sect)
     else if (role == "channel")
 	m_role = ExtModReceiver::RoleChannel;
     else if (role) {
-	Debug(DebugConf,"Unknown role '%s' of listener '%s'",role.c_str(),m_name.c_str());
+	Debug(&__plugin,DebugConf,"Unknown role '%s' of listener '%s'",role.c_str(),m_name.c_str());
 	return false;
     }
     String type(sect.getValue("type"));
@@ -2002,17 +1904,17 @@ bool ExtListener::init(const NamedList& sect)
 	    return false;
     }
     else {
-	Debug(DebugConf,"Unknown type '%s' of listener '%s'",type.c_str(),m_name.c_str());
+	Debug(&__plugin,DebugConf,"Unknown type '%s' of listener '%s'",type.c_str(),m_name.c_str());
 	return false;
     }
     if (!m_socket.create(addr.family(),SOCK_STREAM)) {
-	Debug(DebugWarn,"Could not create socket for listener '%s' error %d: %s",
+	Debug(&__plugin,DebugWarn,"Could not create socket for listener '%s' error %d: %s",
 	    m_name.c_str(),m_socket.error(),strerror(m_socket.error()));
 	return false;
     }
     m_socket.setReuse();
     if (!m_socket.bind(addr)) {
-	Debug(DebugWarn,"Could not bind listener '%s' error %d: %s",
+	Debug(&__plugin,DebugWarn,"Could not bind listener '%s' error %d: %s",
 	    m_name.c_str(),m_socket.error(),strerror(m_socket.error()));
 	return false;
     }
@@ -2032,13 +1934,13 @@ void ExtListener::run()
 	if (!skt) {
 	    if (m_socket.canRetry())
 		continue;
-	    Alarm("extmodule","socket",DebugWarn,"Error on accept(), shutting down ExtListener '%s'",m_name.c_str());
+	    Alarm(&__plugin,"socket",DebugWarn,"Error on accept(), shutting down ExtListener '%s'",m_name.c_str());
 	    break;
 	}
 	String tmp = addr.host();
 	if (addr.port())
 	    tmp << ":" << addr.port();
-	Debug(DebugInfo,"Listener '%s' got connection from '%s'",m_name.c_str(),tmp.c_str());
+	Debug(&__plugin,DebugInfo,"Listener '%s' got connection from '%s'",m_name.c_str(),tmp.c_str());
 	switch (m_role) {
 	    case ExtModReceiver::RoleUnknown:
 	    case ExtModReceiver::RoleGlobal:
@@ -2046,7 +1948,7 @@ void ExtListener::run()
 		ExtModReceiver::build(m_name,skt,0,m_role,tmp);
 		break;
 	    default:
-		Debug(DebugWarn,"Listener '%s' hit invalid role %d",m_name.c_str(),m_role);
+		Debug(&__plugin,DebugWarn,"Listener '%s' hit invalid role %d",m_name.c_str(),m_role);
 		delete skt;
 	}
     }
@@ -2058,7 +1960,7 @@ ExtListener* ExtListener::build(const char* name, const NamedList& sect)
 	return 0;
     ExtListener* ext = new ExtListener(name);
     if (!ext->init(sect)) {
-	Alarm("extmodule","config",DebugWarn,"Could not start listener '%s'",name);
+	Alarm(&__plugin,"config",DebugWarn,"Could not start listener '%s'",name);
 	delete ext;
 	ext = 0;
     }
@@ -2067,7 +1969,7 @@ ExtListener* ExtListener::build(const char* name, const NamedList& sect)
 
 
 ExtModulePlugin::ExtModulePlugin()
-    : Plugin("extmodule"),
+    : Module("extmodule","misc"),
       m_handler(0)
 {
     Output("Loaded module ExtModule");
@@ -2076,17 +1978,12 @@ ExtModulePlugin::ExtModulePlugin()
 ExtModulePlugin::~ExtModulePlugin()
 {
     Output("Unloading module ExtModule");
-    s_mutex.lock();
-    s_pluginSafe = false;
-    s_modules.clear();
-    // the receivers destroyed above should also clear chans but better be sure
-    s_chans.clear();
-    s_mutex.unlock();
+    cleanup(true);
 }
 
 bool ExtModulePlugin::isBusy() const
 {
-    Lock lock(s_mutex);
+    Lock lck(s_mutex);
     return (s_chans.count() != 0);
 }
 
@@ -2095,6 +1992,7 @@ void ExtModulePlugin::initialize()
     Output("Initializing module ExtModule");
     s_cfg = Engine::configFile("extmodule");
     s_cfg.load();
+    NamedList& gen = *s_cfg.createSection(YSTRING("general"));
     s_maxQueue = s_cfg.getIntValue("general","maxqueue",DEF_MAXQUEUE,0,MAX_MAXQUEUE);
     s_timeout = s_cfg.getIntValue("general","timeout",MSG_TIMEOUT);
     s_timebomb = s_cfg.getBoolValue("general","timebomb",false);
@@ -2107,12 +2005,25 @@ void ExtModulePlugin::initialize()
     else if (wf > 100)
 	wf = 100;
     s_waitFlush = wf;
+    s_execPrintf = gen.getBoolValue(YSTRING("exec_use_printf"));
+    unsigned int cleanupWait = gen.getIntValue(YSTRING("recv_cleanup_waitpid"),30,0,100);
+    unsigned int dieWait = gen.getIntValue(YSTRING("recv_die_waitpid"),60,0,200);
+    if (dieWait && dieWait <= cleanupWait)
+	dieWait = cleanupWait + Thread::idleMsec();
+    s_recvCleanupWaitPid = cleanupWait;
+    s_recvDieWaitPid = dieWait;
+
     if (!m_handler) {
 	m_handler = new ExtModHandler("call.execute",s_cfg.getIntValue("general","priority",100));
+	if (gen.getBoolValue(YSTRING("execute_use_filter"),true))
+	    m_handler->setFilter(new NamedPointer("callto",new Regexp(s_callto)));
 	Engine::install(m_handler);
-	Engine::install(new ExtModCommand);
-	Engine::install(new ExtModStatus);
-	Engine::install(new ExtModHelp);
+	installRelay(Command);
+	installRelay(Status,110);
+	installRelay(Help);
+	installRelay(Level);
+	if (gen.getBoolValue(YSTRING("halt_cleanup"),true))
+	    installRelay(Halt,gen.getIntValue(YSTRING("halt_priority"),1000,100));
 	NamedList *sect = 0;
 	int n = s_cfg.sections();
 	for (int i = 0; i < n; i++) {
@@ -2153,6 +2064,166 @@ void ExtModulePlugin::initialize()
 	    }
 	}
     }
+}
+
+bool ExtModulePlugin::commandExecute(String& retVal, const String& l)
+{
+    if (!l.startsWith("external",true))
+	return false;
+    String line = l.substr(9);
+    line.trimBlanks();
+    if (!line || line == "info") {
+	retVal = "";
+	int n = 0;
+	Lock lck(s_mutex);
+	for (ObjList* o = s_modules.skipNull(); o; o = o->skipNext()) {
+	    ExtModReceiver* r = static_cast<ExtModReceiver*>(o->get());
+	    retVal << ++n << ". " << r->scriptFile() << " " << r->commandArg() << "\r\n";
+	    if (line)
+		r->describe(retVal);
+	}
+	return true;
+    }
+    int blank = line.find(' ');
+    bool start = line.startSkip("start");
+    bool restart = start || line.startSkip("restart");
+    if (restart || line.startSkip("stop")) {
+	if (!line)
+	    return false;
+	blank = line.find(' ');
+	String arg;
+	if (blank >= 0)
+	    arg = line.substr(blank+1);
+	ExtModReceiver* r = ExtModReceiver::find(line.substr(0,blank),arg);
+	if (r) {
+	    if (start) {
+		retVal = "External already running\r\n";
+		return true;
+	    }
+	    else {
+		r->setRestart(false);
+		r->die();
+		retVal = "External command stopped\r\n";
+	    }
+	}
+	else
+	    retVal = "External not running\r\n";
+	if (!restart)
+	    return true;
+    }
+    else if (line.startSkip("execute")) {
+	if (!line)
+	    return false;
+	blank = line.find(' ');
+	String exe = line.substr(0,blank);
+	adjustPath(exe);
+	if (blank >= 0)
+	    line = line.substr(blank+1);
+	else
+	    line.clear();
+	bool ok = runProgram(exe,line);
+	retVal = ok ? "External exec attempt\r\n" : "External exec failed\r\n";
+	return true;
+    }
+    ExtModReceiver* r = ExtModReceiver::build(line.substr(0,blank),
+	(blank >= 0) ? line.substr(blank+1).c_str() : (const char*)0);
+    retVal = r ? "External start attempt\r\n" : "External command failed\r\n";
+    return true;
+}
+
+bool ExtModulePlugin::commandComplete(Message& msg, const String& partLine, const String& partWord)
+{
+    if (!(partLine || partWord))
+	return false;
+    String& rval = msg.retValue();
+    if (!partLine) {
+	itemComplete(rval,"external",partWord);
+	return false;
+    }
+    if (partLine == YSTRING("debug") || partLine == YSTRING("status"))
+	itemComplete(rval,name(),partWord);
+    else if (partLine == YSTRING("help"))
+	itemComplete(rval,"external",partWord);
+    else if (partLine == YSTRING("external")) {
+	for (const char** list = s_cmds; *list; list++)
+	    itemComplete(rval,*list,partWord);
+	return true;
+    }
+    else if (partLine == YSTRING("external restart") || partLine == YSTRING("external stop")) {
+	ObjList mod;
+	s_mutex.lock();
+	for (ObjList* o = s_modules.skipNull(); o; o = o->skipNext()) {
+	    ExtModReceiver* r = static_cast<ExtModReceiver *>(o->get());
+	    if (mod.find(r->scriptFile()))
+		continue;
+	    mod.append(new String(r->scriptFile()));
+	}
+	s_mutex.unlock();
+	itemComplete(rval,mod,partWord);
+    }
+    else if (partLine.startsWith("external ")) {
+	String scr = partLine.substr(9);
+	if (!(scr.startSkip("restart") || scr.startSkip("stop")))
+	    return false;
+	if (scr.null() || (scr.find(' ') >= 0))
+	    return false;
+	ObjList arg;
+	s_mutex.lock();
+	for (ObjList* o = s_modules.skipNull(); o; o = o->skipNext()) {
+	    ExtModReceiver* r = static_cast<ExtModReceiver *>(o->get());
+	    if (r->commandArg().null() || (r->scriptFile() != scr))
+		continue;
+	    if (arg.find(r->commandArg()))
+		continue;
+	    arg.append(new String(r->commandArg()));
+	}
+	s_mutex.unlock();
+	itemComplete(rval,arg,partWord);
+    }
+    return false;
+}
+
+void ExtModulePlugin::statusParams(String& str)
+{
+    Lock lck(s_mutex);
+    str << "scripts=" << s_modules.count() << ",chans=" << s_chans.count();
+}
+
+bool ExtModulePlugin::received(Message& msg, int id)
+{
+    if (Help == id) {
+	const String& line = msg[YSTRING("line")];
+	if (line && (line != YSTRING("external")))
+	    return false;
+	msg.retValue() << "  " << s_helpExternalCmd << "\r\n";
+	if (line)
+	    msg.retValue() << s_helpExternalInfo << "\r\n";
+	return !line.null();
+    }
+    if (Status == id) {
+	// Keep old behavior, respond to 'external'
+	if (msg[YSTRING("module")] == YSTRING("external")) {
+	    msgStatus(msg);
+	    return true;
+	}
+	return Module::received(msg,id);
+    }
+    if (Halt == id) {
+	cleanup();
+	return false;
+    }
+    return Module::received(msg,id);
+}
+
+void ExtModulePlugin::cleanup(bool fromDestruct)
+{
+    s_mutex.lock();
+    if (fromDestruct)
+	s_pluginSafe = false;
+    s_modules.clear();
+    // the receivers destroyed above should also clear chans but better be sure
+    s_chans.clear();
+    s_mutex.unlock();
 }
 
 }; // anonymous namespace
