@@ -50,3 +50,22 @@
 ; remote_port: source port, mandatory to set. Port to use for sending HEP3 packets
 ; Not applicable on reload.
 ;local_port=
+
+; max_queue_size: integer: Maximum length of transmission queue for HEP packets. Once
+; this threshold is exceeded, a packet at the front the queue is discarded in order
+; for a new one to be appended.
+; 0 deactivates the mechanism, otherwise, minimum value is 2.
+; Default value is 1000
+;max_queue_size=1000
+
+;max_msg_age: integer. Maximum age in milliseconds of a HEP packet in order to be sent.
+; Otherwise, the packet is dropped. 0 means that packets are not checked (mechanism is
+; disabled). By default, this mechanism is disabled.
+max_msg_age=0
+
+;max_write_tries: integer: Maximum number of tries for transmitting a HEP packet over
+; a TCP connection, afterwards the packet is discarded. Once a packet needed multiple
+; tries to be transmitted, this threshold is halved. A packet being transmitted in a
+; single try will double the threshold until it reaches back the configured value.
+; Minimum value is 1. Default value is 320
+max_write_tries=320
