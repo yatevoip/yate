@@ -58,13 +58,13 @@ public:
 		const Message* msg = YOBJECT(Message,&list);
 		if (msg) {
 		    if (!params) {
-			if (m_minAge < Time::now() - msg->msgTime().usec())
+			if (m_minAge > Time::now() - msg->msgTime().usec())
 			    return false;
 		    }
 		    else {
 			if (!params->m_now)
 			    params->m_now = Time::now();
-			if (m_minAge < params->m_now - msg->msgTime().usec())
+			if (m_minAge > params->m_now - msg->msgTime().usec())
 			    return false;
 		    }
 		}
