@@ -1548,11 +1548,11 @@ public:
     /**
      * Set element attributes from a list of parameters
      * @param list List of attributes
-     * @param prefix Add only the attributes that start with this prefix. =
-     *  If NULL, it will set as attributes the whole parameter list
+     * @param prefix Add only the attributes that start with this prefix.
+     *  Set attributes from the whole parameter list if this parameter is empty
      * @param skipPrefix Skip over the prefix when building attribute name
      */
-    inline void setAttributes(const NamedList& list, const String& prefix = NamedList::empty(),
+    inline void setAttributes(const NamedList& list, const String& prefix = String::empty(),
 	bool skipPrefix = true) {
 	    if (prefix)
 		m_element.copySubParams(list,prefix,skipPrefix);
