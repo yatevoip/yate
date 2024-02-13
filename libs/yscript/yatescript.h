@@ -1431,7 +1431,6 @@ public:
      * @param op New item to set
      * @param idx Index to set
      * @param consume Consume the item if failed to be set
-     * @return ExpOperation pointer, NULL if not set or index is out of bounds
      */
     inline void set(ExpOperation* op, unsigned int idx, bool consume = true) {
 	    if (!m_data.set(op,idx) && consume)
