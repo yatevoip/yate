@@ -371,7 +371,7 @@ bool SocketAddr::assign(const DataBlock& addr)
 int SocketAddr::copyAddr(DataBlock& addr) const
 {
     if (!m_address)
-	return false;
+	return Unknown;
     switch (family()) {
 	case AF_INET:
 	    addr.assign(&((struct sockaddr_in*)m_address)->sin_addr,4);
