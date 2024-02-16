@@ -491,6 +491,12 @@ int NamedList::getIntValue(const String& name, const TokenDict* tokens, int defv
     return s ? s->toInteger(tokens,defvalue) : defvalue;
 }
 
+int NamedList::getIntValue(const String& name, const TokenDictStr* tokens, int defvalue) const
+{
+    const NamedString *s = getParam(name);
+    return s ? s->toInteger(tokens,defvalue) : defvalue;
+}
+
 int64_t NamedList::getInt64Value(const String& name, int64_t defvalue, int64_t minvalue,
     int64_t maxvalue, bool clamp) const
 {
@@ -499,6 +505,13 @@ int64_t NamedList::getInt64Value(const String& name, int64_t defvalue, int64_t m
 }
 
 int64_t NamedList::getInt64ValueDict(const String& name, const TokenDict64* tokens,
+    int64_t defvalue) const
+{
+    const NamedString* s = getParam(name);
+    return s ? s->toInt64Dict(tokens,defvalue) : defvalue;
+}
+
+int64_t NamedList::getInt64ValueDict(const String& name, const TokenDictStr64* tokens,
     int64_t defvalue) const
 {
     const NamedString* s = getParam(name);

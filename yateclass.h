@@ -250,6 +250,8 @@ class NamedCounter;
 class MutexPrivate;
 class SemaphorePrivate;
 class ThreadPrivate;
+struct TokenDictStr;
+struct TokenDictStr64;
 
 /**
  * Abort execution (and coredump if allowed) if the abort flag is set.
@@ -905,6 +907,7 @@ struct TokenDict64 {
      */
     int64_t value;
 };
+
 
 #if 0 /* for documentation generator */
 /**
@@ -3155,6 +3158,15 @@ public:
     int toInteger(const TokenDict* tokens, int defvalue = 0, int base = 0) const;
 
     /**
+     * Convert the string to an integer value looking up first a token table.
+     * @param tokens Pointer to an array of String tokens to lookup first
+     * @param defvalue Default to return if the string is not a token or number
+     * @param base Numeration base, 0 to autodetect
+     * @return The integer interpretation or defvalue.
+     */
+    int toInteger(const TokenDictStr* tokens, int defvalue = 0, int base = 0) const;
+
+    /**
      * Convert the string to an long integer value.
      * @param defvalue Default to return if the string is not a number
      * @param base Numeration base, 0 to autodetect
@@ -3188,6 +3200,15 @@ public:
      * @return The integer interpretation or defvalue.
      */
     int64_t toInt64Dict(const TokenDict64* tokens, int64_t defvalue = 0, int base = 0) const;
+
+    /**
+     * Convert the string to an 64bit integer value looking up first a token table.
+     * @param tokens Pointer to an array of String tokens to lookup first
+     * @param defvalue Default to return if the string is not a token or number
+     * @param base Numeration base, 0 to autodetect
+     * @return The integer interpretation or defvalue.
+     */
+    int64_t toInt64Dict(const TokenDictStr64* tokens, int64_t defvalue = 0, int base = 0) const;
 
     /**
      * Convert the string to an unsigned 64 bit integer value.
@@ -4776,6 +4797,76 @@ YATE_API int64_t lookup(const char* str, const TokenDict64* tokens, int64_t defv
  * @param defvalue Value to return if lookup fails
  */
 YATE_API const char* lookup(int64_t value, const TokenDict64* tokens, const char* defvalue = 0);
+
+/**
+ * A structure to build (mainly static) Token-to-ID translation tables.
+ * A table of such structures must end with an entry with an empty token
+ */
+struct TokenDictStr {
+    /**
+     * Token to match
+     */
+    String token;
+
+    /**
+     * Value the token translates to
+     */
+    int value;
+};
+
+/**
+ * A structure to build (mainly static) Token-to-ID translation tables.
+ * Value is 64bit integer.
+ * A table of such structures must end with an entry with an empty token
+ */
+struct TokenDictStr64 {
+    /**
+     * Token to match
+     */
+    String token;
+
+    /**
+     * Value the token translates to
+     */
+    int64_t value;
+};
+
+/**
+ * Utility function to look up a string in a token table,
+ * interpret as number if it fails
+ * @param str String to look up
+ * @param tokens Pointer to the token table
+ * @param defvalue Value to return if lookup and conversion fail
+ * @param base Default base to use to convert to number
+ */
+YATE_API int lookup(const String& str, const TokenDictStr* tokens, int defvalue = 0, int base = 0);
+
+/**
+ * Utility function to look up a number in a token table
+ * @param value Value to search for
+ * @param tokens Pointer to the token table
+ * @param defvalue Value to return if lookup fails
+ */
+YATE_API const String& lookup(int value, const TokenDictStr* tokens, const String& defvalue = String::empty());
+
+/**
+ * Utility function to look up a string in a 64bit token table,
+ * interpret as number if it fails
+ * @param str String to look up
+ * @param tokens Pointer to the token table
+ * @param defvalue Value to return if lookup and conversion fail
+ * @param base Default base to use to convert to number
+ */
+YATE_API int64_t lookup(const String& str, const TokenDictStr64* tokens, int64_t defvalue = 0, int base = 0);
+
+/**
+ * Utility function to look up a 64bit number in a token table
+ * @param value Value to search for
+ * @param tokens Pointer to the token table
+ * @param defvalue Value to return if lookup fails
+ */
+YATE_API const String& lookup(int64_t value, const TokenDictStr64* tokens, const String& defvalue = String::empty());
+
 
 class NamedList;
 
@@ -7213,6 +7304,16 @@ public:
     int getIntValue(const String& name, const TokenDict* tokens, int defvalue = 0) const;
 
     /**
+     * Retrieve the numeric value of a parameter trying first a table lookup.
+     * @param name Name of parameter to locate
+     * @param tokens A pointer to an array of String tokens to try to lookup
+     * @param defvalue Default value to return if not found
+     * @return The number contained in the named parameter or the default
+     */
+    int getIntValue(const String& name, const TokenDictStr* tokens, int defvalue = 0) const;
+
+
+    /**
      * Retrieve the 64-bit numeric value of a parameter.
      * @param name Name of parameter to locate
      * @param defvalue Default value to return if not found
@@ -7233,6 +7334,15 @@ public:
      * @return The number contained in the named parameter or the default
      */
     int64_t getInt64ValueDict(const String& name, const TokenDict64* tokens, int64_t defvalue = 0) const;
+
+    /**
+     * Retrieve the 64bit numeric value of a parameter trying first a table lookup.
+     * @param name Name of parameter to locate
+     * @param tokens A pointer to an array of String tokens to try to lookup
+     * @param defvalue Default value to return if not found
+     * @return The number contained in the named parameter or the default
+     */
+    int64_t getInt64ValueDict(const String& name, const TokenDictStr64* tokens, int64_t defvalue = 0) const;
 
     /**
      * Retrieve the unsigned 64-bit numeric value of a parameter.

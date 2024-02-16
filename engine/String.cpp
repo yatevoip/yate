@@ -156,6 +156,50 @@ const char* lookup(int64_t value, const TokenDict64* tokens, const char* defvalu
     return defvalue;
 }
 
+int lookup(const String& str, const TokenDictStr* tokens, int defvalue, int base)
+{
+    if (!str)
+	return defvalue;
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (str == tokens->token)
+		return tokens->value;
+    }
+    return str.toInteger(defvalue,base);
+}
+
+const String& lookup(int value, const TokenDictStr* tokens, const String& defvalue)
+{
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (value == tokens->value)
+		return tokens->token;
+    }
+    return defvalue;
+}
+
+int64_t lookup(const String& str, const TokenDictStr64* tokens, int64_t defvalue, int base)
+{
+    if (!str)
+	return defvalue;
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (str == tokens->token)
+		return tokens->value;
+    }
+    return str.toInt64(defvalue,base);
+}
+
+const String& lookup(int64_t value, const TokenDictStr64* tokens, const String& defvalue)
+{
+    if (tokens) {
+	for (; tokens->token; tokens++)
+	    if (value == tokens->value)
+		return tokens->token;
+    }
+    return defvalue;
+}
+
 #define MAX_MATCH 9
 
 class StringMatchPrivate
@@ -793,16 +837,25 @@ int String::toInteger(int defvalue, int base, int minvalue, int maxvalue,
     return defvalue;
 }
 
+#define STR_TO_INT_DICT(f) { \
+    if (!m_string) \
+	return defvalue; \
+    if (tokens) { \
+	for (; tokens->token; tokens++) \
+	    if (operator==(tokens->token)) \
+		return tokens->value; \
+    } \
+    return f(defvalue,base); \
+}
+
 int String::toInteger(const TokenDict* tokens, int defvalue, int base) const
 {
-    if (!m_string)
-	return defvalue;
-    if (tokens) {
-	for (; tokens->token; tokens++)
-	    if (operator==(tokens->token))
-		return tokens->value;
-    }
-    return toInteger(defvalue,base);
+    STR_TO_INT_DICT(toInteger);
+}
+
+int String::toInteger(const TokenDictStr* tokens, int defvalue, int base) const
+{
+    STR_TO_INT_DICT(toInteger);
 }
 
 long int String::toLong(long int defvalue, int base, long int minvalue, long int maxvalue,
@@ -858,6 +911,13 @@ int64_t String::toInt64Dict(const TokenDict64* tokens, int64_t defvalue, int bas
     }
     return toInt64(defvalue,base);
 }
+
+int64_t String::toInt64Dict(const TokenDictStr64* tokens, int64_t defvalue, int base) const
+{
+    STR_TO_INT_DICT(toInt64);
+}
+
+#undef STR_TO_INT_DICT
 
 uint64_t String::toUInt64(uint64_t defvalue, int base, uint64_t minvalue, uint64_t maxvalue,
     bool clamp) const
