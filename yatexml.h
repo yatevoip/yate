@@ -1508,7 +1508,7 @@ public:
      * Get first XmlChild of this XmlElement
      * @return The first XmlChild found.
      */
-     XmlChild* getFirstChild();
+    XmlChild* getFirstChild();
 
     /**
      * @return The first XmlText found in this XmlElement children
@@ -1529,6 +1529,13 @@ public:
      * @param text Non empty text to add
      */
     void addText(const char* text);
+
+    /**
+     * Add a text child with hexified value
+     * @param buf Pointer to buffer to hexify
+     * @param len Buffer length
+     */
+    void addText(const void* buf, unsigned int len);
 
     /**
      * Retrieve the list of attributes
@@ -1657,6 +1664,31 @@ public:
      * @param params List of parameters
      */
     virtual void replaceParams(const NamedList& params);
+
+    /**
+     * Safely build and add an XmlElement child
+     * @param name The name of the element
+     * @param value Element text child value
+     * @return XmlElement pointer on success, NULL on failure
+     */
+    inline XmlElement* addChild(const char* name, const char* value = 0) {
+	    return TelEngine::null(name) ? 0
+		: static_cast<XmlElement*>(addChildSafe(new XmlElement(name,value)));
+	}
+
+    /**
+     * Safely build and add an XmlElement child with hexified value
+     * @param name The name of the element
+     * @param buf Pointer to buffer to hexify
+     * @param len Buffer length
+     * @return XmlElement pointer on success, NULL on failure
+     */
+    inline XmlElement* addChildHex(const char* name, const void* buf, unsigned int len) {
+	    XmlElement* x = addChild(name);
+	    if (x)
+		x->addText(buf,len);
+	    return x;
+	}
 
     /**
      * Check if a string represents a namespace attribute name
@@ -1852,7 +1884,14 @@ public:
      * Constructor
      * @param text The text
      */
-    XmlText(const String& text);
+    XmlText(const char* text);
+
+    /**
+     * Constructor. Build a hexified text
+     * @param buf Pointer to buffer to hexify
+     * @param len Buffer length
+     */
+    XmlText(const void* buf, unsigned int len);
 
     /**
      * Copy constructor
@@ -1877,6 +1916,14 @@ public:
      */
     inline void setText(const char* text)
 	{ m_text = text; }
+
+    /**
+     * Set hexified data value
+     * @param buf Pointer to buffer to hexify
+     * @param len Buffer length
+     */
+    inline void setText(const void* buf, unsigned int len)
+	{ m_text.hexify(buf,len); }
 
     /**
      * Build a String from this XmlText

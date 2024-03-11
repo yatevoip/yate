@@ -1863,6 +1863,12 @@ void XmlElement::addText(const char* text)
 	addChild(new XmlText(text));
 }
 
+void XmlElement::addText(const void* buf, unsigned int len)
+{
+    if (buf && len)
+	addChild(new XmlText(buf,len));
+}
+
 // Retrieve the element's tag (without prefix) and namespace
 bool XmlElement::getTag(const String*& tag, const String*& ns) const
 {
@@ -2188,10 +2194,16 @@ void XmlCData::toString(String& dump, const String& indent) const
  * XmlText
  */
 // Constructor
-XmlText::XmlText(const String& text)
+XmlText::XmlText(const char* text)
     : m_text(text)
 {
-    XDebug(DebugAll,"XmlText::XmlText(%s) [%p]",m_text.c_str(),this);
+    XDebug(DebugAll,"XmlText::XmlText(%s) [%p]",m_text.safe(),this);
+}
+
+XmlText::XmlText(const void* buf, unsigned int len)
+{
+    m_text.hexify(buf,len);
+    XDebug(DebugAll,"XmlText::XmlText(%p,%u) '%s' [%p]",buf,len,m_text.safe(),this);
 }
 
 // Copy Constructor
