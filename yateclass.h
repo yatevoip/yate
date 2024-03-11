@@ -2397,17 +2397,19 @@ public:
     /**
      * Constructor of a zero capacity vector
      * @param autodelete True to delete objects on destruct, false otherwise
+     * @param allocChunk How many items to allocate when needed to make space
      */
-    inline explicit ObjVector(bool autodelete = true)
-	: m_length(0), m_objects(0), m_delete(autodelete)
+    inline explicit ObjVector(bool autodelete = true, unsigned int allocChunk = 0)
+	: m_length(0), m_objects(0), m_delete(autodelete), m_size(0), m_allocChunk(allocChunk)
 	{ }
 
     /**
      * Constructor of an empty vector
      * @param maxLen Maximum number of objects the vector can hold
      * @param autodelete True to delete objects on destruct, false otherwise
+     * @param allocChunk How many items to allocate when needed to make space
      */
-    ObjVector(unsigned int maxLen, bool autodelete = true);
+    ObjVector(unsigned int maxLen, bool autodelete = true, unsigned int allocChunk = 0);
 
     /**
      * Constructor from an object list
@@ -2415,8 +2417,10 @@ public:
      * @param move True to move elements from list, false to just copy the pointer
      * @param maxLen Maximum number of objects to put in vector, zero to put all
      * @param autodelete True to delete objects on destruct, false otherwise
+     * @param allocChunk How many items to allocate when needed to make space
      */
-    ObjVector(ObjList& list, bool move = true, unsigned int maxLen = 0, bool autodelete = true);
+    ObjVector(ObjList& list, bool move = true, unsigned int maxLen = 0, bool autodelete = true,
+	unsigned int allocChunk = 0);
 
     /**
      * Destroys the vector and the objects if automatic delete is set
@@ -2438,6 +2442,38 @@ public:
 	{ return m_length; }
 
     /**
+     * Get a pointer to the stored data.
+     * @return A pointer to the data or NULL
+     */
+    inline GenObject** data()
+	{ return m_objects; }
+
+    /**
+     * Get a pointer to a byte range inside the stored data
+     * @param offs Byte offset inside the stored data
+     * @param len Number of bytes that must be valid starting at offset
+     * @return A pointer to the data or NULL if the range is not available
+     */
+    inline GenObject** data(unsigned int offs, unsigned int len = 1)
+	{ return (offs + len <= m_length) ? m_objects + offs : 0; }
+
+    /**
+     * Get a pointer to the stored data.
+     * @return A pointer to the data or NULL
+     */
+    inline const GenObject** data() const
+	{ return (const GenObject**)m_objects; }
+
+    /**
+     * Get a pointer to a byte range inside the stored data
+     * @param offs Byte offset inside the stored data
+     * @param len Number of bytes that must be valid starting at offset
+     * @return A pointer to the data or NULL if the range is not available
+     */
+    inline const GenObject** data(unsigned int offs, unsigned int len = 1) const
+	{ return (offs + len <= m_length) ? (const GenObject**)m_objects + offs : 0; }
+
+    /**
      * Get the number of non-null objects in the vector
      * @return Count of items
      */
@@ -2454,24 +2490,8 @@ public:
      * @param index Index of the object to retrieve
      * @return Pointer to the object or NULL
      */
-    inline GenObject* at(int index) const
-	{ return (index >= 0 && index < (int)m_length) ? m_objects[index] : 0; }
-
-    /**
-     * Indexing operator with signed parameter
-     * @param index Index of the object to retrieve
-     * @return Pointer to the object or NULL
-     */
-    inline GenObject* operator[](signed int index) const
-	{ return at(index); }
-
-    /**
-     * Indexing operator with unsigned parameter
-     * @param index Index of the object to retrieve
-     * @return Pointer to the object or NULL
-     */
-    inline GenObject* operator[](unsigned int index) const
-	{ return at(index); }
+    inline GenObject* at(unsigned int index) const
+	{ return index < m_length ? m_objects[index] : 0; }
 
     /**
      * Clear the vector and assign objects from a list
@@ -2483,26 +2503,88 @@ public:
     unsigned int assign(ObjList& list, bool move = true, unsigned int maxLen = 0);
 
     /**
-     * Resize the vector. Reset data if not kept
-     * @param len New vector length
-     * @param keepData Keep old data
+     * Insert NULL items in vector
+     * @param pos Vector position. Append if past vector length
+     * @param items Number of items to insert
      * @return Capacity of the vector
      */
-    unsigned int resize(unsigned int len, bool keepData = false);
+    unsigned int insert(unsigned int pos, unsigned int items);
+
+    /**
+     * Remove items from vector
+     * @param pos Vector position
+     * @param items Number of items to remove
+     * @param reAlloc Re-allocate buffer. Set it it to false to move/reset data only
+     * @return Capacity of the vector
+     */
+    unsigned int cut(unsigned int pos, unsigned int items, bool reAlloc = true);
+
+    /**
+     * Remove items from vector
+     * @param items Number of items to remove. Negative to remove from start, positive to remove from end
+     * @param reAlloc Re-allocate buffer. Set it it to false to move/reset data only
+     * @return Capacity of the vector
+     */
+    inline unsigned int cut(int items, bool reAlloc = true) {
+	    if (!items)
+		return m_length;
+	    if (items < 0)
+		return cut(0,-items,reAlloc);
+	    if ((unsigned int)items < m_length)
+		return cut(m_length - items,items,reAlloc);
+	    return cut(0,m_length,reAlloc);
+	}
+
+    /**
+     * Resize the vector. Reset data if not kept
+     * Reset (release) vector data if same length and data is not kept
+     * @param len New vector length
+     * @param keepData Keep old data
+     * @param reAlloc Re-allocate buffer. Set it it to false to move/reset data only
+     * @return Capacity of the vector
+     */
+    inline unsigned int resize(unsigned int len, bool keepData = false, bool reAlloc = true) {
+	    if (!len) {
+		clear();
+		return length();
+	    }
+	    if (!keepData)
+		reset();
+	    return (len == length()) ? length(): (len > length() ?
+		insert(length(),len - length()) : cut(len,length() - len,reAlloc));
+	}
 
     /**
      * Compact vector, move non NULL pointers in front
      * @param resizeToCount Resize to non null items count, clears the list if empty
      * @return The number of non NULL pointers
      */
-    unsigned int compact(bool resizeToCount = false);
+    inline unsigned int compact(bool resizeToCount = false) {
+	    unsigned int n = compact(0,m_length);
+	    if (resizeToCount)
+		resize(n,true);
+	    return n;
+	}
+
+    /**
+     * Compact vector, move non NULL pointers at given position
+     * @param pos Vector position
+     * @param len Number of items to reset. Negative for all starting with given position
+     * @return The number of non NULL pointers in given range
+     */
+    unsigned int compact(unsigned int pos, int len);
 
     /**
      * Retrieve and remove an object from the vector
      * @param index Index of the object to retrieve
      * @return Pointer to the stored object, NULL for out of bound index
      */
-    GenObject* take(unsigned int index);
+    inline GenObject* take(unsigned int index) {
+	    GenObject* ret = at(index);
+	    if (ret)
+		m_objects[index] = 0;
+	    return ret;
+	}
 
     /**
      * Store an object in the vector
@@ -2511,6 +2593,29 @@ public:
      * @return True for success, false if index was out of bounds
      */
     bool set(GenObject* obj, unsigned int index);
+
+    /**
+     * Append NULL items in vector
+     * @param obj Object to store in vector
+     * @return True for success, false on failure (memory allocation error)
+     */
+    inline bool appendObj(GenObject* obj) {
+	    unsigned int idx = length();
+	    return idx < resize(length() + 1,true) && set(obj,idx);
+	}
+
+    /**
+     * Insert an object in vector
+     * @param obj Object to store in vector
+     * @param pos Vector position. Append if past vector length
+     * @return True for success, false on failure (memory allocation error)
+     */
+    inline bool insertObj(GenObject* obj, unsigned int pos) {
+	    if (pos >= length())
+		return appendObj(obj);
+	    unsigned int n = length();
+	    return (n < insert(pos,1)) && set(obj,pos);
+	}
 
     /**
      * Get the position in vector of a GenObject by a pointer to it
@@ -2527,9 +2632,49 @@ public:
     int index(const String& str) const;
 
     /**
+     * Get the position in vector of the first or last NULL object
+     * @param first Ture for first free index, false for last
+     * @return Index of object in vector, -1 if empty or full
+     */
+    int indexFree(bool first) const;
+
+    /**
+     * Indexing operator with unsigned parameter
+     * @param idx Index of the object to retrieve
+     * @return Pointer to the object or NULL
+     */
+    inline GenObject* operator[](unsigned int idx) const
+	{ return at(idx); }
+
+    /**
+     * Indexing operator with signed parameter
+     * @param idx Index of the object to retrieve
+     * @return Pointer to the object or NULL
+     */
+    inline GenObject* operator[](signed int idx) const
+	{ return idx < 0 ? 0 : at(idx); }
+
+    /**
+     * Indexing operator with GenObject string value to search
+     * @param str String value (toString) of the object to search for
+     * @return Pointer to the object or NULL
+     */
+    inline GenObject* operator[](const String& str) const {
+	    int idx = index(str);
+	    return idx >= 0 ? m_objects[idx] : 0;
+	}
+
+    /**
      * Clear the vector and optionally delete all contained objects
      */
     void clear();
+
+    /**
+     * Reset vector data. Delete reset item(s) if owned
+     * @param pos Vector position
+     * @param len Number of items to reset. Negative to reset all items after given position
+     */
+    void reset(unsigned int pos = 0, int len = -1);
 
     /**
      * Get the automatic delete flag
@@ -2545,10 +2690,45 @@ public:
     inline void setDelete(bool autodelete)
 	{ m_delete = autodelete; }
 
+    /**
+     * Retrieve the length of allocate chunk
+     * @return Allocate chunk size
+     */
+    inline unsigned int allocChunk() const
+	{ return m_allocChunk; }
+
+    /**
+     * Set the length of the allocate chunk
+     * @param count Length of allocate chunk
+     */
+    inline void allocChunk(unsigned int count)
+	{ m_allocChunk = count; }
+
+    /**
+     * Retrieve vector size (total allocated items, including over alloc)
+     * @return Vector size
+     */
+    inline unsigned int size() const
+	{ return m_size; }
+
 private:
+    // Calculate allocate size. Assumes given 'len' is checked.
+    // Return 0 if required len falls into [m_length .. m_size] interval
+    inline unsigned int allocLen(unsigned int len) {
+	    if (!len || m_allocChunk < 2)
+		return len;
+	    // Allocate using over alloc chunks
+	    unsigned int rest = len % m_allocChunk;
+	    if (rest)
+		len += m_allocChunk - rest;
+	    return m_length <= len && len <= m_size ? 0 : len;
+	}
+
     unsigned int m_length;
     GenObject** m_objects;
     bool m_delete;
+    unsigned int m_size;
+    unsigned int m_allocChunk;
 };
 
 /**

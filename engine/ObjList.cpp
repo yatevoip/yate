@@ -19,6 +19,7 @@
 
 #include "yateclass.h"
 #include <string.h>
+#include <stdlib.h>
 
 using namespace TelEngine;
 
@@ -537,20 +538,45 @@ void ObjList::sort(int (*callbackCompare)(GenObject* obj1, GenObject* obj2, void
     }
 }
 
-ObjVector::ObjVector(unsigned int maxLen, bool autodelete)
-    : m_length(maxLen), m_objects(0), m_delete(autodelete)
+static inline size_t objSize(unsigned int n)
 {
-    XDebug(DebugAll,"ObjVector::ObjVector(%u,%s) [%p]",
-	maxLen,String::boolText(autodelete),this);
-    if (maxLen) {
-	m_objects = new GenObject*[maxLen];
-	for (unsigned int i = 0; i < maxLen; i++)
-	    m_objects[i] = 0;
+    return n * sizeof(GenObject*);
+}
+
+static inline void clearObjVector(GenObject** buf, unsigned int len)
+{
+    while (len--) {
+	TelEngine::destruct(*buf);
+	buf++;
     }
 }
 
-ObjVector::ObjVector(ObjList& list, bool move, unsigned int maxLen, bool autodelete)
-    : m_length(0), m_objects(0), m_delete(autodelete)
+static inline void resetObjVector(GenObject** buf, unsigned int len, bool del)
+{
+    if (del)
+	clearObjVector(buf,len);
+    ::memset(buf,0,objSize(len));
+}
+
+static inline GenObject** vectAlloc(unsigned int n, void* reAlloc = 0)
+{
+    GenObject** p = (GenObject**)::realloc(reAlloc,objSize(n));
+    if (!p)
+	Debug("ObjVector",DebugFail,"Failed to allocate %u item(s) bytes=" FMT64U,n,objSize(n));
+    return p;
+}
+
+ObjVector::ObjVector(unsigned int maxLen, bool autodelete, unsigned int allocChunk)
+    : m_length(0), m_objects(0), m_delete(autodelete), m_size(0), m_allocChunk(allocChunk)
+{
+    XDebug(DebugAll,"ObjVector::ObjVector(%u,%s) [%p]",maxLen,String::boolText(autodelete),this);
+    if (maxLen)
+	insert(0,maxLen);
+}
+
+ObjVector::ObjVector(ObjList& list, bool move, unsigned int maxLen, bool autodelete,
+    unsigned int allocChunk)
+    : m_length(0), m_objects(0), m_delete(autodelete), m_size(0), m_allocChunk(allocChunk)
 {
     XDebug(DebugAll,"ObjVector::ObjVector(%p,%s,%u,%s) [%p]",
 	&list,String::boolText(move),maxLen,String::boolText(autodelete),this);
@@ -574,85 +600,108 @@ unsigned int ObjVector::assign(ObjList& list, bool move, unsigned int maxLen)
 {
     if (!maxLen)
 	maxLen = list.count();
-    clear();
-    if (maxLen) {
-	m_objects = new GenObject*[maxLen];
-	ObjList* l = list.skipNull();
-	for (unsigned int i = 0; i < maxLen; i++) {
-	    if (l) {
-		if (move) {
-		    m_objects[i] = l->remove(false);
-		    l = l->skipNull();
-		}
-		else {
-		    m_objects[i] = l->get();
-		    l = l->skipNext();
-		}
-	    }
-	    else
-		m_objects[i] = 0;
-	}
-	m_length = maxLen;
-    }
-    return maxLen;
+    resize(maxLen,false);
+    GenObject** buf = data(0);
+    ObjList* o = list.skipNull();
+    if (move)
+	for (unsigned int i = 0; o && i < m_length; o = o->skipNull(), ++i)
+	    *buf++ = o->remove(false);
+    else
+	for (unsigned int i = 0; o && i < m_length; o = o->skipNext(), ++i)
+	    *buf++ = o->get();
+    return m_length;
 }
 
-static inline void clearObjVector(GenObject** objs, unsigned int len)
+unsigned int ObjVector::insert(unsigned int pos, unsigned int items)
 {
-    while (len--) {
-	TelEngine::destruct(*objs);
-	objs++;
-    }
+    XDebug(DebugAll,"ObjVector::insert(%u,%u) len=%u [%p]",pos,items,m_length,this);
+    if (!items)
+	return m_length;
+    unsigned int newLen = m_length + items;
+    unsigned int newSize = allocLen(newLen);
+    GenObject** buf = newSize ? vectAlloc(newSize,m_objects) : m_objects;
+    if (!buf)
+	return m_length;
+    if (!m_objects)
+	// New buffer. Reset
+	::memset(buf,0,objSize(newLen));
+    else if (pos >= m_length)
+	// Append. Reset added
+	::memset(buf + m_length,0,objSize(items));
+    else
+	// Insert middle. Data re-allocated. Move data
+	DataBlock::moveData(buf,objSize(newLen),objSize(m_length - pos),
+	    objSize(pos + items),objSize(pos),0);
+    m_objects = buf;
+    m_length = newLen;
+    if (newSize)
+	m_size = newSize;
+    return m_length;
 }
 
-unsigned int ObjVector::resize(unsigned int len, bool keepData)
+unsigned int ObjVector::cut(unsigned int pos, unsigned int items, bool reAlloc)
 {
-    if (!len) {
+    XDebug(DebugAll,"ObjVector::cut(%u,%u,%u) len=%u [%p]",pos,items,reAlloc,m_length,this);
+    if (!(m_objects && items) || pos >= m_length)
+	return m_length;
+    if (items > m_length - pos) {
+	items = m_length - pos;
+	if (!items)
+	    return m_length;
+    }
+    unsigned int newLen = m_length - items;
+    if (!newLen) {
 	clear();
-	return length();
+	return m_length;
     }
-    if (len == length()) {
-	if (!keepData) {
-	    if (m_delete)
-		clearObjVector(m_objects,length());
-	    ::memset(m_objects,0,length() * sizeof(GenObject*));
+    GenObject** buf = 0;
+    bool sameBuffer = false;
+    unsigned int newSize = reAlloc ? allocLen(newLen) : 0;
+    if (newSize) {
+	// Realloc buffer if cut from end and we don't need to release held data
+	sameBuffer = (!m_delete && (pos + items) == m_length);
+	buf = vectAlloc(newSize,sameBuffer ? m_objects : 0);
+    }
+    if (buf) {
+	if (!sameBuffer) {
+	    resetObjVector(m_objects + pos,items,m_delete);
+	    DataBlock::rebuildDataRemove(buf,objSize(newLen),m_objects,objSize(m_length),
+		objSize(pos),objSize(items),0);
+	    ::free(m_objects);
 	}
-	return length();
-    }
-    GenObject** buf = new GenObject*[len];
-    if (!(keepData && length()))
-	::memset(buf,0,len * sizeof(GenObject*));
-    else if (len < length()) {
-	::memcpy(buf,m_objects,len * sizeof(GenObject*));
-	::memset(m_objects,0,len * sizeof(GenObject*));
+	// else: nothing to be done, we hold the original buffer start
+	m_objects = buf;
+	m_size = newSize;
     }
     else {
-	::memcpy(buf,m_objects,length() * sizeof(GenObject*));
-	::memset(m_objects,0,length() * sizeof(GenObject*));
-	if (len > length())
-	    ::memset(buf + length(),0,(len - length()) * sizeof(GenObject*));
+	// Removed without size change or memory allocation failure
+	// Reset/clear removed. Move data if cut from start/middle
+	resetObjVector(m_objects + pos,items,m_delete);
+	if ((pos + items) < m_length)
+	    DataBlock::moveData(m_objects,objSize(m_length),objSize(m_length - (pos + items)),
+		objSize(pos),objSize(pos + items),0);
     }
-    clear();
-    m_objects = buf;
-    m_length = len;
-    return length();
+    m_length = newLen;
+    return m_length;
 }
 
-unsigned int ObjVector::compact(bool resizeToCount)
+unsigned int ObjVector::compact(unsigned int pos, int len)
 {
-    if (!m_objects)
+    if (!m_objects || !len || pos >= m_length)
 	return 0;
+    if (len < 0)
+	len = m_length - pos;
+    else if ((unsigned int)len > m_length - pos)
+	len = m_length - pos;
     unsigned int n = 0;
-    GenObject** buf = m_objects;
-    for (unsigned int i = 0; i < m_length; ++i, ++buf) {
-	if (*buf) {
-	    ++n;
+    GenObject** buf = m_objects + pos;
+    for (int i = 0; i < len; ++i, ++buf, ++n) {
+	if (*buf)
 	    continue;
-	}
-	if (i == m_length - 1)
+	if (i == len - 1)
 	    break;
 	GenObject** b = 0;
-	for (unsigned int j = i + 1; j < m_length; ++j) {
+	for (int j = i + 1; j < len; ++j) {
 	    if (!buf[j])
 		continue;
 	    b = buf + j;
@@ -663,10 +712,7 @@ unsigned int ObjVector::compact(bool resizeToCount)
 	    break;
 	*buf = *b;
 	*b = 0;
-	++n;
     }
-    if (resizeToCount)
-	resize(n,true);
     return n;
 }
 
@@ -711,13 +757,21 @@ int ObjVector::index(const String& str) const
     return -1;
 }
 
-GenObject* ObjVector::take(unsigned int index)
+int ObjVector::indexFree(bool first) const
 {
-    if (index >= m_length || !m_objects)
-	return 0;
-    GenObject* ret = m_objects[index];
-    m_objects[index] = 0;
-    return ret;
+    if (!m_objects)
+	return -1;
+    if (first) {
+	for (unsigned int i = 0; i < m_length; ++i)
+	    if (!m_objects[i])
+		return i;
+    }
+    else {
+	for (int i = m_length - 1; i >= 0; --i)
+	    if (!m_objects[i])
+		return i;
+    }
+    return -1;
 }
 
 bool ObjVector::set(GenObject* obj, unsigned int index)
@@ -742,9 +796,23 @@ void ObjVector::clear()
     unsigned int len = m_length;
     m_length = 0;
     m_objects = 0;
-    if (m_delete && objs)
-	clearObjVector(objs,len);
-    delete[] objs;
+    m_size = 0;
+    if (objs) {
+	if (m_delete)
+	    clearObjVector(objs,len);
+	::free(objs);
+    }
+}
+
+void ObjVector::reset(unsigned int pos, int len)
+{
+    if (!m_objects || !len || pos >= m_length)
+	return;
+    if (len < 0)
+	len = m_length - pos;
+    else if ((unsigned int)len > m_length - pos)
+	len = m_length - pos;
+    resetObjVector(m_objects + pos,len,m_delete);
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */
