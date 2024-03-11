@@ -5862,6 +5862,7 @@ private:
  */
 class YATE_API DataBlock : public GenObject
 {
+    YCLASS(DataBlock,GenObject)
 public:
     /**
      * Constructs an empty data block
@@ -5895,13 +5896,6 @@ public:
      * Destroys the data, disposes the memory.
      */
     virtual ~DataBlock();
-
-    /**
-     * Get a pointer to a derived class given that class name
-     * @param name Name of the class we are asking for
-     * @return Pointer to the requested class or NULL if this object doesn't implement it
-     */
-    virtual void* getObject(const String& name) const;
 
     /**
      * A static empty data block
@@ -5948,6 +5942,13 @@ public:
 	{ return m_length; }
 
     /**
+     * Get the length of the allocated data
+     * @return The length of the allocated data
+     */
+    inline unsigned int size() const
+	{ return m_allocated; }
+
+    /**
      * Get the memory overallocation setting.
      * @return Amount of memory that will be overallocated.
      */
@@ -5990,24 +5991,98 @@ public:
 	unsigned int extra = 0, int extraVal = 0, bool mayOverlap = true);
 
     /**
-     * Change (append or insert unsigned integer data) to the current block
+     * Change (append or insert unsigned integer data) to the current block using network byte order
      * @param pos Buffer position, append at end if past buffer end
-     * @param value Value to append
-     * @param len Number of bytes to handle
-     * @param lsb Byte direction. Less/most significant byte
+     * @param value Value to set
      * @return True on success, false on failure (memory allocation error)
      */
-    bool change8(unsigned int pos, uint64_t value, unsigned int len = 8, bool lsb = true);
+    inline bool change8hton(unsigned int pos, uint64_t value) {
+	    if (!value)
+		return change(pos,0,0,8);
+	    uint8_t buf[8];
+	    hton8(buf,value);
+	    return change(pos,buf,8,0,0,false);
+	}
 
     /**
-     * Change (append or insert unsigned integer data) to the current block
+     * Change (append or insert unsigned integer data) to the current block using network byte order
      * @param pos Buffer position, append at end if past buffer end
-     * @param value Value to append
-     * @param len Number of bytes to handle
-     * @param lsb Byte direction. Less/most significant byte
+     * @param value Value to set
      * @return True on success, false on failure (memory allocation error)
      */
-    bool change4(unsigned int pos, uint32_t value, unsigned int len = 4, bool lsb = true);
+    inline bool change4hton(unsigned int pos, uint32_t value) {
+	    if (!value)
+		return change(pos,0,0,4);
+	    uint8_t buf[4];
+	    hton4(buf,value);
+	    return change(pos,buf,4,0,0,false);
+	}
+
+    /**
+     * Change (append or insert unsigned integer data) to the current block using network byte order
+     * @param pos Buffer position, append at end if past buffer end
+     * @param value Value to set
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool change3hton(unsigned int pos, uint32_t value) {
+	    if (!value)
+		return change(pos,0,0,3);
+	    uint8_t buf[3];
+	    hton3(buf,value);
+	    return change(pos,buf,3,0,0,false);
+	}
+
+    /**
+     * Change (append or insert unsigned integer data) to the current block using network byte order
+     * @param pos Buffer position, append at end if past buffer end
+     * @param value Value to set
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool change2hton(unsigned int pos, uint16_t value) {
+	    uint8_t buf[2];
+	    hton2(buf,value);
+	    return change(pos,buf,2,0,0,false);
+	}
+
+    /**
+     * Change (append or insert unsigned integer data) to the current block using network byte order
+     * @param pos Buffer position, append at end if past buffer end
+     * @param value Value to set
+     * @param bytes Number of bytes to handle
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool changeHton(unsigned int pos, uint64_t value, uint8_t bytes) {
+	    if (!bytes)
+		return true;
+	    if (bytes > 8)
+		bytes = 8;
+	    if (!value)
+		return change(pos,0,0,bytes);
+	    uint8_t buf[8];
+	    hton(buf,value,bytes);
+	    return change(pos,buf,bytes,0,0,false);
+    }
+
+    /**
+     * Change (append or insert unsigned integer data) to the current block using LSB byte order
+     * @param pos Buffer position, append at end if past buffer end
+     * @param value Value to set
+     * @param bytes Number of bytes to handle
+     * @return True on success, false on failure (memory allocation error)
+     */
+    inline bool changeLsb(unsigned int pos, uint64_t value, uint8_t bytes = 8) {
+	    if (!value)
+		return bytes ? change(pos,0,0,bytes <= 8 ? bytes : 8) : true;
+	    uint8_t buf[8];
+	    if (bytes >= 8) {
+		lsbSet(buf,value,8);
+		return change(pos,buf,8,0,0,false);
+	    }
+	    else if (!bytes)
+		return true;
+	    lsbSet(buf,value,bytes);
+	    return change(pos,buf,bytes,0,0,false);
+	}
 
     /**
      * Append data to the current block
@@ -6040,29 +6115,63 @@ public:
 	}
 
     /**
-     * Append unsigned integer data to the current block
-     * @param value Value to append
-     * @param len Number of bytes to handle
-     * @param lsb Byte direction. Less/most significant byte
+     * Append bytes to current block
+     * @param count Number of bytes to append
+     * @param val Value to fill
      */
-    inline void append8(uint64_t value, unsigned int len = 8, bool lsb = true)
-	{ change8(length(),value,len,lsb); }
+    inline void appendBytes(unsigned int count, uint8_t val = 0)
+	{ insertBytes(count,length(),val); }
 
     /**
-     * Append unsigned integer data to the current block
+     * Append unsigned integer data to the current block using network byte order
      * @param value Value to append
-     * @param len Number of bytes to handle
-     * @param lsb Byte direction. Less/most significant byte
      */
-    inline void append4(uint32_t value, unsigned int len = 4, bool lsb = true)
-	{ change4(length(),value,len,lsb); }
+    inline void append8hton(uint64_t value)
+	{ change8hton(length(),value); }
+
+    /**
+     * Append unsigned integer data to the current block using network byte order
+     * @param value Value to append
+     */
+    inline void append4hton(uint32_t value)
+	{ change4hton(length(),value); }
+
+    /**
+     * Append unsigned integer data to the current block using network byte order
+     * @param value Value to append
+     */
+    inline void append3hton(uint32_t value)
+	{ change3hton(length(),value); }
+
+    /**
+     * Append unsigned integer data to the current block using network byte order
+     * @param value Value to append
+     */
+    inline void append2hton(uint16_t value)
+	{ change2hton(length(),value); }
+
+    /**
+     * Append unsigned integer data to the current block using network byte order
+     * @param value Value to append
+     * @param bytes Number of bytes to handle
+     */
+    inline void appendHton(uint64_t value, uint8_t bytes)
+	{ changeHton(length(),value,bytes); }
+
+    /**
+     * Append unsigned integer data to the current block using LSB byte order
+     * @param value Value to append
+     * @param bytes Number of bytes to handle
+     */
+    inline void append8lsb(uint64_t value, uint8_t bytes = 8)
+	{ changeLsb(length(),value,bytes); }
 
     /**
      * Append 1 byte to the current block
      * @param value Value to append
      */
     inline void append1(uint8_t value)
-	{ append((const void*)&value,1,true); }
+	{ append((const void*)&value,1,false); }
 
     /**
      * Insert data in the current block
@@ -6085,26 +6194,65 @@ public:
 	{ insert(value.data(),value.length(),pos,mayOverlap); }
 
     /**
-     * Insert unsigned integer data in the current block
-     * @param value Value to insert
-     * @param len Number of bytes to handle
-     * @param pos Buffer position, append at end if greater than current length
-     * @param lsb Byte direction. Less/most significant byte
+     * Insert bytes in current block
+     * @param count Number of bytes to insert
+     * @param pos Buffer position
+     * @param val Value to fill
      */
-    inline void insert8(uint64_t value, unsigned int len = 8, unsigned int pos = 0,
-	bool lsb = true)
-	{ change8(pos,value,len,lsb); }
+    inline void insertBytes(unsigned int count, unsigned int pos = 0, uint8_t val = 0) {
+	    if (count)
+		change(pos,0,0,count,val,false);
+	}
 
     /**
-     * Insert unsigned integer data in the current block
+     * Insert unsigned integer data in the current block using network byte order
      * @param value Value to insert
-     * @param len Number of bytes to handle
      * @param pos Buffer position, append at end if greater than current length
-     * @param lsb Byte direction. Less/most significant byte
      */
-    inline void insert4(uint32_t value, unsigned int len = 4, unsigned int pos = 0,
-	bool lsb = true)
-	{ change4(pos,value,len,lsb); }
+    inline void insert8hton(uint64_t value, unsigned int pos = 0)
+	{ change8hton(pos,value); }
+
+    /**
+     * Insert unsigned integer data in the current block using network byte order
+     * @param value Value to insert
+     * @param pos Buffer position, append at end if greater than current length
+     */
+    inline void insert4hton(uint32_t value, unsigned int pos = 0)
+	{ change4hton(pos,value); }
+
+    /**
+     * Insert unsigned integer data in the current block using network byte order
+     * @param value Value to insert
+     * @param pos Buffer position, append at end if greater than current length
+     */
+    inline void insert3hton(uint32_t value, unsigned int pos = 0)
+	{ change3hton(pos,value); }
+
+    /**
+     * Insert unsigned integer data in the current block using network byte order
+     * @param value Value to insert
+     * @param pos Buffer position, append at end if greater than current length
+     */
+    inline void insert2hton(uint16_t value, unsigned int pos = 0)
+	{ change2hton(pos,value); }
+
+    /**
+     * Insert unsigned integer data in the current block using network byte order
+     * @param value Value to insert
+     * @param bytes Number of bytes to handle
+     * @param pos Buffer position, append at end if greater than current length
+     */
+    inline void insertHton(uint64_t value, uint8_t bytes = 8, unsigned int pos = 0)
+	{ changeHton(pos,value,bytes); }
+
+    /**
+     * Insert unsigned integer data in the current block using LSB byte order
+     * @param value Value to insert
+     * @param bytes Number of bytes to handle
+     * @param pos Buffer position, append at end if greater than current length
+     */
+    inline void insertLsb(uint64_t value, uint8_t bytes = 8, unsigned int pos = 0)
+	{ changeLsb(pos,value,bytes); }
 
     /**
      * Insert 1 byte in the current block
@@ -6112,28 +6260,52 @@ public:
      * @param pos Buffer position, append at end if greater than current length
      */
     inline void insert1(uint8_t value, unsigned int pos = 0)
-	{ insert((const void*)&value,1,pos,true); }
+	{ insert((const void*)&value,1,pos,false); }
 
     /**
      * Resize (re-alloc or free) this block if required size is not the same as the current one
-     * @param len Required block size
+     * @param len Required block size. Clear if 0
+     * @param keepData Keep old data
+     *   This parameter is ignored if data is cleared
+     * @param reAlloc Re-allocate buffer. Set it it to false to move/reset data only
+     *   This parameter is ignored if data is cleared
      */
-    inline void resize(unsigned int len) {
-	    if (len != length())
-		assign(0,len);
-	}
+    void resize(unsigned int len, bool keepData = false, bool reAlloc = true);
 
     /**
      * Truncate the data block
      * @param len The maximum length to keep
+     * @param reAlloc Re-allocate buffer. Set it it to false to move/reset data only
+     *   This parameter is ignored if data is cleared
      */
-    void truncate(unsigned int len);
+    inline void truncate(unsigned int len, bool reAlloc = true) {
+	    if (!len)
+		clear();
+	    else if (len < length())
+		cut(len,length() - len,reAlloc);
+	}
 
     /**
      * Cut off a number of bytes from the data block
-     * @param len Amount to cut, positive to cut from end, negative to cut from start of block
+     * @param pos Block position
+     * @param len Amount to cut. Clear block if all data is removed
+     * @param reAlloc Re-allocate buffer. Set it it to false to move/reset data only
+     *   This parameter is ignored if data is cleared
      */
-    void cut(int len);
+    void cut(unsigned int pos, unsigned int len, bool reAlloc = true);
+
+    /**
+     * Cut off a number of bytes from the data block
+     * @param len Amount to cut, positive to cut from end, negative to cut from start of block.
+     */
+    inline void cut(int len) {
+	    if (len <= 0)
+		cut(0,-len);
+	    else if ((unsigned int)len < length())
+		cut(length() - len,len);
+	    else
+		clear();
+	}
 
     /**
      * Byte indexing operator with signed parameter
@@ -6154,7 +6326,8 @@ public:
     /**
      * Assignment operator.
      */
-    DataBlock& operator=(const DataBlock& value);
+    inline DataBlock& operator=(const DataBlock& value)
+	{ assign(value.data(),value.length()); return *this; }
 
     /**
      * Appending operator.
@@ -6302,38 +6475,480 @@ public:
     static String& sqlEscape(String& str, const void* data, unsigned int len, char extraEsc = 0);
 
     /**
-     * Safely move data in the same buffer
-     * It is assumed the buffer is large enough to hold data
-     * pos<=len or pos+space=0: no change
-     * otherwise: move len-pos bytes from buf+pos to buf+pos+space
-     * @param buf The buffer
-     * @param len Buffer length
-     * @param pos Buffer position to move data from
-     * @param space Optional number of bytes to make space at given position
+     * Safely move data in the same buffer.
+     * No change is done if destination and source position are the same
+     * @param buf Buffer pointer
+     * @param bufLen Buffer length
+     * @param len Number of items to copy (move)
+     * @param dPos Destination buffer position
+     * @param sPos Source buffer position
+     * @param fill Value to reset empty (moved) memory if not negative
      */
-    static void moveData(void* buf, unsigned int len, unsigned int pos, unsigned int space = 0);
+    static void moveData(void* buf, unsigned int bufLen, unsigned int len,
+	unsigned int dPos, unsigned int sPos, int fill = -1);
 
     /**
-     * Copy buffers. It is assumed the destination and source don't overlap
-     * It is also assumed the destination buffer is large enough to hold data
-     * pos=0: copy len bytes from src to dest+space
-     *  (assume destination buffer is a copy of source buffer with other data inserted at start)
-     * pos=len: copy len bytes from src to dest
-     *  (assume destination buffer is a copy of source buffer with other data added)
-     * otherwise: copy pos bytes from src to dest, copy len-pos bytes from src+pos to dest+pos+space
-     *  (assume destination buffer is a copy of source buffer with other data inserted in the middle)
-     * The following combinations leads to plain data copy: (pos=0 AND space=0), (pos=len), (len>pos AND space=0)
+     * Rebuild a data buffer after data was inserted.
+     * It is assumed the destination and source don't overlap
      * @param dest Destination buffer
+     * @param dLen Destination buffer length
      * @param src Source buffer
-     * @param len Number of bytes to copy (source length)
-     * @param pos Source/destination buffer buffer position
-     * @param space Optional number of bytes to make space at given position
+     * @param sLen Source buffer length
+     * @param pos Insert position
+     * @param space Amount of inserted space
+     * @param fill Value to reset inserted memory if not negative
      */
-    static void copyData(void* dest, const void* src, unsigned int len, unsigned int pos = 0,
-	unsigned int space = 0);
+    static void rebuildDataInsert(void* dest, unsigned int dLen, const void* src, unsigned int sLen,
+	unsigned int pos, unsigned int space, int fill = -1);
+
+    /**
+     * Rebuild a data buffer after data was removed.
+     * It is assumed the destination and source don't overlap
+     * @param dest Destination buffer
+     * @param dLen Destination buffer length
+     * @param src Source buffer
+     * @param sLen Source buffer length
+     * @param pos Remove position
+     * @param space Amount of removed space
+     * @param fillAfter Value to reset memory until buffer end if not negative
+     */
+    static void rebuildDataRemove(void* dest, unsigned int dLen, const void* src, unsigned int sLen,
+	unsigned int pos, unsigned int space, int fillAfter = -1);
+
+    /**
+     * Convert 8 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @return First 8 bytes value in machine byte order
+     */
+    static inline uint64_t ntoh8advance(const uint8_t*& buf) {
+	    uint64_t val = ((uint64_t)*buf++) << 56;
+	    val |= ((uint64_t)*buf++) << 48;
+	    val |= ((uint64_t)*buf++) << 40;
+	    val |= ((uint64_t)*buf++) << 32;
+	    val |= ((uint64_t)*buf++) << 24;
+	    val |= ((uint64_t)*buf++) << 16;
+	    val |= ((uint64_t)*buf++) << 8;
+	    val |= (uint64_t)*buf++;
+	    return val;
+	}
+
+    /**
+     * Convert 8 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer, decrease buffer length.
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param len Buffer length. Assumed to be valid
+     * @return First 8 bytes value in machine byte order
+     */
+    static inline uint64_t ntoh8advance(const uint8_t*& buf, unsigned int& len) {
+	    len -= 8;
+	    return ntoh8advance(buf);
+	}
+
+    /**
+     * Convert 8 bytes from buffer to host byte order unsigned int
+     * @param buf Buffer pointer. Assumed to be valid
+     * @return First 8 bytes value in machine byte order
+     */
+    static inline uint64_t ntoh8(const uint8_t* buf)
+	{ return ntoh8advance(buf); }
+
+    /**
+     * Convert 8 bytes value from host byte order to network byte order
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton8advance(uint8_t*& buf, uint64_t val) {
+	    *buf++ = (uint8_t)(val >> 56);
+	    *buf++ = (uint8_t)(val >> 48);
+	    *buf++ = (uint8_t)(val >> 40);
+	    *buf++ = (uint8_t)(val >> 32);
+	    *buf++ = (uint8_t)(val >> 24);
+	    *buf++ = (uint8_t)(val >> 16);
+	    *buf++ = (uint8_t)(val >> 8);
+	    *buf++ = (uint8_t)val;
+	}
+
+    /**
+     * Convert 8 bytes value from host byte order to network byte order.
+     * Advance in buffer, increase length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param len Buffer length. Assumed to be valid
+     */
+    static inline void hton8advance(uint8_t*& buf, uint64_t val, unsigned int& len) {
+	    len += 8;
+	    hton8advance(buf,val);
+	}
+
+    /**
+     * Convert 8 bytes value from host byte order to network byte order.
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton8(uint8_t* buf, uint64_t val)
+	{ return hton8advance(buf,val); }
+
+    /**
+     * Convert 4 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @return First 4 bytes value in machine byte order
+     */
+    static inline uint32_t ntoh4advance(const uint8_t*& buf) {
+	    uint32_t val = (uint32_t)(*buf++) << 24;
+	    val |= (uint32_t)(*buf++) << 16;
+	    val |= (uint32_t)(*buf++) << 8;
+	    val |= (uint32_t)(*buf++);
+	    return val;
+	}
+
+    /**
+     * Convert 4 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer, decrease buffer length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param len Buffer length. Assumed to be valid
+     * @return First 4 bytes value in machine byte order
+     */
+    static inline uint32_t ntoh4advance(const uint8_t*& buf, unsigned int& len) {
+	    len -= 4;
+	    return ntoh4advance(buf);
+	}
+
+    /**
+     * Convert 4 bytes from buffer to host byte order unsigned int
+     * @param buf Buffer pointer. Assumed to be valid
+     * @return First 4 bytes value in machine byte order
+     */
+    static inline uint32_t ntoh4(const uint8_t* buf)
+	{ return ntoh4advance(buf); }
+
+    /**
+     * Convert 4 bytes value from host byte order to network byte order.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton4advance(uint8_t*& buf, uint32_t val) {
+	    *buf++ = (uint8_t)(val >> 24);
+	    *buf++ = (uint8_t)(val >> 16);
+	    *buf++ = (uint8_t)(val >> 8);
+	    *buf++ = (uint8_t)val;
+	}
+
+    /**
+     * Convert 4 bytes value from host byte order to network byte order.
+     * Advance in buffer, increase length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param len Buffer length. Assumed to be valid
+     */
+    static inline void hton4advance(uint8_t*& buf, uint32_t val, unsigned int& len) {
+	    len += 4;
+	    hton4advance(buf,val);
+	}
+
+    /**
+     * Convert 4 bytes value from host byte order to network byte order.
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton4(uint8_t* buf, uint32_t val)
+	{ hton4advance(buf,val); }
+
+    /**
+     * Convert 3 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @return First 3 bytes value in machine byte order
+     */
+    static inline uint32_t ntoh3advance(const uint8_t*& buf) {
+	    uint32_t val = (uint32_t)(*buf++) << 16;
+	    val |= (uint32_t)(*buf++) << 8;
+	    val |= (uint32_t)(*buf++);
+	    return val;
+	}
+
+    /**
+     * Convert 3 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer, decrease buffer length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param len Buffer length. Assumed to be valid
+     * @return First 3 bytes value in machine byte order
+     */
+    static inline uint32_t ntoh3advance(const uint8_t*& buf, unsigned int& len) {
+	    len -= 3;
+	    return ntoh3advance(buf);
+	}
+
+    /**
+     * Convert 3 bytes from buffer to host byte order unsigned int
+     * @param buf Buffer pointer. Assumed to be valid
+     * @return First 3 bytes value in machine byte order
+     */
+    static inline uint32_t ntoh3(const uint8_t* buf)
+	{ return ntoh3advance(buf); }
+
+    /**
+     * Convert 3 bytes value from host byte order to network byte order.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton3advance(uint8_t*& buf, uint32_t val) {
+	    *buf++ = (uint8_t)(val >> 16);
+	    *buf++ = (uint8_t)(val >> 8);
+	    *buf++ = (uint8_t)val;
+	}
+
+    /**
+     * Convert 3 bytes value from host byte order to network byte order.
+     * Advance in buffer, increase length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param len Buffer length. Assumed to be valid
+     */
+    static inline void hton3advance(uint8_t*& buf, uint32_t val, unsigned int& len) {
+	    len += 3;
+	    hton3advance(buf,val);
+	}
+
+    /**
+     * Convert 3 bytes value from host byte order to network byte order.
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton3(uint8_t* buf, uint32_t val)
+	{ hton3advance(buf,val); }
+
+    /**
+     * Convert 2 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @return First 2 bytes value in machine byte order
+     */
+    static inline uint16_t ntoh2advance(const uint8_t*& buf) {
+	    uint16_t val = (uint16_t)(*buf++) << 8;
+	    val |= (uint16_t)(*buf++);
+	    return val;
+	}
+
+    /**
+     * Convert 2 bytes from buffer to host byte order unsigned int.
+     * Advance in buffer, decrease buffer length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param len Buffer length. Assumed to be valid
+     * @return First 2 bytes value in machine byte order
+     */
+    static inline uint16_t ntoh2advance(const uint8_t*& buf, unsigned int& len) {
+	    len -= 2;
+	    return ntoh2advance(buf);
+	}
+
+    /**
+     * Convert 2 bytes from buffer to host byte order unsigned int
+     * @param buf Buffer pointer. Assumed to be valid
+     * @return First 2 bytes value in machine byte order
+     */
+    static inline uint16_t ntoh2(const uint8_t* buf)
+	{ return ntoh2advance(buf); }
+
+    /**
+     * Convert 2 bytes value from host byte order to network byte order.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton2advance(uint8_t*& buf, uint16_t val) {
+	    *buf++ = (uint8_t)(val >> 8);
+	    *buf++ = (uint8_t)val;
+	}
+
+    /**
+     * Convert 2 bytes value from host byte order to network byte order.
+     * Advance in buffer, increase length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param len Buffer length. Assumed to be valid
+     */
+    static inline void hton2advance(uint8_t*& buf, uint16_t val, unsigned int& len) {
+	    len += 2;
+	    hton2advance(buf,val);
+	}
+
+    /**
+     * Convert 2 bytes value from host byte order to network byte order.
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param val The value
+     */
+    static inline void hton2(uint8_t* buf, uint16_t val)
+	{ hton2advance(buf,val); }
+
+    /**
+     * Convert bytes from buffer to host byte order unsigned int.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     * @return First 'bytes' value in machine byte order
+     */
+    static inline uint64_t ntohAdvance(const uint8_t*& buf, uint8_t bytes) {
+	    if (bytes > 7)
+		return ntoh8advance(buf);
+	    uint64_t val = 0;
+	    for (int n = 8 * ((int)bytes - 1); n >= 0; n -= 8)
+		val |= ((uint64_t)*buf++) << n;
+	    return val;
+	}
+
+    /**
+     * Convert bytes from buffer to host byte order unsigned int.
+     * Advance in buffer, decrease buffer length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param len Buffer length. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     * @return First 'bytes' value in machine byte order
+     */
+    static inline uint64_t ntohAdvance(const uint8_t*& buf, unsigned int& len, uint8_t bytes) {
+	    if (bytes > 8)
+		bytes = 8;
+	    len -= bytes;
+	    return ntohAdvance(buf,bytes);
+	}
+
+    /**
+     * Convert bytes from buffer to host byte order unsigned int
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     * @return First 'bytes' value in machine byte order
+     */
+    static inline uint64_t ntoh(const uint8_t* buf, uint8_t bytes)
+	{ return ntohAdvance(buf,bytes); }
+
+    /**
+     * Convert bytes value from host byte order to network byte order.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param bytes The number of bytes to convert
+     */
+    static inline void htonAdvance(uint8_t*& buf, uint64_t val, uint8_t bytes) {
+	    if (bytes > 7)
+		return hton8advance(buf,val);
+	    for (int n = 8 * ((int)bytes - 1); n >= 0; n -= 8)
+		*buf++ = (uint8_t)(val >> n);
+	}
+
+    /**
+     * Convert bytes value from host byte order to network byte order.
+     * Advance in buffer, increase length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param len Buffer length. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     */
+    static inline void htonAdvance(uint8_t*& buf, uint64_t val, unsigned int& len, uint8_t bytes) {
+	    if (bytes > 8)
+		bytes = 8;
+	    len += bytes;
+	    htonAdvance(buf,val,bytes);
+	}
+
+    /**
+     * Convert bytes value from host byte order to network byte order.
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param val The value
+     * @param bytes The number of bytes to convert
+     */
+    static inline void hton(uint8_t* buf, uint64_t val, uint8_t bytes)
+	{ return htonAdvance(buf,val,bytes); }
+
+    /**
+     * Convert bytes from buffer to LSB unsigned int.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     * @return First 'bytes' value in LSB order
+     */
+    static inline uint64_t lsbAdvance(const uint8_t*& buf, uint8_t bytes) {
+	    if (bytes > 8)
+		bytes = 8;
+	    uint64_t val = 0;
+	    for (uint8_t i = 0; i < bytes; ++i)
+		val |= ((uint64_t)*buf++) << (i * 8);
+	    return val;
+	}
+
+    /**
+     * Convert bytes from buffer to LSB unsigned int.
+     * Advance in buffer, decrease buffer length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param len Buffer length. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     * @return First 'bytes' value in LSB order
+     */
+    static inline uint64_t lsbAdvance(const uint8_t*& buf, unsigned int& len, uint8_t bytes) {
+	    if (bytes > 8)
+		bytes = 8;
+	    len -= bytes;
+	    return lsbAdvance(buf,bytes);
+	}
+
+    /**
+     * Convert bytes from buffer to LSB unsigned int
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     * @return First 'bytes' value in LSB order
+     */
+    static inline uint64_t lsb(const uint8_t* buf, uint8_t bytes)
+	{ return lsbAdvance(buf,bytes); }
+
+    /**
+     * Set value in buffer using LSB order.
+     * Advance in buffer
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param bytes The number of bytes to convert
+     */
+    static inline void lsbSetAdvance(uint8_t*& buf, uint64_t val, uint8_t bytes) {
+	    if (bytes > 8)
+		bytes = 8;
+	    for (uint8_t i = 0; i < bytes; ++i)
+		*buf++ = (uint8_t)(val >> (i * 8));
+	}
+
+    /**
+     * Set value in buffer using LSB order.
+     * Advance in buffer, increase length
+     * @param buf Buffer pointer reference. Assumed to be valid
+     * @param val The value
+     * @param len Buffer length. Assumed to be valid
+     * @param bytes The number of bytes to convert
+     */
+    static inline void lsbSetAdvance(uint8_t*& buf, uint64_t val, unsigned int& len, uint8_t bytes) {
+	    if (bytes > 8)
+		bytes = 8;
+	    len += bytes;
+	    lsbSetAdvance(buf,val,bytes);
+	}
+
+    /**
+     * Set value in buffer using LSB order
+     * @param buf Buffer pointer. Assumed to be valid
+     * @param val The value
+     * @param bytes The number of bytes to convert
+     */
+    static inline void lsbSet(uint8_t* buf, uint64_t val, uint8_t bytes)
+	{ return lsbSetAdvance(buf,val,bytes); }
 
 private:
-    unsigned int allocLen(unsigned int len) const;
+    inline unsigned int allocLen(unsigned int len) const {
+	    // allocate a multiple of 8 bytes
+	    unsigned int over = (8 - (len & 7)) & 7;
+	    if (over < m_overAlloc)
+		return (len + m_overAlloc + 7) & ~7;
+	    else
+		return len + over;
+	}
     void* m_data;
     unsigned int m_length;
     unsigned int m_allocated;

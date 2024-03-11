@@ -120,13 +120,6 @@ DataBlock::~DataBlock()
     clear();
 }
 
-void* DataBlock::getObject(const String& name) const
-{
-    if (name == YATOM("DataBlock"))
-	return const_cast<DataBlock*>(this);
-    return GenObject::getObject(name);
-}
-
 void DataBlock::clear(bool deleteData)
 {
     m_length = 0;
@@ -143,11 +136,11 @@ void DataBlock::clear(bool deleteData)
 bool DataBlock::change(unsigned int pos, const void* buf, unsigned int bufLen,
     unsigned int extra, int extraVal, bool mayOverlap)
 {
-    unsigned int addLen = (buf ? bufLen : 0) + extra;
-    if (!addLen)
+    unsigned int added = (buf ? bufLen : 0) + extra;
+    if (!added)
 	return true;
     XDebug("DataBlock",DebugAll,
-	"change(%u,%p,%u,%d,%d,%u) add_lenlen=%u m_data=%p m_length=%u allocated=%u [%p]",
+	"change(%u,%p,%u,%d,%d,%u) add_len=%u m_data=%p m_length=%u allocated=%u [%p]",
 	pos,buf,bufLen,extra,extraVal,mayOverlap,addLen,m_data,m_length,m_allocated,this);
     if (!(buf && bufLen)) {
 	buf = 0;
@@ -155,95 +148,63 @@ bool DataBlock::change(unsigned int pos, const void* buf, unsigned int bufLen,
     }
     if (pos > m_length)
 	pos = m_length;
-    unsigned int newLen = m_length + addLen;
-    void* data = 0;
-    unsigned int aLen = 0;
+    unsigned int newLen = m_length + added;
     // Allocate a new buffer if input data may overlap with existing
     bool overlap = buf && (mayOverlap || buf == m_data);
     if (!m_data || overlap || newLen > m_allocated) {
-	aLen = allocLen(newLen);
-	// Append to existing: Realloc data. Avoid free
-	void* reallocAppend = (!overlap && pos == m_length) ? m_data : 0;
-	data = dbAlloc(aLen,reallocAppend);
+	unsigned int aLen = (!m_data || newLen > m_allocated) ? allocLen(newLen) : m_allocated;
+	void* data = dbAlloc(aLen,overlap ? 0 : m_data);
 	if (!data)
 	    return false;
-	if (reallocAppend)
-	    clear(false);
-	else
-	    copyData(data,m_data,m_length,pos,addLen);
+	if (m_data) {
+	    if (overlap)             // New buffer
+		rebuildDataInsert(data,newLen,m_data,m_length,pos,added);
+	    else if (pos < m_length) // Data re-allocated. Insert. Move data
+		moveData(data,newLen,m_length - pos,pos + added,pos);
+	    // else: Data re-allocated. Append. Old data already in buffer
+	    // Avoid free if data was re-allocated
+	    clear(overlap);
+	}
+	assign(data,newLen,false,aLen);
     }
     else {
-	moveData(m_data,m_length,pos,addLen);
-	data = m_data;
+	// Allocated space did not change. Move data if insert
+	if (pos < m_length)
+	    moveData(m_data,newLen,m_length - pos,pos + added,pos);
+	m_length = newLen;
     }
     if (bufLen)
-	::memcpy((uint8_t*)data + pos,buf,bufLen);
+	::memcpy(data(pos),buf,bufLen);
     if (extra)
-	::memset((uint8_t*)data + pos + bufLen,extraVal,extra);
-    if (aLen)
-	assign(data,newLen,false,aLen);
-    else
-	m_length = newLen;
+	::memset(data(pos + bufLen),extraVal,extra);
     return true;
-}
-
-#define DB_CHANGE_UINT_FUNC \
-    unsigned int n = 0; \
-    if (lsb) { \
-	while (len--) { \
-	    buf[n++] = (uint8_t)value; \
-	    value = value >> 8; \
-	} \
-    } \
-    else { \
-	uint8_t sh = (len - 1) * 8; \
-	while (len--) { \
-	    buf[n++] = (uint8_t)(value >> sh); \
-	    sh -= 8; \
-	} \
-    } \
-    return change(pos,(const void*)buf,n,0,0,false)
-
-bool DataBlock::change8(unsigned int pos, uint64_t value, unsigned int len, bool lsb)
-{
-    if (!len)
-	return true;
-    if (len > 8)
-	len = 8;
-    uint8_t buf[8] = {0,0,0,0,0,0,0,0};
-    DB_CHANGE_UINT_FUNC;
-}
-
-bool DataBlock::change4(unsigned int pos, uint32_t value, unsigned int len, bool lsb)
-{
-    if (!len)
-	return true;
-    if (len > 4)
-	len = 4;
-    uint8_t buf[4] = {0,0,0,0};
-    DB_CHANGE_UINT_FUNC;
 }
 
 DataBlock& DataBlock::assign(void* value, unsigned int len, bool copyData, unsigned int allocated)
 {
     if ((value != m_data) || (len != m_length)) {
 	void *odata = m_data;
+	unsigned int oldSize = m_allocated;
 	m_length = 0;
 	m_allocated = 0;
 	m_data = 0;
 	if (len) {
 	    if (copyData) {
 		allocated = allocLen(len);
-		void *data = ::malloc(allocated);
-		if (data) {
-		    if (value)
-			::memcpy(data,value,len);
-		    else
-			::memset(data,0,len);
-		    m_data = data;
+		if (allocated == oldSize && odata && !value) {
+		    m_data = odata;
+		    ::memset(m_data,0,len);
 		}
-		else
-		    Debug("DataBlock",DebugFail,"malloc(%d) returned NULL!",allocated);
+		else {
+		    void* data = dbAlloc(allocated);
+		    if (data) {
+			if (value)
+			    ::memcpy(data,value,len);
+			else
+			    ::memset(data,0,len);
+			m_data = data;
+		    }
+		}
 	    }
 	    else {
 		if (allocated < len)
@@ -261,45 +222,65 @@ DataBlock& DataBlock::assign(void* value, unsigned int len, bool copyData, unsig
     return *this;
 }
 
-void DataBlock::truncate(unsigned int len)
+void DataBlock::resize(unsigned int len, bool keepData, bool reAlloc)
 {
-    if (!len)
-	clear();
-    else if (len < m_length)
-	assign(m_data,len);
-}
-
-void DataBlock::cut(int len)
-{
-    if (!len)
+    if (len == m_length)
 	return;
-
-    int ofs = 0;
-    if (len < 0)
-	ofs = len = -len;
-
-    if ((unsigned)len >= m_length) {
+    if (!len) {
 	clear();
 	return;
     }
-
-    assign(ofs+(char *)m_data,m_length - len);
-}
-
-DataBlock& DataBlock::operator=(const DataBlock& value)
-{
-    assign(value.data(),value.length());
-    return *this;
-}
-
-unsigned int DataBlock::allocLen(unsigned int len) const
-{
-    // allocate a multiple of 8 bytes
-    unsigned int over = (8 - (len & 7)) & 7;
-    if (over < m_overAlloc)
-	return (len + m_overAlloc + 7) & ~7;
+    if (!keepData) {
+	if (!reAlloc && m_data && len <= m_allocated) {
+	    ::memset(m_data,0,len);
+	    m_length = len;
+	}
+	else
+	    assign(0,len);
+    }
+    else if (len < length())
+	cut(len,length() - len,reAlloc);
     else
-	return len + over;
+	appendBytes(len - length());
+}
+
+void DataBlock::cut(unsigned int pos, unsigned int len, bool reAlloc)
+{
+    XDebug(DebugAll,"DataBlock::cut(%u,%u,%u,%u) len=%u [%p]",pos,len,reAlloc,m_length,this);
+    if (!(m_data && len) || pos >= m_length)
+	return;
+    if (len > m_length - pos) {
+	len = m_length - pos;
+	if (!len)
+	    return;
+    }
+    unsigned int newLen = m_length - len;
+    if (!newLen) {
+	clear();
+	return;
+    }
+    unsigned int lastRemoveIdx = pos + len;
+    unsigned int newSize = reAlloc ? allocLen(newLen) : 0;
+    void* buf = 0;
+    if (newSize && newSize != m_allocated)
+	// Realloc buffer if cut from end, alloc a new one otherwise
+	buf = dbAlloc(newSize,lastRemoveIdx == m_length ? m_data : 0);
+    if (!buf) {
+	// Removed without size change or memory allocation error
+	// Move data if cut from start/middle. Adjust held length
+	if (lastRemoveIdx < m_length)
+	    moveData(m_data,m_length,m_length - lastRemoveIdx,pos,lastRemoveIdx);
+	m_length = newLen;
+	return;
+    }
+    if (lastRemoveIdx < m_length) {
+	rebuildDataRemove(buf,newLen,m_data,m_length,pos,len,0);
+	::free(m_data);
+    }
+    // else: nothing to be done: we hold the original buffer start
+    m_data = buf;
+    m_length = newLen;
+    m_allocated = newSize;
 }
 
 bool DataBlock::convert(const DataBlock& src, const String& sFormat,
@@ -465,7 +446,8 @@ bool DataBlock::changeHex(unsigned int pos, const char* data, unsigned int len, 
 	::free(newData);
 	return retResult(false,-2,res);
     }
-    copyData(newData,m_data,m_length,pos,n);
+    if (m_data)
+	rebuildDataInsert(newData,newLen,m_data,m_length,pos,n);
     assign(newData,newLen,false,aLen);
     return retResult(true,n,res);
 }
@@ -513,46 +495,133 @@ String& DataBlock::sqlEscape(String& str, const void* data, unsigned int len, ch
     return str;
 }
 
-void DataBlock::moveData(void* buf, unsigned int len, unsigned int pos, unsigned int space)
+void DataBlock::moveData(void* buf, unsigned int bufLen, unsigned int len,
+    unsigned int dPos, unsigned int sPos, int fill)
 {
-    if (!buf || pos >= len)
+    int delta = (int)((int64_t)sPos - dPos);
+    if (!(buf && len) || !delta || sPos + len > bufLen || dPos + len > bufLen)
 	return;
-    unsigned int delta = pos + space;
-    if (!delta)
-	return;
-    uint8_t* src = (uint8_t*)buf;
-    uint8_t* dest = (uint8_t*)buf + delta;
-    if (pos) {
-	// Insert middle. Keep old data until pos. Copy the rest
-	len -= pos;
-	src += pos;
+    bool useCopy = delta >= (int)len;
+//#define DataBlock_moveData_debug
+#ifdef DataBlock_moveData_debug
+    String fillStr;
+    if (fill >= 0) {
+	if (useCopy)
+	    fillStr.printf(" fill: %d pos=%u count=%u",fill,sPos,len);
+	else if (delta > 0)
+	    fillStr.printf(" fill: %d pos=%u count=%u",fill,sPos + len - delta,delta);
+	else
+	    fillStr.printf(" fill: %d pos=%u count=%u",fill,sPos,-delta);
     }
-    if (delta < len)
-	::memmove(dest,src,len);
+    Debug("DataBlock",DebugTest,"moveData(%p,%u) move=%u dPos=%u sPos=%u delta=%d use_copy=%u%s",
+	buf,bufLen,len,dPos,sPos,(int)delta,useCopy,fillStr.safe());
+#endif
+    if (useCopy)
+	::memcpy((uint8_t*)buf + dPos,(uint8_t*)buf + sPos,len);
     else
-	::memcpy(dest,src,len);
+	::memmove((uint8_t*)buf + dPos,(uint8_t*)buf + sPos,len);
+    // Reset data at position + moved data if requested
+    if (fill >= 0) {
+	if (useCopy)
+	    // Not overlapped
+	    ::memset((uint8_t*)buf + sPos,fill,len);
+	else if (delta > 0)
+	    // Overlap. Data moved toward buffer start
+	    ::memset((uint8_t*)buf + sPos + len - delta,fill,delta);
+	else
+	    // Overlap. Data moved toward buffer end
+	    ::memset((uint8_t*)buf + sPos,fill,-delta);
+    }
 }
 
-void DataBlock::copyData(void* dest, const void* src, unsigned int len, unsigned int pos,
-    unsigned int space)
+void DataBlock::rebuildDataInsert(void* dest, unsigned int dLen, const void* src, unsigned int sLen,
+    unsigned int pos, unsigned int space, int fill)
 {
-    if (!(src && dest && len))
+    if (!(src && dest && (space || sLen)) || (space + sLen) > dLen)
 	return;
-    uint8_t* d = (uint8_t*)dest;
-    const uint8_t* s = (const uint8_t*)src;
+//#define DataBlock_rebuildDataInsert_debug
+#ifdef DataBlock_rebuildDataInsert_debug
+    String tmp;
     if (!pos)
-	// Data insert before existing, copy old data after it
-	::memcpy(d + space,s,len);
-    else if (pos == len)
-	// Data added to existing, copy old at start
-	::memcpy(d,s,len);
-    else if (space) {
-	// Insert middle
-	::memcpy(d,s,pos);
-	::memcpy(d + pos + space,s + pos,len - pos);
-    }
+	tmp.printf("%u dPos=%u sPos=%u",sLen,space,0);
+    else if (pos >= sLen)
+	tmp.printf("%u dPos=%u sPos=%u",sLen,0,0);
     else
-	::memcpy(d,s,len);
+	tmp.printf("(%u dPos=%u sPos=%u) (%u dPos=%u sPos=%u)",pos,0,0,sLen - pos,pos + space,pos);
+    if (space && fill >= 0) {
+	if (!pos)
+	    tmp.printfAppend(" fill %d pos=%u",fill,0);
+	else if (pos >= sLen)
+	    tmp.printfAppend(" fill %d pos=%u",fill,sLen);
+	else
+	    tmp.printfAppend(" fill %d pos=%u",fill,pos);
+    }
+    Debug("DataBlock",DebugTest,"rebuildDataInsert(%p,%u,%p,%u) pos=%u insert=%u copy %s",
+	dest,dLen,src,sLen,pos,space,tmp.c_str());
+#endif
+    if (!pos) {
+	// Space insert at start
+	// Copy data after inserted space
+	if (sLen)
+	    ::memcpy((uint8_t*)dest + space,src,sLen);
+	if (space && fill >= 0)
+	    ::memset((uint8_t*)dest,fill,space);
+    }
+    else if (pos >= sLen) {
+	// Space added
+	// Copy data at buffer start
+	if (sLen)
+	    ::memcpy((uint8_t*)dest,src,sLen);
+	if (space && fill >= 0)
+	    ::memset((uint8_t*)dest + sLen,fill,space);
+    }
+    else {
+	// Space insert in the middle
+	// Copy 'src' before pos to buffer start and 'src' after pos to buffer pos+items
+	::memcpy(dest,src,pos);
+	::memcpy((uint8_t*)dest + pos + space,(uint8_t*)src + pos,sLen - pos);
+	if (space && fill >= 0)
+	    ::memset((uint8_t*)dest + pos,fill,space);
+    }
+}
+
+void DataBlock::rebuildDataRemove(void* dest, unsigned int dLen, const void* src, unsigned int sLen,
+    unsigned int pos, unsigned int space, int fillAfter)
+{
+    if (!(src && dest && space) || pos >= sLen || space >= sLen)
+	return;
+    if (pos + space > sLen)
+	space = sLen - pos;
+    unsigned int cp = sLen - space;
+    if (cp > dLen)
+	return;
+//#define DataBlock_rebuildDataRemove_debug
+#ifdef DataBlock_rebuildDataRemove_debug
+    String tmp;
+    if (!pos)
+	tmp.printf("%u dPos=%u sPos=%u",cp,0,space);
+    else if (pos + space >= sLen)
+	tmp.printf("%u dPos=%u sPos=%u",cp,0,0);
+    else
+	tmp.printf("(%u dPos=%u sPos=%u) (%u dPos=%u sPos=%u)",pos,0,0,cp - pos,pos,pos + space);
+    if (fillAfter >= 0 && cp < dLen)
+	tmp.printfAppend(" fill_after %d pos=%u count=%u",fillAfter,cp,dLen - cp);
+    Debug("DataBlock",DebugTest,"rebuildDataRemove(%p,%u,%p,%u) pos=%u removed=%u copy %s",
+	dest,dLen,src,sLen,pos,space,tmp.c_str());
+#endif
+    if (!pos)
+	// Removed from start
+	::memcpy(dest,(uint8_t*)src + space,cp);
+    else if (pos + space >= sLen)
+	// Removed from end
+	::memcpy(dest,src,cp);
+    else {
+	// Removed from middle
+	::memcpy(dest,src,pos);
+	::memcpy((uint8_t*)dest + pos,(uint8_t*)src + pos + space,cp - pos);
+    }
+    if (fillAfter >= 0 && cp < dLen)
+	::memset((uint8_t*)dest + cp,fillAfter,dLen - cp);
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */
