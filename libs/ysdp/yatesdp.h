@@ -557,6 +557,17 @@ public:
     };
 
     /**
+     * RTP media status enumeration
+     */
+    enum PasstroughLocation {
+	PasstroughNone = 0,
+	PasstroughProvisional,
+	PasstroughAnswer,
+	PasstroughAck,                   // Outgoing transaction ACK
+	PasstroughUpdate,                // Session update
+    };
+
+    /**
      * Constructor
      * @param parser The SDP parser whose data this object will use
      */
@@ -696,12 +707,13 @@ public:
     /**
      * Creates a SDP from RTP address data present in message.
      * Use the raw SDP if present.
+     * @param loc Location (session state)
      * @param msg The list of parameters
      * @param update True to update RTP/SDP data if raw SDP is not found in the list
      * @param allowEmptyAddr Allow empty address in parameters (default: false)
      * @return MimeSdpBody pointer or 0
      */
-    MimeSdpBody* createPasstroughSDP(NamedList& msg, bool update = true,
+    MimeSdpBody* createPasstroughSDP(int loc, NamedList& msg, bool update = true,
 	bool allowEmptyAddr = false);
 
     /**
@@ -890,10 +902,25 @@ protected:
      */
     void updateSessionParams(const NamedList& params);
 
+    /**
+     * Update RTP forward related parameters
+     * @param params Parameters list
+     * @param inAccept Incoming session accepted
+     */
+    void updateRtpForward(const NamedList& params, bool inAccept = false);
+
+    /**
+     * Retrieve SDP forward flags
+     * @param mask Mask to apply
+     * @return Masked SDP forward flags
+     */
+    inline unsigned int sdpForward(unsigned int mask) const
+	{ return m_sdpForward & mask; }
+
     SDPParser* m_parser;
     int m_mediaStatus;
     bool m_rtpForward;                   // Forward RTP flag
-    bool m_sdpForward;                   // Forward SDP (only if RTP is forwarded)
+    AtomicUInt m_sdpForward;             // Forward SDP (only if RTP is forwarded)
     String m_originAddr;                 // Our SDP origin address
     String m_externalAddr;               // Our external IP address, possibly outside of a NAT
     String m_rtpAddr;                    // Remote RTP address
@@ -911,6 +938,7 @@ protected:
     NamedList m_amrExtra;                // Extra AMR codec parameters
     NamedList* m_parsedParams;           // Parsed session level parameters
     NamedList m_createSdpParams;         // Session level parameters used on SDP create
+    String m_lastSdpFwd;                 // Last forwarded SDP
 
 private:
     // Add extra AMR params to fmtp line
@@ -933,6 +961,22 @@ class YSDP_API SDPParser : public DebugEnabler, public Mutex
 
 public:
     /**
+     * SDP forward bahaviour flags
+     */
+    enum SdpForwardFlags {
+	SdpForward = 0x01,               // SDP forward is enabled
+	SdpFwdKeepLast = 0x02,           // Keep last forwarded SDP, possibly send in future offers
+	SdpFwdProvSendLast = 0x10,       // Send last kept SDP in provisional message if missing signalling message
+	SdpFwdProvPresentOnly = 0x20,    // Send SDP in provisional message only if present signalling message
+	SdpFwdAnswerSendLast = 0x40,     // Send last kept SDP in answer message if missing signalling message
+	SdpFwdAnswerPresentOnly = 0x80,  // Send SDP in answer message only if present signalling message
+	// Masks
+	SdpFwdProv = SdpFwdProvSendLast | SdpFwdProvPresentOnly,
+	SdpFwdAnswer = SdpFwdAnswerSendLast | SdpFwdAnswerPresentOnly,
+	SdpFwdAll = SdpFwdKeepLast | SdpFwdProv | SdpFwdAnswer,
+    };
+
+    /**
      * Constructor
      * @param dbgName Debug name of this parser
      * @param sessName Name of the session in SDP
@@ -940,7 +984,7 @@ public:
      */
     inline SDPParser(const char* dbgName, const char* sessName, const char* fmts = "alaw,mulaw")
 	: Mutex(true,"SDPParser"),
-	  m_sdpForward(false), m_secure(false), m_gpmd(false), m_ignorePort(false),
+	  m_sdpForward(0), m_secure(false), m_gpmd(false), m_ignorePort(false),
 	  m_sessionName(sessName), m_audioFormats(fmts),
 	  m_codecs(""), m_hacks("")
 	{ debugName(dbgName); }
@@ -976,9 +1020,9 @@ public:
 
     /**
      * Get the SDP forward flag
-     * @return True if raw SDP should be added to RTP forward offer
+     * @return Raw SDP forward flags
      */
-    inline bool sdpForward() const
+    inline unsigned int sdpForward() const
 	{ return m_sdpForward; }
 
     /**
@@ -1030,6 +1074,23 @@ public:
     void initialize(const NamedList* codecs, const NamedList* hacks, const NamedList* general = 0);
 
     /**
+     * Retrieve SDP forward from string
+     * @param str String with value
+     * @param defVal Default value if empty
+     * @return SDP forward flags
+     */
+    static inline unsigned int getSdpForward(const String& str, unsigned int defVal = 0) {
+	    if (str) {
+		if (str.isBoolean())
+		    return str.toBoolean() ? SdpForward : 0;
+		defVal = str.encodeFlags(s_sdpForwardFlags);
+		if (defVal)
+		    defVal |= SdpForward;
+	    }
+	    return defVal;
+	}
+
+    /**
      * Yate Payloads for the AV profile
      */
     static const TokenDict s_payloads[];
@@ -1039,9 +1100,14 @@ public:
      */
     static const TokenDict s_rtpmap[];
 
+    /**
+     * SDP forward flags
+     */
+    static const TokenDict s_sdpForwardFlags[];
+
 private:
     Rfc2833 m_rfc2833;                   // RFC 2833 payloads offered to remote
-    bool m_sdpForward;                   // Include raw SDP for forwarding
+    AtomicUInt m_sdpForward;             // Include raw SDP for forwarding
     bool m_secure;                       // Offer SRTP
     bool m_gpmd;                         // Propagate GPMD when not forwarding
     bool m_ignorePort;                   // Ignore port only changes in SDP

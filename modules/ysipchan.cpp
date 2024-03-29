@@ -6797,8 +6797,7 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
 	}
 	if (m_sdpForward) {
 	    const DataBlock& raw = sdp->getBody();
-	    String tmp((const char*)raw.data(),raw.length());
-	    m->addParam("sdp_raw",tmp);
+	    m->addParam(new NamedString("sdp_raw",(const char*)raw.data(),raw.length()));
 	    m_rtpForward = true;
 	}
 	if (m_rtpForward)
@@ -6882,8 +6881,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     m_honorDtmfDetect = msg.getBoolValue(YSTRING("ohonor_dtmf_detect"),m_honorDtmfDetect);
     m_secure = msg.getBoolValue(YSTRING("secure"),plugin.parser().secure());
     setRfc2833(msg,true);
-    m_rtpForward = msg.getBoolValue(YSTRING("rtp_forward"));
-    m_sdpForward = msg.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
+    updateRtpForward(msg);
     m_gpmd = msg.getBoolValue(YSTRING("forward_gpmd"),m_gpmd);
     m_user = msg.getValue(YSTRING("user"));
     String tmp;
@@ -7035,7 +7033,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 
     setRtpLocalAddr(m_rtpLocalAddr,&msg);
     bool fwd = m_rtpForward;
-    MimeSdpBody* sdp = createPasstroughSDP(msg);
+    MimeSdpBody* sdp = createPasstroughSDP(0,msg);
     if (msg.getBoolValue(YSTRING("sdp_ack"))) {
 	if (sdp) {
 	    TelEngine::destruct(sdp);
@@ -7398,7 +7396,7 @@ MimeSdpBody* YateSIPConnection::createProvisionalSDP(Message& msg)
 	    || (getPeer() && getPeer()->getSource())))
 	return 0;
     if (m_rtpForward)
-	return createPasstroughSDP(msg);
+	return createPasstroughSDP(PasstroughProvisional,msg);
     if (m_rtpAddr.null())
 	return 0;
     if (s_1xx_formats)
@@ -7641,8 +7639,6 @@ bool YateSIPConnection::process(SIPEvent* ev)
 	    m_rtpAddr = m_host;
 	}
 	DDebug(this,DebugAll,"RTP addr '%s' [%p]",m_rtpAddr.c_str(),this);
-	if (m_rtpForward && plugin.parser().sdpForward() && !(msg->isACK() || tr->autoAck()))
-	    m_sdpForward = true;
     }
     if (msg->isAnswer() && (msg->code > 100) && (msg->code < 300)) {
 	switch (msg->code >= 200 ? m_updateRouteSet2xx : m_updateRouteSetEarly) {
@@ -8613,7 +8609,9 @@ bool YateSIPConnection::msgAnswered(Message& msg)
 	updateFormats(msg,true);
 	SIPMessage* m = new SIPMessage(m_tr->initialMessage(), 200);
 	copySipHeaders(*m,msg);
-	MimeSdpBody* sdp = createPasstroughSDP(msg);
+	MimeSdpBody* sdp = 0;
+	if (m_rtpForward)
+	    sdp = createPasstroughSDP(PasstroughAnswer,msg);
 	if (!sdp) {
 	    m_rtpForward = false;
 	    bool startNow = false;
@@ -8776,7 +8774,7 @@ bool YateSIPConnection::msgUpdate(Message& msg)
 	if (*oper == YSTRING("notify")) {
 	    if (m_tr && m_tr->isOutgoing() && !m_tr->autoAck()) {
 		// generate ACK explicitly and put the SDP in it
-		MimeSdpBody* sdp = createPasstroughSDP(msg);
+		MimeSdpBody* sdp = createPasstroughSDP(PasstroughAck,msg);
 		if (m_rtpMedia && !sdp) {
 		    if (m_rtpForward && m_rtpLocalAddr)
 			sdp = createSDP(m_rtpLocalAddr,m_rtpMedia);
@@ -8814,7 +8812,7 @@ bool YateSIPConnection::msgUpdate(Message& msg)
     }
 
     if (m_rtpForward && m_tr2->isOutgoing() && !m_tr2->autoAck() && (m_tr2->getState() == SIPTransaction::Retrans)) {
-	m_tr2->setAcknowledge(createPasstroughSDP(msg,true,m_rtpForward));
+	m_tr2->setAcknowledge(createPasstroughSDP(PasstroughUpdate,msg,true,m_rtpForward));
 	detachTransaction2();
 	return true;
     }
@@ -8827,7 +8825,7 @@ bool YateSIPConnection::msgUpdate(Message& msg)
     if (*oper == YSTRING("notify")) {
 	bool rtpSave = m_rtpForward;
 	m_rtpForward = msg.getBoolValue(YSTRING("rtp_forward"),m_rtpForward);
-	MimeSdpBody* sdp = createPasstroughSDP(msg,true,m_rtpForward);
+	MimeSdpBody* sdp = createPasstroughSDP(PasstroughUpdate,msg,true,m_rtpForward);
 	if (!sdp) {
 	    m_rtpForward = rtpSave;
 	    m_tr2->setResponse(500,"Server failed to build the SDP");
@@ -8984,10 +8982,8 @@ bool YateSIPConnection::callPrerouted(Message& msg, bool handled)
 bool YateSIPConnection::callRouted(Message& msg)
 {
     // try to disable RTP forwarding earliest possible
-    if (m_rtpForward) {
-	m_rtpForward = msg.getBoolValue(YSTRING("rtp_forward"));
-	m_sdpForward = msg.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
-    }
+    if (m_rtpForward)
+	updateRtpForward(msg);
     m_gpmd = msg.getBoolValue(YSTRING("forward_gpmd"),m_gpmd);
     m_reinviteWait = msg.getBoolValue(YSTRING("reinvite_wait_initial"),m_reinviteWait);
     setRfc2833(msg,false);
@@ -9062,10 +9058,8 @@ void YateSIPConnection::callAccept(Message& msg)
     m_user = msg.getValue(s_username);
     if (m_authBye)
 	m_authBye = msg.getBoolValue(YSTRING("xsip_auth_bye"),true);
-    if (m_rtpForward) {
-	m_rtpForward = (msg[YSTRING("rtp_forward")] == YSTRING("accepted"));
-	m_sdpForward = msg.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
-    }
+    if (m_rtpForward)
+	updateRtpForward(msg,true);
     if (m_tr && msg.getBoolValue("sdp_ack"))
 	m_tr->autoAck(false);
     m_secure = m_secure && msg.getBoolValue(YSTRING("secure"),true);
@@ -9143,7 +9137,7 @@ bool YateSIPConnection::startClientReInvite(NamedList& msg, bool rtpForward, boo
 	clearEndpoint();
     MimeSdpBody* sdp = 0;
     if (rtpForward)
-	sdp = createPasstroughSDP(msg,false,true);
+	sdp = createPasstroughSDP(PasstroughUpdate,msg,false,true);
     else {
 	updateSDP(msg);
 	sdp = createRtpSDP(true);
@@ -9193,7 +9187,7 @@ bool YateSIPConnection::startClientUpdate(NamedList& msg)
 	clearEndpoint();
     MimeSdpBody* sdp = 0;
     if (m_rtpForward)
-	sdp = createPasstroughSDP(msg,false,true);
+	sdp = createPasstroughSDP(PasstroughUpdate,msg,false,true);
     else {
 	updateFormats(msg,true);
 	sdp = createSDP();

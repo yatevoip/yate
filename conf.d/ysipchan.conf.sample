@@ -265,7 +265,21 @@
 ; secure: bool: Generate and accept RFC 4568 security descriptors for SRTP
 ;secure=disable
 
-; forward_sdp: bool: Include the raw SDP body to be used as-is for forwarding RTP
+; forward_sdp: boolean or flags: Include the raw SDP body to be used as-is for forwarding RTP
+; This parameter can be overridden in call.execute for incoming and/or outgoing calls
+;   and in call.route for incoming calls
+; Boolean true: Enable SDP forward with no other flag
+; Boolean false: Disable SDP forward
+; Flags (set as comma separated):
+; keep-last: Keep last forwarded SDP, possibly send it in future offers
+; provisional-send-last: Send last kept SDP in provisional message if missing signalling message
+; provisional-send-present-only: Send SDP in provisional message only if present signalling message
+; answer-send-last: Send last kept SDP in answer message if missing signalling message
+; answer-send-present-only: Send SDP in answer message only if present signalling message
+; provisional: provisional-send-last and provisional-send-present-only
+; answer: answer-send-last and answer-send-present-only
+; all: set all known flags
+; NOTE: SDP forward is enabled if any flag is set
 ;forward_sdp=disable
 
 ; forward_gpmd: bool: Propagate GPMD even when not forwarding RTP

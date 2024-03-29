@@ -23,6 +23,8 @@
 
 namespace TelEngine {
 
+static const String s_rtpForward = "rtp_forward";
+
 /*
  * SDPSession
  */
@@ -47,8 +49,7 @@ SDPSession::SDPSession(SDPParser* parser, NamedList& params)
       m_enabler(0), m_ptr(0)
 {
     setSdpDebug();
-    m_rtpForward = params.getBoolValue(YSTRING("rtp_forward"));
-    m_sdpForward = params.getBoolValue(YSTRING("forward_sdp"),m_sdpForward);
+    updateRtpForward(params);
     m_secure = params.getBoolValue(YSTRING("secure"),parser->m_secure);
     m_gpmd = params.getBoolValue(YSTRING("forward_gpmd"),parser->m_gpmd);
     m_rfc2833 = parser->m_rfc2833;
@@ -662,34 +663,65 @@ MimeSdpBody* SDPSession::createSDP()
 }
 
 // Creates a SDP from RTP address data present in message
-MimeSdpBody* SDPSession::createPasstroughSDP(NamedList& msg, bool update,
+MimeSdpBody* SDPSession::createPasstroughSDP(int loc, NamedList& msg, bool update,
     bool allowEmptyAddr)
 {
-    XDebug(m_enabler,DebugAll,"createPasstroughSDP(%s,%u,%u) [%p]",
-	msg.c_str(),update,allowEmptyAddr,m_ptr);
-    String tmp = msg.getValue("rtp_forward");
-    msg.clearParam("rtp_forward");
-    if (!(m_rtpForward && tmp.toBoolean()))
+    XDebug(m_enabler,DebugAll,"createPasstroughSDP(%d,%s,%u,%u) [%p]",
+	loc,msg.c_str(),update,allowEmptyAddr,m_ptr);
+    NamedString* rtpFwd = msg.getParam(s_rtpForward);
+    if (!rtpFwd)
 	return 0;
-    String* raw = msg.getParam("sdp_raw");
-    if (raw && m_sdpForward) {
-	msg.setParam("rtp_forward","accepted");
-	return new MimeSdpBody("application/sdp",raw->safe(),raw->length());
+    MimeSdpBody* sdp = 0;
+    while (m_rtpForward && rtpFwd->toBoolean()) {
+	if (m_sdpForward) {
+	    String* raw = msg.getParam(YSTRING("sdp_raw"));
+	    if (raw) {
+		if (raw->length()) {
+		    if (sdpForward(SDPParser::SdpFwdKeepLast))
+			m_lastSdpFwd = *raw;
+		    else
+			m_lastSdpFwd = "";
+		}
+		sdp = new MimeSdpBody("application/sdp",raw->safe(),raw->length());
+		break;
+	    }
+	    bool sendLast = false;
+	    bool cont = true;
+	    switch (loc) {
+		case PasstroughProvisional:
+		    sendLast = sdpForward(SDPParser::SdpFwdProvSendLast);
+		    cont = !sdpForward(SDPParser::SdpFwdProvPresentOnly);
+		    break;
+		case PasstroughAnswer:
+		    sendLast = sdpForward(SDPParser::SdpFwdAnswerSendLast);
+		    cont = !sdpForward(SDPParser::SdpFwdAnswerPresentOnly);
+		    break;
+	    }
+	    if (sendLast && m_lastSdpFwd) {
+		sdp = new MimeSdpBody("application/sdp",m_lastSdpFwd.safe(),m_lastSdpFwd.length());
+		break;
+	    }
+	    if (!cont)
+		break;
+	}
+	updateSessionParams(msg);
+	String addr;
+	ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr);
+	if (!lst)
+	    break;
+	sdp = createSDP(addr,lst);
+	if (update) {
+	    m_rtpLocalAddr = addr;
+	    setMedia(lst);
+	}
+	else
+	    TelEngine::destruct(lst);
+	break;
     }
-    updateSessionParams(msg);
-    String addr;
-    ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr);
-    if (!lst)
-	return 0;
-    MimeSdpBody* sdp = createSDP(addr,lst);
-    if (update) {
-	m_rtpLocalAddr = addr;
-	setMedia(lst);
-    }
-    else
-	TelEngine::destruct(lst);
     if (sdp)
-	msg.setParam("rtp_forward","accepted");
+	*rtpFwd = "accepted";
+    else
+	msg.clearParam(rtpFwd);
     return sdp;
 }
 
@@ -812,7 +844,7 @@ bool SDPSession::addSdpParams(NamedList& msg, const String& rawSdp)
 {
     if (!m_sdpForward)
 	return false;
-    msg.setParam("rtp_forward","yes");
+    msg.setParam(s_rtpForward,"yes");
     msg.addParam("sdp_raw",rawSdp);
     return true;
 }
@@ -830,7 +862,7 @@ bool SDPSession::addRtpParams(NamedList& msg, const String& natAddr,
     if (force || (!startRtp() && m_rtpForward)) {
 	if (natAddr)
 	    msg.addParam("rtp_nat_addr",natAddr);
-	msg.addParam("rtp_forward","yes");
+	msg.addParam(s_rtpForward,"yes");
 	msg.addParam("rtp_addr",m_rtpAddr);
 	for (ObjList* o = m_rtpMedia->skipNull(); o; o = o->skipNext()) {
 	    SDPMedia* m = static_cast<SDPMedia*>(o->get());
@@ -850,7 +882,7 @@ void SDPSession::resetSdp(bool all)
     m_mediaStatus = MediaMissing;
     TelEngine::destruct(m_rtpMedia);
     m_rtpForward = false;
-    m_sdpForward = false;
+    m_sdpForward = 0;
     m_externalAddr.clear();
     m_rtpAddr.clear();
     m_rtpLocalAddr.clear();
@@ -1154,6 +1186,21 @@ void SDPSession::updateSessionParams(const NamedList& nl)
 	    XDebug(m_enabler,DebugAll,"Added sess create SDP param %s='%s' [%p]",
 		ns->name().c_str(),ns->safe(),m_ptr);
 	}
+    }
+}
+
+void SDPSession::updateRtpForward(const NamedList& params, bool inAccept)
+{
+    if (inAccept)
+	m_rtpForward = (params[s_rtpForward] == YSTRING("accepted"));
+    else
+	m_rtpForward = params.getBoolValue(s_rtpForward);
+    m_sdpForward = SDPParser::getSdpForward(params[YSTRING("forward_sdp")],m_sdpForward);
+    if (m_enabler && m_enabler->debugAt(DebugAll)) {
+	String tmp;
+	tmp.decodeFlags(m_sdpForward,SDPParser::s_sdpForwardFlags);
+	Debug(m_enabler,DebugAll,"Updated RTP forward rtp=%s sdp=%s from '%s' [%p]",
+	    String::boolText(m_rtpForward),tmp.safe("no"),params.safe(),m_ptr);
     }
 }
 

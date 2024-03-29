@@ -121,6 +121,24 @@ const TokenDict SDPParser::s_rtpmap[] = {
     { 0,                    0 },
 };
 
+const TokenDict SDPParser::s_sdpForwardFlags[] = {
+    {"yes",                           SdpForward},
+    {"enable",                        SdpForward},
+    {"true",                          SdpForward},
+    {"on",                            SdpForward},
+    {"t",                             SdpForward},
+    {"keep-last",                     SdpFwdKeepLast},
+    {"provisional-send-last",         SdpFwdProvSendLast},
+    {"provisional-send-present-only", SdpFwdProvPresentOnly},
+    {"answer-send-last",              SdpFwdAnswerSendLast},
+    {"answer-send-present-only",      SdpFwdAnswerPresentOnly},
+    // Masks
+    {"provisional",                   SdpFwdProv},
+    {"answer",                        SdpFwdAnswer},
+    {"all",                           SdpFwdAll},
+    {0,0}
+};
+
 enum SdpFormat
 {
     SdpFmtUnknown = 0,
@@ -625,11 +643,11 @@ void SDPParser::initialize(const NamedList* codecs, const NamedList* hacks, cons
     Debug(this,DebugAll,"Initialized RFC 2833: %s",m_rfc2833.dump(tmp).c_str());
     m_secure = false;
     m_gpmd = false;
-    m_sdpForward = false;
+    m_sdpForward = 0;
     if (general) {
 	m_secure = general->getBoolValue("secure",m_secure);
 	m_gpmd = general->getBoolValue("forward_gpmd",m_gpmd);
-	m_sdpForward = general->getBoolValue("forward_sdp",m_sdpForward);
+	m_sdpForward = getSdpForward((*general)[YSTRING("forward_sdp")]);
     }
     m_ssdpParam = general ? general->getValue(YSTRING("ssdp_prefix"),"ssdp") : "ssdp";
 }
