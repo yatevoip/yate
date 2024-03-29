@@ -5281,8 +5281,9 @@ public:
      * Creates a new named string.
      * @param name Name of this string
      * @param value Initial value of the string
+     * @param len Length of the value, -1 for full string
      */
-    explicit NamedString(const char* name, const char* value = 0);
+    explicit NamedString(const char* name, const char* value = 0, int len = -1);
 
     /**
      * Retrieve the name of this string.
@@ -5329,8 +5330,10 @@ public:
      * @param name Name of this pointer
      * @param data Initial pointer value. The pointer will be owned by this object
      * @param value Initial string value
+     * @param len Length of the value, -1 for full string
      */
-    explicit NamedPointer(const char* name, GenObject* data = 0, const char* value = 0);
+    explicit NamedPointer(const char* name, GenObject* data = 0, const char* value = 0,
+	int len = -1);
 
     /**
      * Destructor. Release the pointer

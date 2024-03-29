@@ -2481,8 +2481,8 @@ bool Regexp::isCaseInsensitive() const
 }
 
 
-NamedString::NamedString(const char* name, const char* value)
-    : String(value), m_name(name)
+NamedString::NamedString(const char* name, const char* value, int len)
+    : String(value,len), m_name(name)
 {
     XDebug(DebugAll,"NamedString::NamedString(\"%s\",\"%s\") [%p]",name,value,this);
 }
@@ -2500,8 +2500,8 @@ void* NamedString::getObject(const String& name) const
 }
 
 
-NamedPointer::NamedPointer(const char* name, GenObject* data, const char* value)
-    : NamedString(name,value),
+NamedPointer::NamedPointer(const char* name, GenObject* data, const char* value, int len)
+    : NamedString(name,value,len),
     m_data(0)
 {
     userData(data);
