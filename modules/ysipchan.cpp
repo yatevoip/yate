@@ -7033,7 +7033,7 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
 
     setRtpLocalAddr(m_rtpLocalAddr,&msg);
     bool fwd = m_rtpForward;
-    MimeSdpBody* sdp = createPasstroughSDP(0,msg);
+    MimeSdpBody* sdp = createPasstroughSDP(PasstroughInitial,msg);
     if (msg.getBoolValue(YSTRING("sdp_ack"))) {
 	if (sdp) {
 	    TelEngine::destruct(sdp);
@@ -8610,10 +8610,15 @@ bool YateSIPConnection::msgAnswered(Message& msg)
 	SIPMessage* m = new SIPMessage(m_tr->initialMessage(), 200);
 	copySipHeaders(*m,msg);
 	MimeSdpBody* sdp = 0;
-	if (m_rtpForward)
+	if (m_rtpForward) {
 	    sdp = createPasstroughSDP(PasstroughAnswer,msg);
-	if (!sdp) {
-	    m_rtpForward = false;
+	    // This is an old behaviour
+	    // It may not be desirable to disable RTP forward: peer channel may have no data
+	    //  source/consumer: we'll build a data endpoint not connected to something
+	    if (!sdp && !sdpForward(SDPParser::SdpFwdAnswerPresentOnly))
+		m_rtpForward = false;
+	}
+	if (!sdp && !m_rtpForward) {
 	    bool startNow = false;
 	    if (m_rtpMedia)
 		startNow = msg.getBoolValue(YSTRING("rtp_start"),s_start_rtp);
@@ -8857,7 +8862,8 @@ bool YateSIPConnection::msgUpdate(Message& msg)
 bool YateSIPConnection::msgControl(Message& msg)
 {
     bool ok = false;
-    if (msg[YSTRING("operation")] == YSTRING("query")) {
+    const String& oper = msg[YSTRING("operation")];
+    if (oper == YSTRING("query")) {
 	msg.setParam("sip_uri",m_uri);
 	msg.setParam("sip_callid",callid());
 	String tmp;
@@ -8875,6 +8881,10 @@ bool YateSIPConnection::msgControl(Message& msg)
 	    msg.setParam("local_cseq",String(cseq));
 	if (m_dialog.remoteCSeq >= 0)
 	    msg.setParam("remote_cseq",String(m_dialog.remoteCSeq));
+	ok = true;
+    }
+    else if (oper == YSTRING("update_rtp_forward")) {
+	updateRtpForward(msg);
 	ok = true;
     }
     return Channel::msgControl(msg) || ok;
