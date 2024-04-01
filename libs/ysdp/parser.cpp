@@ -127,15 +127,16 @@ const TokenDict SDPParser::s_sdpForwardFlags[] = {
     {"true",                          SdpForward},
     {"on",                            SdpForward},
     {"t",                             SdpForward},
-    {"keep-last",                     SdpFwdKeepLast},
+    {"proxy",                         SdpFwdProxy},
     {"provisional-send-last",         SdpFwdProvSendLast},
     {"provisional-send-present-only", SdpFwdProvPresentOnly},
     {"answer-send-last",              SdpFwdAnswerSendLast},
     {"answer-send-present-only",      SdpFwdAnswerPresentOnly},
+    {"ack-send-present-only",         SdpFwdAckPresentOnly},
+    {"update-send-present-only",      SdpFwdUpdatePresentOnly},
     // Masks
     {"provisional",                   SdpFwdProv},
     {"answer",                        SdpFwdAnswer},
-    {"all",                           SdpFwdAll},
     {0,0}
 };
 
@@ -292,6 +293,8 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
     Lock lock(this);
     ObjList* lst = 0;
     bool defcodecs = m_codecs.getBoolValue("default",true);
+    bool defAnnexB = m_codecs.getBoolValue("g729_annexb");
+    bool defAmrOctet = m_codecs.getBoolValue("amr_octet");
     c = sdp.getLine("m");
     for (; c; c = sdp.getNextLine(c)) {
 	String tmp(*c);
@@ -366,8 +369,8 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 		tmp.clear();
 	    }
 	    int mode = 0;
-	    bool annexB = m_codecs.getBoolValue("g729_annexb",false);
-	    bool amrOctet = m_codecs.getBoolValue("amr_octet",false);
+	    bool annexB = defAnnexB;
+	    bool amrOctet = defAmrOctet;
 	    int defmap = -1;
 	    String payload(lookup(var,s_payloads));
 
@@ -475,6 +478,10 @@ ObjList* SDPParser::parse(const MimeSdpBody& sdp, String& addr, ObjList* oldMedi
 				    s >> annexB;
 				    break;
 				case SdpAmr:
+				    // RFC 4867
+				    // octet-align=0/1. Missing: assume 0
+				    // TODO: The following should be handled as octet-align=1
+				    // 'crc=1' 'robust-sorting=1' 'interleaving'
 				    if (s.startSkip("octet-align=",false)) {
 					int val = 0;
 					s >> val;

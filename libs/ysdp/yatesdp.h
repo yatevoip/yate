@@ -561,6 +561,7 @@ public:
      */
     enum PasstroughLocation {
 	PasstroughNone = 0,
+	PasstroughInitial,
 	PasstroughProvisional,
 	PasstroughAnswer,
 	PasstroughAck,                   // Outgoing transaction ACK
@@ -965,15 +966,17 @@ public:
      */
     enum SdpForwardFlags {
 	SdpForward = 0x01,               // SDP forward is enabled
-	SdpFwdKeepLast = 0x02,           // Keep last forwarded SDP, possibly send in future offers
 	SdpFwdProvSendLast = 0x10,       // Send last kept SDP in provisional message if missing signalling message
 	SdpFwdProvPresentOnly = 0x20,    // Send SDP in provisional message only if present signalling message
 	SdpFwdAnswerSendLast = 0x40,     // Send last kept SDP in answer message if missing signalling message
 	SdpFwdAnswerPresentOnly = 0x80,  // Send SDP in answer message only if present signalling message
+	SdpFwdAckPresentOnly = 0x0100,   // Send SDP in outgoing ACK only if present signalling message
+	SdpFwdUpdatePresentOnly = 0x0200,// Send SDP in update message only if present signalling message
 	// Masks
 	SdpFwdProv = SdpFwdProvSendLast | SdpFwdProvPresentOnly,
 	SdpFwdAnswer = SdpFwdAnswerSendLast | SdpFwdAnswerPresentOnly,
-	SdpFwdAll = SdpFwdKeepLast | SdpFwdProv | SdpFwdAnswer,
+	SdpFwdProxy = SdpFwdProvPresentOnly | SdpFwdAnswerPresentOnly | SdpFwdAckPresentOnly
+	    | SdpFwdUpdatePresentOnly,
     };
 
     /**

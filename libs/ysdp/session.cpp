@@ -673,35 +673,39 @@ MimeSdpBody* SDPSession::createPasstroughSDP(int loc, NamedList& msg, bool updat
 	return 0;
     MimeSdpBody* sdp = 0;
     while (m_rtpForward && rtpFwd->toBoolean()) {
+	bool create = true;
 	if (m_sdpForward) {
 	    String* raw = msg.getParam(YSTRING("sdp_raw"));
-	    if (raw) {
-		if (raw->length()) {
-		    if (sdpForward(SDPParser::SdpFwdKeepLast))
-			m_lastSdpFwd = *raw;
-		    else
-			m_lastSdpFwd = "";
-		}
+	    if (raw && *raw) {
+		if (PasstroughProvisional == loc &&
+		    sdpForward(SDPParser::SdpFwdProvSendLast | SDPParser::SdpFwdAnswerSendLast))
+		    m_lastSdpFwd = *raw;
 		sdp = new MimeSdpBody("application/sdp",raw->safe(),raw->length());
 		break;
 	    }
 	    bool sendLast = false;
-	    bool cont = true;
 	    switch (loc) {
 		case PasstroughProvisional:
 		    sendLast = sdpForward(SDPParser::SdpFwdProvSendLast);
-		    cont = !sdpForward(SDPParser::SdpFwdProvPresentOnly);
+		    create = !sdpForward(SDPParser::SdpFwdProvPresentOnly);
 		    break;
 		case PasstroughAnswer:
 		    sendLast = sdpForward(SDPParser::SdpFwdAnswerSendLast);
-		    cont = !sdpForward(SDPParser::SdpFwdAnswerPresentOnly);
+		    create = !sdpForward(SDPParser::SdpFwdAnswerPresentOnly);
+		    break;
+		case PasstroughAck:
+		    create = !sdpForward(SDPParser::SdpFwdAckPresentOnly);
+		    break;
+		case PasstroughUpdate:
+		    create = !sdpForward(SDPParser::SdpFwdUpdatePresentOnly);
 		    break;
 	    }
 	    if (sendLast && m_lastSdpFwd) {
 		sdp = new MimeSdpBody("application/sdp",m_lastSdpFwd.safe(),m_lastSdpFwd.length());
 		break;
 	    }
-	    if (!cont)
+	    // Do not build a SDP if empty raw SDP is present in message: allow per message config
+	    if (raw)
 		break;
 	}
 	updateSessionParams(msg);
@@ -709,7 +713,8 @@ MimeSdpBody* SDPSession::createPasstroughSDP(int loc, NamedList& msg, bool updat
 	ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr);
 	if (!lst)
 	    break;
-	sdp = createSDP(addr,lst);
+	if (create)
+	    sdp = createSDP(addr,lst);
 	if (update) {
 	    m_rtpLocalAddr = addr;
 	    setMedia(lst);
@@ -1191,16 +1196,20 @@ void SDPSession::updateSessionParams(const NamedList& nl)
 
 void SDPSession::updateRtpForward(const NamedList& params, bool inAccept)
 {
+    bool rtpFwd = m_rtpForward;
+    unsigned int sdpFwd = m_sdpForward;
     if (inAccept)
 	m_rtpForward = (params[s_rtpForward] == YSTRING("accepted"));
     else
 	m_rtpForward = params.getBoolValue(s_rtpForward);
     m_sdpForward = SDPParser::getSdpForward(params[YSTRING("forward_sdp")],m_sdpForward);
-    if (m_enabler && m_enabler->debugAt(DebugAll)) {
+    if (m_enabler && m_enabler->debugAt(DebugAll)
+	&& (rtpFwd != m_rtpForward || sdpFwd != m_sdpForward)) {
 	String tmp;
 	tmp.decodeFlags(m_sdpForward,SDPParser::s_sdpForwardFlags);
-	Debug(m_enabler,DebugAll,"Updated RTP forward rtp=%s sdp=%s from '%s' [%p]",
-	    String::boolText(m_rtpForward),tmp.safe("no"),params.safe(),m_ptr);
+	Debug(m_enabler,DebugAll,"Updated RTP forward rtp=%s sdp=0x%x (%s) from '%s' [%p]",
+	    String::boolText(m_rtpForward),(unsigned int)m_sdpForward,tmp.safe("no"),
+	    params.safe(),m_ptr);
     }
 }
 
