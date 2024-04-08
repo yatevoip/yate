@@ -786,6 +786,15 @@ public:
     Debugger(int level, const char* name, const char* format = 0, ...);
 
     /**
+     * The constructor prints the method entry message and indents.
+     * @param enabler DebugEnabler to use for level check
+     * @param level The level of the message
+     * @param name Name of the function or block entered, must be static
+     * @param format printf() style format string
+     */
+    Debugger(DebugEnabler* enabler, int level, const char* name, const char* format = 0, ...);
+
+    /**
      * The destructor prints the method leave message and deindents.
      */
     ~Debugger();
@@ -3196,30 +3205,30 @@ public:
      */
     unsigned int encodeFlags(const TokenDict* tokens) const;
 
-     /**
+    /**
      * Encode flags from dictionary values
      * @param tokens The dictionary containing the flags
      * @return Encoded flags
      */
     uint64_t encodeFlags(const TokenDict64* tokens) const;
 
-     /**
+    /**
      * Decodoe flags from dictionary values
      * @param flags The flags
      * @param tokens The dictionary containing the flags
      * @param unknownflag True (default) to add unknown flags
      * @return Decoded flags
      */
-    const String& decodeFlags(unsigned int flags, const TokenDict* tokens, bool unknownflag = true);
+    String& decodeFlags(unsigned int flags, const TokenDict* tokens, bool unknownflag = true);
 
-     /**
+    /**
      * Decode flags from dictionary values
      * @param flags The flags
      * @param tokens The dictionary containing the flags
      * @param unknownflag True (default) to add unknown flags
      * @return Decoded flags
      */
-     const String& decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag = true);
+    String& decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag = true);
 
     /**
      * Check if a string starts with UTF-8 Byte Order Mark

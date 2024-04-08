@@ -729,20 +729,23 @@ void DebugEnabler::debugSet(const char* desc)
     }
 }
 
+#define Debugger_PRINT_START { \
+    char buf[OUT_HEADER_SIZE]; \
+    ::snprintf(buf,sizeof(buf),">>> %s",m_name); \
+    va_list va; \
+    va_start(va,format); \
+    ind_mux.lock(); \
+    dbg_output(m_level,buf,format,va); \
+    va_end(va); \
+    s_indent++; \
+    ind_mux.unlock(); \
+}
 
 Debugger::Debugger(const char* name, const char* format, ...)
     : m_name(name), m_level(DebugAll)
 {
     if (s_debugging && m_name && (s_debug >= DebugAll) && !reentered()) {
-	char buf[OUT_HEADER_SIZE];
-	::snprintf(buf,sizeof(buf),">>> %s",m_name);
-	va_list va;
-	va_start(va,format);
-	ind_mux.lock();
-	dbg_output(m_level,buf,format,va);
-	va_end(va);
-	s_indent++;
-	ind_mux.unlock();
+	Debugger_PRINT_START
     }
     else
 	m_name = 0;
@@ -752,15 +755,17 @@ Debugger::Debugger(int level, const char* name, const char* format, ...)
     : m_name(name), m_level(level)
 {
     if (s_debugging && m_name && (s_debug >= level) && !reentered()) {
-	char buf[OUT_HEADER_SIZE];
-	::snprintf(buf,sizeof(buf),">>> %s",m_name);
-	va_list va;
-	va_start(va,format);
-	ind_mux.lock();
-	dbg_output(m_level,buf,format,va);
-	va_end(va);
-	s_indent++;
-	ind_mux.unlock();
+	Debugger_PRINT_START
+    }
+    else
+	m_name = 0;
+}
+
+Debugger::Debugger(DebugEnabler* enabler, int level, const char* name, const char* format, ...)
+    : m_name(name), m_level(level)
+{
+    if (s_debugging && m_name && enabler && enabler->debugAt(level) && !reentered()) {
+	Debugger_PRINT_START
     }
     else
 	m_name = 0;

@@ -2584,7 +2584,7 @@ uint64_t String::encodeFlags(const TokenDict64* tokens) const
     return flags;
 }
 
-const String& String::decodeFlags(unsigned int flags, const TokenDict* tokens, bool unknownflag)
+String& String::decodeFlags(unsigned int flags, const TokenDict* tokens, bool unknownflag)
 {
     if (tokens) {
 	for(; tokens->token && flags; tokens++) {
@@ -2599,7 +2599,7 @@ const String& String::decodeFlags(unsigned int flags, const TokenDict* tokens, b
     return *this;
 }
 
-const String& String::decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag)
+String& String::decodeFlags(uint64_t flags, const TokenDict64* tokens, bool unknownflag)
 {
     if (tokens) {
 	for (; tokens->token && flags; tokens++) {
