@@ -98,6 +98,12 @@ static inline const NamedList* getObjParams(GenObject* op)
     return jso ? (jso->nativeParams() ? jso->nativeParams() : &jso->params()) : 0;
 }
 
+static inline const String& nonObjStr(const NamedString* ns)
+{
+    ExpWrapper* w = YOBJECT(ExpWrapper,ns);
+    return w ? String::empty() : *ns;
+}
+
 // Temporary class used to store an object from received parameter or build a new one to be used
 // Safely release created object
 template <class Obj> class ExpOpTmpObj
@@ -1077,6 +1083,7 @@ public:
 	    params().addParam(new ExpFunction("print_root_r"));
 	    params().addParam(new ExpFunction("dump_t"));
 	    params().addParam(new ExpFunction("print_t"));
+	    params().addParam(new ExpFunction("dump_t_params"));
 	    params().addParam(new ExpFunction("debugName"));
 	    params().addParam(new ExpFunction("debugLevel"));
 	    params().addParam(new ExpFunction("debugEnabled"));
@@ -2223,43 +2230,104 @@ static inline const NamedList* getReplaceParams(GenObject* gen)
 
 // Build a tabular dump of an Object or Array
 static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
-    const NamedList* hdrMap = 0, bool forceEmpty = false, bool allHeaders = false)
+    const NamedList* hdrMap = 0, const NamedList* params = 0)
 {
-    class Header : public ObjList
+    class Header : public ObjVector
     {
     public:
-	Header(const char* name)
-	    : m_name(new String(name)), m_rows(0)
-	    { set(m_name); m_width = m_name->length(); }
+	Header(const char* name, const NamedList* params, const NamedList* hdrMap,
+	    const String& title = String::empty())
+	    : ObjVector(1,true,10), m_name(name), m_width(0), m_widthMax(0),
+	    m_titleAlign(String::Left), m_dataAlign(String::Left) {
+		    if (params) {
+			m_titleAlign = getAlign((*params)["column_align_title_" + m_name]);
+			m_dataAlign = getAlign((*params)["column_align_data_" + m_name]);
+			m_width = params->getIntValue("column_width_fixed_" + m_name,0);
+			if (m_width)
+			    m_widthMax = m_width;
+			else {
+			    m_width = params->getIntValue("column_width_min_" + m_name,0);
+			    if (!m_width)
+				m_widthMax = params->getIntValue("column_width_max_" + m_name,0);
+			}
+		    }
+		    const String& t = title ? title : (hdrMap ? (*hdrMap)[m_name] : String::empty());
+		    m_title = buildValue(t ? t : m_name);
+		    set(m_title,0);
+		}
 	virtual const String& toString() const
-	    { return *m_name; }
-	inline unsigned int width() const
-	    { return m_width; }
+	    { return m_name; }
 	inline unsigned int rows() const
-	    { return m_rows; }
-	inline void setWidth(unsigned int w)
-	    { if (m_width < w) m_width = w; }
-	inline void setName(const char* n) {
-		if (TelEngine::null(n))
-		    return;
-		*m_name = n;
-		setWidth(m_name->length());
-	    }
+	    { return length() - 1; }
 	inline void addString(const String& val, unsigned int row) {
-		if (row <= m_rows)
-		    return;
-		setWidth(val.length());
-		ObjList* a = this;
-		while (++m_rows < row)
-		    a = a->append(0,false);
-		a->append(new String(val),false);
+		unsigned int n = rows();
+		if (row > n && resize(row + 1,true) > n)
+		    set(buildValue(val),row);
 	    }
-	inline const String* getString(unsigned int row) const
-	    { return (row < m_rows) ? static_cast<const String*>(at(++row)) : 0; }
+	inline String& dump(String& buf, unsigned int row, unsigned int col,
+	    unsigned int* prevSp = 0) const {
+		if (!m_width)
+		    return buf;
+		const String* val = static_cast<const String*>(at(row));
+		if (TelEngine::null(val)) {
+		    unsigned int sp = (col ? 1 : 0) + m_width;
+		    if (!prevSp)
+			return buf.append(' ',sp);
+		    *prevSp += sp;
+		    return buf;
+		}
+		if (prevSp) {
+		    buf.append(' ',(col ? 1 : 0) + *prevSp);
+		    *prevSp = 0;
+		}
+		else if (col)
+		    buf << ' ';
+		if (val->length() >= m_width)
+		    return buf.append(val->c_str(),m_width);
+		int align = row ? m_dataAlign : m_titleAlign;
+		if (prevSp) {
+		    if (String::Left == align) {
+			*prevSp = m_width - val->length();
+			return buf << *val;
+		    }
+		    if (String::Center == align) {
+			unsigned int len = val->length() + m_width / 2 - val->length() / 2;
+			*prevSp = m_width - len;
+			return buf.appendFixed(len,*val,' ',String::Right);
+		    }
+		}
+		return buf.appendFixed(m_width,*val,' ',align);
+	    }
+	inline String& dumpSep(String& buf) const {
+		if (!m_width)
+		    return buf;
+		if (buf)
+		    buf << ' ';
+		return buf.append('-',m_width);
+	    }
+
     private:
-	String* m_name;
+	inline String* buildValue(const String& val) {
+		String* buf = new String(val.c_str(),
+		    (!m_widthMax || val.length() <= m_widthMax) ? val.length() : m_widthMax);
+		if (m_width < buf->length())
+		    m_width = buf->length();
+		return buf;
+	    }
+	inline int getAlign(const String& val) {
+		if (val == YSTRING("right"))
+		    return String::Right;
+		else if (val == YSTRING("center"))
+		    return String::Center;
+		return String::Left;
+	    }
+
+	String m_name;
+	String* m_title;
 	unsigned int m_width;
-	unsigned int m_rows;
+	unsigned int m_widthMax;
+	int m_titleAlign;
+	int m_dataAlign;
     };
 
     const JsObject* jso = YOBJECT(JsObject,&oper);
@@ -2283,36 +2351,37 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
 	unsigned int row = 0;
 	for (int i = 0; i < jsa->length(); i++) {
 	    jso = YOBJECT(JsObject,jsa->params().getParam(String(i)));
-	    if (!jso)
-		continue;
-	    if (!i)
+	    if (!i) {
+		// Require first index to be a valid entry (it MUST contain the headers)
+		if (!jso)
+		    break;
 		jsaRow = YOBJECT(JsArray,jso);
-	    if (jsaRow) {
-		const JsArray* a = i ? YOBJECT(JsArray,jso) : jsaRow;
-		if (!a)
-		    continue;
-		if (i) {
-		    row++;
-		    unsigned int n = a->length();
-		    if (n > cols)
-			n = cols;
-		    ObjList* hdr = &header;
-		    for (unsigned int j = 0; j < n; j++, hdr = hdr->next()) {
-			const NamedString* ns = a->params().getParam(String(j));
-			if (ns)
-			    (static_cast<Header*>(hdr->get()))->addString(*ns,row);
-		    }
-		}
-		else {
-		    for (unsigned int j = 0; j < (unsigned int)a->length(); j++) {
-			const NamedString* ns = a->params().getParam(String(j));
+		if (jsaRow) {
+		    for (unsigned int j = 0; j < (unsigned int)jsaRow->length(); j++) {
+			const NamedString* ns = jsaRow->params().getParam(String(j));
 			if (!ns)
 			    continue;
 			cols++;
-			header.append(new Header(*ns));
+			header.append(new Header(nonObjStr(ns),params,hdrMap));
 		    }
 		    if (!cols)
 			break;
+		    continue;
+		}
+	    }
+	    if (jsaRow) {
+		const JsArray* a = YOBJECT(JsArray,jso);
+		if (!a)
+		    continue;
+		row++;
+		unsigned int n = a->length();
+		if (n > cols)
+		    n = cols;
+		ObjList* hdr = &header;
+		for (unsigned int j = 0; j < n; j++, hdr = hdr->next()) {
+		    const NamedString* ns = a->params().getParam(String(j));
+		    if (ns)
+			(static_cast<Header*>(hdr->get()))->addString(nonObjStr(ns),row);
 		}
 		continue;
 	    }
@@ -2324,10 +2393,10 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
 		    continue;
 		Header* h = static_cast<Header*>(header[ns->name()]);
 		if (!h) {
-		    h = new Header(ns->name());
+		    h = new Header(ns->name(),params,hdrMap);
 		    header.append(h);
 		}
-		h->addString(*ns,row);
+		h->addString(nonObjStr(ns),row);
 	    }
 	}
     }
@@ -2340,14 +2409,25 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
 	    jsa = YOBJECT(JsArray,ns);
 	    if (!jsa)
 		continue;
-	    Header* h = new Header(ns->name());
+	    Header* h = new Header(ns->name(),params,hdrMap);
 	    header.append(h);
 	    for (int r = 0; r < jsa->length(); r++) {
 		ns = jsa->params().getParam(String(r));
 		if (ns)
-		    h->addString(*ns,r + 1);
+		    h->addString(nonObjStr(ns),r + 1);
 	    }
 	}
+    }
+    bool forceEmpty = false;
+    bool allHeaders = false;
+    bool optimizeOut = true;
+    bool emptyRow = true;
+    if (params) {
+	forceEmpty = params->getBoolValue(YSTRING("force_empty"));
+	allHeaders = params->getBoolValue(YSTRING("all_headers"));
+	optimizeOut = params->getBoolValue(YSTRING("optimize_output"),true);
+	// Keep old behaviour
+	emptyRow = optimizeOut && params->getBoolValue(YSTRING("dump_empty_row"),true);
     }
     if (!header.skipNull()) {
 	if (!(hdrMap && forceEmpty))
@@ -2355,7 +2435,7 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
 	for (ObjList* o = hdrMap->paramList()->skipNull(); o; o = o->skipNext()) {
 	    NamedString* ns = static_cast<NamedString*>(o->get());
 	    if (ns->name() != JsObject::protoName())
-		header.append(new Header(ns->name()));
+		header.append(new Header(ns->name(),params,0,*ns));
 	}
 	if (!header.skipNull())
 	    return;
@@ -2371,52 +2451,48 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
 	    if (ns->name() == JsObject::protoName())
 		continue;
 	    ObjList* oh = header.find(ns->name());
-	    Header* h = oh ? static_cast<Header*>(oh->remove(false)) : new Header(ns->name());
-	    h->setName(*ns);
+	    Header* h = oh ? static_cast<Header*>(oh->remove(false)) :
+		new Header(ns->name(),params,0,*ns);
 	    hAdd = hAdd->append(h);
 	}
 	if (allHeaders) {
-	    while (true) {
-		ObjList* o = header.skipNull();
-		if (!o)
-		    break;
+	    for (ObjList* o = 0; 0 != (o = header.skipNull()); )
 		hAdd = hAdd->append(o->remove(false));
-	    }
 	}
     }
     str.clear();
-    String tmp;
+    if (!hdrs->skipNull())
+	return;
+    ObjList lines;
+    String* sep = new String;
+    ObjList* add = lines.append(sep);
     unsigned int rows = 0;
+    unsigned int col = 0;
+    unsigned int sp = 0;
+    unsigned int* spPtr = optimizeOut ? &sp : 0;
     for (ObjList* l = hdrs->skipNull(); l; l = l->skipNext()) {
 	Header* h = static_cast<Header*>(l->get());
 	if (rows < h->rows())
 	    rows = h->rows();
-	str.append(h->toString()," ",true);
-	unsigned int sp = h->width() - h->toString().length();
-	if (sp)
-	    str << String(' ',sp);
-	tmp.append(String('-',h->width())," ",true);
+	h->dump(str,0,col++,spPtr);
+	h->dumpSep(*sep);
     }
-    if (!tmp)
+    if (!*sep || !(rows || forceEmpty))
 	return;
-    if (!(rows || forceEmpty))
-	return;
-    str << eol << tmp << eol;
-    for (unsigned int r = 0; r < rows; r++) {
-	tmp.clear();
-	// add each row data
-	for (ObjList* l = hdrs->skipNull(); l; l = l->skipNext()) {
-	    Header* h = static_cast<Header*>(l->get());
-	    const String* s = h->getString(r);
-	    if (!s)
-		s = &String::empty();
-	    tmp.append(*s," ",true);
-	    unsigned int sp = h->width() - s->length();
-	    if (sp)
-		tmp << String(' ',sp);
-	}
-	str << tmp << eol;
+    for (unsigned int r = 1; r <= rows; r++) {
+	col = 0;
+	sp = 0;
+	String* line = new String;
+	for (ObjList* l = hdrs->skipNull(); l; l = l->skipNext())
+	    static_cast<Header*>(l->get())->dump(*line,r,col++,spPtr);
+	if (*line || emptyRow)
+	    add = add->append(line);
+	else
+	    TelEngine::destruct(line);
     }
+    // This will force appending eol at end
+    add = add->append(new String);
+    str.append(lines,eol,true);
 }
 
 // Check and extract arguments from stack
@@ -2848,27 +2924,24 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
     else if (oper.name() == YSTRING("dump_t") || oper.name() == YSTRING("print_t")) {
 	ObjList args;
 	ExpOperation* opObj = 0;
-	ExpOperation* opHdrMap = 0;
+	ExpOperation* hdrMap = 0;
 	ExpOperation* params = 0;
-	if (!extractStackArgs(1,this,stack,oper,context,args,&opObj,&opHdrMap,&params))
+	if (!extractStackArgs(1,this,stack,oper,context,args,&opObj,&hdrMap,&params))
 	    return false;
-	NamedList* hdrMap = 0;
-	bool forceEmpty = false;
-	bool allHeaders = false;
-	JsObject* jso = YOBJECT(JsObject,opHdrMap);
-	if (jso)
-	    hdrMap = jso->nativeParams() ? jso->nativeParams() : &jso->params();
-	jso = YOBJECT(JsObject,params);
-	if (jso) {
-	    jso->getBoolField(YSTRING("force_empty"),forceEmpty);
-	    jso->getBoolField(YSTRING("all_headers"),allHeaders);
-	}
 	String buf;
-	dumpTable(*opObj,buf,"\r\n",hdrMap,forceEmpty,allHeaders);
+	dumpTable(*opObj,buf,"\r\n",getObjParams(hdrMap),getObjParams(params));
 	if (oper.name() == YSTRING("dump_t"))
 	    ExpEvaluator::pushOne(stack,new ExpOperation(buf));
+	else if (buf && Debugger::outputTimestamp())
+	    Output("\r\n%s",buf.safe());
 	else
 	    Output("%s",buf.safe());
+    }
+    else if (oper.name() == YSTRING("dump_t_params")) {
+	JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
+	jso->setBoolField("column_width",true);
+	jso->setBoolField("column_align",true);
+	ExpEvaluator::pushOne(stack,new ExpWrapper(jso,oper.name()));
     }
     else if (oper.name() == YSTRING("debugName")) {
 	if (oper.number() == 0)
