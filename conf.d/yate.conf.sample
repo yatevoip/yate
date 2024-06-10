@@ -257,11 +257,24 @@ h323chan.yate=yes
 ; This section should be the first handled section if you need to apply parameters on this file also
 
 ; max_depth: integer: Maximum file include depth
-; Allowed interval: 3..10
-;max_depth=3
+; Allowed interval: 3..50 if recursive check is enabled, 3..10 otherwise
+;max_depth=10 if recursive check is enabled, 3 otherwise
 
 ; disable_include_silent: boolean: Disable silent include in Configuration files
 ; The '$includesilent' directives of configuration file will be handled as '$include' if this
 ;  parameter is set to boolean true
 ; Same applies for '$includesectionsilent': handled as '$includesection'
 ;disable_include_silent=no
+
+; check_recursive_include: boolean: Enable or disable recursive include of configuration files
+;check_recursive_include=yes
+
+; include_empty: boolean: Handle configuration file include when value is empty (configurared
+;  value or after replacing running parameters)
+; E.g. [$include ${some_param}] will evaluate to empty if 'some_param' is not in engine'r running
+;  parameters list or its value is empty
+; NOTE: Empty value include all configuration files in directory of current file (including itself)
+;include_empty=no
+
+; warnings: boolean: Enable various warnings on configuration file load
+;warnings=yes
