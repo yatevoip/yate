@@ -9889,7 +9889,7 @@ bool DefaultLogic::enableCallActions(const String& id)
 	return false;
     ClientChannel* chan = id.null() ? 0 : ClientDriver::findChan(id);
     DDebug(ClientDriver::self(),DebugInfo,"enableCallActions(%s) chan=%p",
-	id.c_str(),chan);
+	id.safe(),chan);
     NamedList p("");
 
     // Answer/Hangup/Hold

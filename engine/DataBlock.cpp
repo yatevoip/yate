@@ -141,7 +141,7 @@ bool DataBlock::change(unsigned int pos, const void* buf, unsigned int bufLen,
 	return true;
     XDebug("DataBlock",DebugAll,
 	"change(%u,%p,%u,%d,%d,%u) add_len=%u m_data=%p m_length=%u allocated=%u [%p]",
-	pos,buf,bufLen,extra,extraVal,mayOverlap,addLen,m_data,m_length,m_allocated,this);
+	pos,buf,bufLen,extra,extraVal,mayOverlap,added,m_data,m_length,m_allocated,this);
     if (!(buf && bufLen)) {
 	buf = 0;
 	bufLen = 0;
@@ -246,7 +246,7 @@ void DataBlock::resize(unsigned int len, bool keepData, bool reAlloc)
 
 void DataBlock::cut(unsigned int pos, unsigned int len, bool reAlloc)
 {
-    XDebug(DebugAll,"DataBlock::cut(%u,%u,%u,%u) len=%u [%p]",pos,len,reAlloc,m_length,this);
+    XDebug(DebugAll,"DataBlock::cut(%u,%u,%u) len=%u [%p]",pos,len,reAlloc,m_length,this);
     if (!(m_data && len) || pos >= m_length)
 	return;
     if (len > m_length - pos) {

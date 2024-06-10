@@ -317,7 +317,8 @@ bool FIFileData::operator==(const FIFileData& other)
 
 FIFileData* FIFileData::build(const char* file, const char* desc, int* error)
 {
-    XDebug(&__plugin,DebugAll,"FIFileData::build(%s,%s)",file,desc);
+    XDebug(&__plugin,DebugAll,"FIFileData::build(%s,%s)",
+        TelEngine::c_safe(file),TelEngine::c_safe(desc));
     if (TelEngine::null(file))
 	return 0;
     File f;
