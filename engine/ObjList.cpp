@@ -566,6 +566,23 @@ static inline GenObject** vectAlloc(unsigned int n, void* reAlloc = 0)
     return p;
 }
 
+static inline void skipObjSet(GenObject** buf, unsigned int& idx, unsigned int len)
+{
+    for (; idx < len; ++idx) {
+	if (!buf[idx])
+	    return;
+    }
+}
+
+static inline bool skipObjNull(GenObject** buf, unsigned int& idx, unsigned int len)
+{
+    for (; idx < len; ++idx) {
+	if (buf[idx])
+	    return true;
+    }
+    return false;
+}
+
 ObjVector::ObjVector(unsigned int maxLen, bool autodelete, unsigned int allocChunk)
     : m_length(0), m_objects(0), m_delete(autodelete), m_size(0), m_allocChunk(allocChunk)
 {
@@ -693,25 +710,22 @@ unsigned int ObjVector::compact(unsigned int pos, int len)
 	len = m_length - pos;
     else if ((unsigned int)len > m_length - pos)
 	len = m_length - pos;
-    unsigned int n = 0;
     GenObject** buf = m_objects + pos;
-    for (int i = 0; i < len; ++i, ++buf, ++n) {
-	if (*buf)
-	    continue;
-	if (i == len - 1)
+    unsigned int idx = 0;
+    skipObjSet(buf,idx,len);
+    unsigned int n = idx;
+    while (true) {
+	// Current index is NULL. Skip NULLs
+	unsigned int destIdx = idx;
+	if (!skipObjNull(buf,idx,len))
 	    break;
-	GenObject** b = 0;
-	for (int j = i + 1; j < len; ++j) {
-	    if (!buf[j])
-		continue;
-	    b = buf + j;
-	    i = j;
-	    break;
-	}
-	if (!b)
-	    break;
-	*buf = *b;
-	*b = 0;
+	// Current index is not NULL. Count and skip non NULLs
+	unsigned int srcIdx = idx;
+	skipObjSet(buf,idx,len);
+	unsigned int move = idx - srcIdx;
+	DataBlock::moveData(buf,objSize(len),objSize(move),objSize(destIdx),objSize(srcIdx),0);
+	n += move;
+	idx = destIdx + move;
     }
     return n;
 }
@@ -757,11 +771,29 @@ int ObjVector::index(const String& str) const
     return -1;
 }
 
-int ObjVector::indexFree(bool first) const
+int ObjVector::indexFree(bool fromStart, bool beforeNonNull) const
 {
     if (!m_objects)
 	return -1;
-    if (first) {
+    if (beforeNonNull) {
+	if (fromStart) {
+	    if (!m_objects[0]) {
+		unsigned int i = 1;
+		while (i < m_length && !m_objects[i])
+		    i++;
+		return i - 1;
+	    }
+	}
+	else {
+	    int i = m_length - 1;
+	    if (!m_objects[i--]) {
+		while (i >= 0 && !m_objects[i])
+		    i--;
+		return i + 1;
+	    }
+	}
+    }
+    else if (fromStart) {
 	for (unsigned int i = 0; i < m_length; ++i)
 	    if (!m_objects[i])
 		return i;

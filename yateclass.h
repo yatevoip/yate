@@ -2604,13 +2604,29 @@ public:
     bool set(GenObject* obj, unsigned int index);
 
     /**
-     * Append NULL items in vector
+     * Append an object to vector
      * @param obj Object to store in vector
      * @return True for success, false on failure (memory allocation error)
      */
     inline bool appendObj(GenObject* obj) {
 	    unsigned int idx = length();
-	    return idx < resize(length() + 1,true) && set(obj,idx);
+	    return idx < resize(length() + 1,true) && (!obj || set(obj,idx));
+	}
+
+    /**
+     * Append an object to vector. Trye to use a free (NULL) entry
+     * @param obj Object to store in vector
+     * @param fromStart True to check from vector start, false to check from vector end
+     *  in backward direction
+     * @param beforeNonNull Stop on first NULL object before first non NULL object
+     * @return True for success, false on failure (memory allocation error)
+     */
+    inline bool appendObj(GenObject* obj, bool fromStart, bool beforeNonNull = false) {
+	    int idx = indexFree(fromStart,beforeNonNull);
+	    if (idx < 0)
+		return appendObj(obj);
+	    set(obj,idx);
+	    return true;
 	}
 
     /**
@@ -2642,10 +2658,12 @@ public:
 
     /**
      * Get the position in vector of the first or last NULL object
-     * @param first Ture for first free index, false for last
-     * @return Index of object in vector, -1 if empty or full
+     * @param fromStart True to check from vector start, false to check from vector end
+     *  in backward direction
+     * @param beforeNonNull Stop on first NULL object before first non NULL object
+     * @return Index of object in vector, -1 if not found
      */
-    int indexFree(bool first) const;
+    int indexFree(bool fromStart, bool beforeNonNull = false) const;
 
     /**
      * Indexing operator with unsigned parameter
