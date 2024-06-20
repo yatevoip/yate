@@ -438,7 +438,7 @@ RegfilePlugin::~RegfilePlugin()
 
 void RegfilePlugin::initialize()
 {
-    Output("Initializing module Register from file");
+    Output("Initializing module Registration from file");
     Lock lock(s_mutex);
     s_cfg.load();
     bool first = !m_init;
