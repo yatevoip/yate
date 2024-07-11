@@ -464,16 +464,21 @@ public:
 	{}
     inline ~SharedObjList()
 	{ clear(); }
-    inline bool set(SharedJsObject* jsh) {
+    inline bool set(SharedJsObject* jsh, bool force = true) {
 	    if (!(jsh && jsh->getObject() && jsh->ref()))
 		return false;
 	    WLock lck(m_lock);
 	    ObjList* exist = m_objects.find(jsh->name());
 	    GenObject* old = 0;
-	    if (exist)
-		old = exist->set(jsh,false);
-	    else
+	    if (!exist)
 		m_objects.append(jsh);
+	    else if (force)
+		old = exist->set(jsh,false);
+	    else {
+		lck.drop();
+		TelEngine::destruct(jsh);
+		return false;
+	    }
 #ifdef JS_DEBUG_SharedJsObject
 	    Debug(&__plugin,DebugAll,"SharedObjList(%s) %s %s=(%p) [%p]",
 		c_str(),(exist ? "replaced" : "added"),jsh->name().c_str(),jsh,this);
@@ -661,6 +666,7 @@ public:
 	    params().addParam(new ExpFunction("set"));
 	    params().addParam(new ExpFunction("add"));
 	    params().addParam(new ExpFunction("sub"));
+	    params().addParam(new ExpFunction("create"));
 	    params().addParam(new ExpFunction("clear"));
 	    params().addParam(new ExpFunction("clearAll"));
 	    params().addParam(new ExpFunction("exists"));
@@ -708,6 +714,7 @@ public:
 	    XDebug(DebugAll,"SharedObjectList() [%p]",this);
 	    params().addParam(new ExpFunction("set"));
 	    params().addParam(new ExpFunction("get"));
+	    params().addParam(new ExpFunction("create"));
 	    params().addParam(new ExpFunction("clear"));
 	    params().addParam(new ExpFunction("clearAll"));
 	    params().addParam(new ExpFunction("exists"));
@@ -3366,13 +3373,21 @@ bool JsEngine::setEvent(ObjList& stack, const ExpOperation& oper, GenObject* con
     const ExpFunction* callback = getFunction(args[0]);
     if (!callback)
 	return false;
-    unsigned int interval = args[1]->toInteger();
-    int type = time ? JsEvent::EvTime : interval;
-    if (!time) {
-	if (type == JsEvent::EvTime || !lookup(type,JsEvent::s_evName))
-	    return false;
+    unsigned int interval = 0;
+    int type = 0;
+    if (time) {
+	interval = args[1]->toInteger();
+	type = JsEvent::EvTime;
     }
-    if (!time) {
+    else {
+	type = lookup(*args[1],JsEvent::s_evName);
+	if (!type) {
+	    int tmp = args[1]->toInteger();
+	    if (lookup(tmp,JsEvent::s_evName))
+		type = tmp;
+	}
+	if (!type || type == JsEvent::EvTime)
+	    return false;
 	// We can notify reinit to tracked scripts only
 	ScriptInfo* si = ScriptInfo::get(context);
 	if (!(si && (si->type() == ScriptInfo::Static || si->type() == ScriptInfo::Dynamic))) {
@@ -3531,6 +3546,14 @@ bool JsShared::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	else
 	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
+    else if (oper.name() == YSTRING("create")) {
+	// create(name[,value])
+	ExpOperVector args;
+	if (!extractStackArgs(1,0,args,this,stack,oper,context))
+	    return false;
+	if (m_vars)
+	    m_vars->create(*args[0],TelEngine::c_safe(args[1]));
+    }
     else if (oper.name() == YSTRING("clear")) {
 	if (oper.number() != 1)
 	    return false;
@@ -3629,8 +3652,10 @@ bool JsSharedObjects::runNative(ObjList& stack, const ExpOperation& oper, GenObj
     XDebug(&__plugin,DebugAll,"JsSharedObjects::runNative '%s'(" FMT64 ")",
 	oper.name().c_str(),oper.number());
     ExpOperVector args;
-    if (oper.name() == YSTRING("set")) {
+    bool set = oper.name() == YSTRING("set");
+    if (set || oper.name() == YSTRING("create")) {
 	// set(name,obj[,persistent[,assignPropsFlags]])
+	// create(name,obj[,persistent[,assignPropsFlags]])
 	if (!(extractStackArgs(2,0,args,this,stack,oper,context) && *args[0]))
 	    return false;
 	JsObject* jso = JsParser::objPresent(*args[1]);
@@ -3642,7 +3667,8 @@ bool JsSharedObjects::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 	    owner = m_owner;
 	SharedJsObject* jsh = new SharedJsObject(ok,*args[0],jso,owner,
 	    args[3] ? args[3]->valInteger() : 0,context);
-	JsGlobal::s_sharedObj.set(jsh);
+	if (!JsGlobal::s_sharedObj.set(jsh,set))
+	    ok = -1;
 	TelEngine::destruct(jsh);
 	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)ok));
     }
