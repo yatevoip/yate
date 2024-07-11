@@ -11511,6 +11511,7 @@ public:
 	FBindToIface         = 0x0004, // Bind to specific interface for non IPv6
 	FEfficientSelect     = 0x0008, // Efficient select() is available
 	FExclusiveAddrUse    = 0x0010, // Exclusive access may be indicated in reuse
+	FReusePort           = 0x0020, // Port reuse (bind on same port)
     };
 
     /**
@@ -11693,10 +11694,14 @@ public:
      * Set the local address+port reuse flag of the socket.
      * This method should be called before bind() or it will have no effect.
      * @param reuse True if other sockets may listen on same address+port
-     * @param exclusive Grant exclusive access to the address
+     * @param exclusive Grant exclusive access to the address. Function will fail if exclusive is
+     *  requested and feature is not available
+     * @param setPort Set port reuse flag also. Function will fail if reuse is requested and port
+     *  reuse feature is not available
      * @return True if operation was successfull, false if an error occured
+     * NOTE: Socket error is not set if feature is not available
      */
-    virtual bool setReuse(bool reuse = true, bool exclusive = false);
+    virtual bool setReuse(bool reuse = true, bool exclusive = false, bool setPort = false);
 
     /**
      * Set the way closing a socket is handled

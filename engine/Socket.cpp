@@ -1640,6 +1640,9 @@ unsigned int Socket::s_features = 0
 #ifdef SO_EXCLUSIVEADDRUSE
     | FExclusiveAddrUse
 #endif
+#ifdef SO_REUSEPORT
+    | FReusePort
+#endif
 ;
 
 Socket::Socket()
@@ -2271,7 +2274,7 @@ bool Socket::setBlocking(bool block)
 #endif
 }
 
-bool Socket::setReuse(bool reuse, bool exclusive)
+bool Socket::setReuse(bool reuse, bool exclusive, bool setPort)
 {
     int i = reuse ? 1 : 0;
     if (!setOption(SOL_SOCKET,SO_REUSEADDR,&i,sizeof(i)))
@@ -2283,9 +2286,22 @@ bool Socket::setReuse(bool reuse, bool exclusive)
 #else
     if (exclusive) {
 	Debug(DebugMild,"Socket SO_EXCLUSIVEADDRUSE not supported on this platform");
+	clearError();
 	return false;
     }
 #endif
+    if (setPort) {
+#ifdef SO_REUSEPORT
+	if (!setOption(SOL_SOCKET,SO_REUSEPORT,&i,sizeof(i)))
+	    return false;
+#else
+	if (reuse) {
+	    Debug(DebugMild,"Socket SO_REUSEPORT not supported on this platform");
+	    clearError();
+	    return false;
+	}
+#endif
+    }
     return true;
 }
 
