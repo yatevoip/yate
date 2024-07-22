@@ -8494,6 +8494,7 @@ public:
      */
     enum DumpFlags {
 	NoInitialListDesc = 0x00000001,  // Do not dump list description at depth 0
+	DumpXmlStr        = 0x00000002,  // Used in dump(): dump string in xml format
     };
 
     /**
@@ -8543,6 +8544,14 @@ public:
 	unsigned int depth = 0) const;
 
     /**
+     * Dump an item in XML format
+     * @param mi Item to dump
+     * @param depth Re-enter depth
+     * @return XmlElement pointer, NULL if not dumped
+     */
+    virtual GenObject* dumpXml(const MatchingItemBase* mi, unsigned int depth = 0) const;
+
+    /**
      * Dump an item
      * @param mi Item to dump
      * @param buf Destination buffer
@@ -8558,6 +8567,17 @@ public:
 	    return tmp.dump(mi,buf,indent,origIndent);
 	}
 
+    /**
+     * Dump an item
+     * @param mi Item to dump
+     * @param params Optional dumper parameters parameters
+     * @return XmlElement pointer, NULL if not dumped
+     */
+    static inline GenObject* dumpItemXml(const MatchingItemBase* mi, const NamedList* params = 0) {
+	    MatchingItemDump tmp(params);
+	    return tmp.dumpXml(mi);
+	}
+
     unsigned int m_flags;                // Dump flags
     char m_rexEnclose;                   // Regexp enclose char
     char m_strEnclose;                   // String enclose char
@@ -8566,6 +8586,114 @@ public:
     char m_caseInsentive;                // Case insensitive match value
     char m_regexpBasic;                  // Basic POSIX regexp value
     char m_regexpExtended;               // Extended POSIX regexp value
+};
+
+/**
+ * This class holds matching item load parameters
+ * @short Matching item load parameters
+ */
+class YATE_API MatchingItemLoad : public String
+{
+    YCLASS(MatchingItemLoad,String)
+public:
+    /**
+     * Load behaviour flags
+     */
+    enum LoadFlags {
+	RexBasic           = 0x00000001, // Load basic POSIX regular expressions
+	RexDetect          = 0x00000002, // Detect regular expression if value starts with ^
+                                         // Used when loading from parameters list
+	RexDetectNegated   = 0x00000004, // Detect negated regular expression if value ends with ^
+                                         // Used when loading from parameters list
+	RexValidate        = 0x00000008, // Validate regular expressions
+	NameReqSimple      = 0x00000010, // Request name of the parameter to match
+                                         // Used when loading from XML
+	IgnoreFailed       = 0x00000020, // Ignore failed to load items
+	ListAny            = 0x00000040, // Default 'any' (not match all) parameter value when loading a list 
+                                         // Used when loading from parameters list
+	PrivateFlag        = 0x100000000,// Private flag to be used for derived classes
+	DefaultFlags = RexDetect | RexDetectNegated | NameReqSimple,
+    };
+
+    /**
+     * Item flags
+     */
+    enum ItemFlags {
+	ItemNegated         = 0x00000001,// Matching is negated
+	ItemCaseInsensitive = 0x00000002,// Matching is case insensitive
+	ItemBasic           = 0x00000004,// Matching regexp: use basic POSIX
+	ItemAny             = 0x00000008,// Matching list: match any
+	ItemPrivateFlag     = 0x00010000,// Private flag to be used for custom matching
+    };
+
+    /**
+     * Constructor
+     * @param flags Optional load flags
+     * @param name Optional name
+     */
+    inline MatchingItemLoad(uint64_t flags = DefaultFlags, const char* name = 0)
+	: String(name), m_flags(flags), m_ignore(0), m_allow(0), m_dbg(0)
+	{}
+
+    /**
+     * Load matching item(s)
+     * Parameters prefix is formed from 'prefix' + ':' + our_string + ':' + 'suffix'
+     * @param params Parameters list
+     * @param error Optional pointer to error string
+     * @param prefix Optional parameters prefix
+     * @param suffix Optional parameters suffix
+     * @return MatchingItemBase pointer, NULL if none loaded
+     */
+    virtual MatchingItemBase* load(const NamedList& params, String* error = 0,
+	const char* prefix = 0, const char* suffix = 0) const;
+
+    /**
+     * Load matching item(s) from XML description
+     * @param str XML string
+     * @param error Optional pointer to error string
+     * @return MatchingItemBase pointer, NULL if none loaded
+     */
+    virtual MatchingItemBase* loadXml(const String& str, String* error = 0) const;
+
+    /**
+     * Load matching item(s) from XML description
+     * @param gen XmlElement object
+     * @param error Optional pointer to error string
+     * @return MatchingItemBase pointer, NULL if none loaded
+     */
+    virtual MatchingItemBase* loadXml(const GenObject* gen, String* error = 0) const;
+
+    /**
+     * Retrieve load flags dictionary
+     * @return TokenDict64 pointer
+     */
+    static const TokenDict64* loadFlags();
+
+    /**
+     * Retrieve item flags dictionary
+     * @return TokenDict pointer
+     */
+    static const TokenDict* itemFlags();
+
+    uint64_t m_flags;                    // Load flags
+    ObjList* m_ignore;                   // Optional list of mathing names to ignore (blacklist)
+    ObjList* m_allow;                    // Optional list of mathing names to allow (whitelist)
+    DebugEnabler* m_dbg;                 // Optional pointer to DebugEnabler to be used to put errors
+
+private:
+    inline bool flagSet(uint64_t mask) const
+	{ return 0 != (m_flags & mask); }
+    inline int emptyNameAllow(String* error) const {
+	    if (!flagSet(NameReqSimple))
+		return 0;
+	    if (flagSet(IgnoreFailed))
+		return 1;
+	    if (error)
+		error->printf("empty parameter match name");
+	    return -1;
+	}
+    inline bool ignore(const String& name) const
+	{ return (m_ignore && m_ignore->find(name)) || (m_allow && !m_allow->find(name)); }
 };
 
 /**
@@ -8706,6 +8834,15 @@ public:
 	const String& indent = String::empty(), const String& origIndent = String::empty(),
 	unsigned int depth = 0) const
 	{ return buf; }
+
+    /**
+     * Dump this item in XML format
+     * @param dump Optional dumper
+     * @param depth Re-enter depth
+     * @return XmlElement pointer, NULL if not dumped
+     */
+    virtual GenObject* dumpXml(const MatchingItemDump* dump = 0, unsigned int depth = 0) const
+	{ return 0; }
 
     /**
      * Retrieve item name (suitable for list retrieval)
@@ -9036,6 +9173,20 @@ public:
      */
     inline bool append(MatchingItemBase* item, unsigned int overAlloc = 1)
 	{ return change(item,-1,false,overAlloc); }
+
+    /**
+     * Append a list of items to the list
+     * @param list Items list
+     */
+    inline void append(ObjList& list) {
+	    ObjList* first = list.skipNull();
+	    if (!first)
+		return;
+	    unsigned int count = first->count();
+	    append(static_cast<MatchingItemBase*>(first->remove(false)),count - 1);
+	    while (0 != (first = first->skipNull()))
+		append(static_cast<MatchingItemBase*>(first->remove(false)),0);
+	}
 
     /**
      * Set an item at given position
