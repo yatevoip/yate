@@ -518,13 +518,14 @@ MatchingItemBase* MatchingItemLoad::loadXml(const String& str, String* error) co
     if (!str)
 	return 0;
     XmlDomParser parser("MatchingItemLoad",true);
-    parser.parse(str);
-    XmlElement* xml = parser.fragment()->popElement();
-    if (!xml) {
+    if (!parser.parse(str)) {
 	if (error && !flagSet(IgnoreFailed))
 	    error->printf("invalid xml error='%s'",parser.getError());
 	return 0;
     }
+    XmlElement* xml = parser.fragment()->popElement();
+    if (!xml)
+	return 0;
     String e;
     ObjList items;
     ObjList* add = &items;
