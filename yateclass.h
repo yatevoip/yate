@@ -2357,9 +2357,10 @@ public:
      * @param dest Destination list. Create a new one if not given
      * @param lock Optional Lockable to protect the operation. A RWLock will be write locked
      * @param maxwait Time in microseconds to wait for locking, -1 wait forever
+     * @param compact If true, empty elements will not be moved to destination
      * @return ObjList pointer ('dest' if given). The caller is owning the new list
      */
-    ObjList* move(ObjList* dest, Lockable* lock = 0, long maxwait = -1);
+    ObjList* move(ObjList* dest, Lockable* lock = 0, long maxwait = -1, bool compact = false);
 
     /**
      * Reference all items in this into another one
@@ -8206,6 +8207,23 @@ public:
      * @return Number of replacements made, -1 if an error occured
      */
     int replaceParams(String& str, bool sqlEsc = false, char extraEsc = 0) const;
+
+    /**
+     * Move all parameters from a NamedList to another
+     * @param dest NamedList to where to move the parameters. If 0, a new one will
+       be created
+       @param lock Optional Lockable to protect the operation. A RWLock will be write locked.
+       @param maxwait Time in microseconds to wait for locking, -1 wait forever
+       @param compact True to skip over empty list entries
+     * @return NamedList pointer ('dest' if given). The caller is owning the new list
+    */
+    inline NamedList* moveParams(NamedList* dest, Lockable* lock = 0, long maxwait = -1, bool compact = false)
+    {
+	if (!dest)
+	    dest = new NamedList("");
+	m_params.move(dest->paramList(),lock,maxwait,compact);
+	return dest;
+    }
 
     /**
      * Dumps the name and all parameters to a string in a human readable format.

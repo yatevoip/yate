@@ -430,16 +430,37 @@ void ObjList::compact(Lockable& lock, long maxwait)
     compact();
 }
 
-ObjList* ObjList::move(ObjList* dest, Lockable* lock, long maxwait)
+ObjList* ObjList::move(ObjList* dest, Lockable* lock, long maxwait, bool compact)
 {
     if (!dest)
 	dest = new ObjList;
     ObjList* add = dest;
     Lock lck(lock,maxwait,false);
-    for (ObjList* o = skipNull(); o; o = o->skipNull()) {
-	bool del = o->autoDelete();
-	add = add->append(o->remove(false));
-	add->setDelete(del);
+    if (compact) {
+	for (ObjList* o = skipNull(); o; o = o->skipNull()) {
+	    bool del = o->autoDelete();
+	    add = add->append(o->remove(false));
+	    add->setDelete(del);
+	}
+    }
+    else {
+	// we move the object from the start of the list
+	// in the last element of the destination list if empty,
+	// otherwise, we create a new objlist.
+	// m_next from the source is set as m_next of the last
+	// entry
+	ObjList* l = dest->last();
+	if (m_obj) {
+	    if (!l->get())
+		l->m_obj = m_obj;
+	    else
+		l = l->append(m_obj);
+	    l->m_delete = m_delete;
+	    m_obj = 0;
+	}
+	// move m_next to the m->next of the last element
+	l->m_next = m_next;
+	m_next = 0;
     }
     return dest;
 }
