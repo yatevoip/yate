@@ -193,8 +193,8 @@ private:
 class CipherHandler : public MessageHandler
 {
 public:
-    inline CipherHandler()
-	: MessageHandler("engine.cipher")
+    inline CipherHandler(const char* trackName)
+	: MessageHandler("engine.cipher",100,trackName)
 	{ }
     virtual bool received(Message& msg);
 };
@@ -929,7 +929,7 @@ void OpenSSL::initialize()
 	m_handler = new SslHandler;
 	Engine::install(m_handler);
 #if !defined(OPENSSL_NO_AES) || !defined(OPENSSL_NO_DES)
-	Engine::install(new CipherHandler);
+	Engine::install(new CipherHandler(name()));
 #endif
     }
 
