@@ -3265,7 +3265,7 @@ bool CallRouteQoS::get(int query, String& result)
   * CallMonitor
   */
 CallMonitor::CallMonitor(const NamedList* sect, unsigned int priority)
-      : MessageHandler("call.cdr",priority),
+      : MessageHandler("call.cdr",priority,__plugin.name()),
 	Thread("Call Monitor"),
 	m_checkTime(3600),
 	m_notifTime(0), m_inCalls(0), m_outCalls(0), m_first(true),
