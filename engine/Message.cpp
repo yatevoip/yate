@@ -664,24 +664,59 @@ bool MessageDispatcher::setHook(MessagePostHook* hook, bool remove)
     return true;
 }
 
-unsigned int MessageDispatcher::fillHandlersInfo(bool byName, const String& match,
-    String* details, unsigned int* total)
+static inline bool matchHandler(const MessageHandler& h, const String* nameMatch,
+    const String* trackNameMatch)
+{
+    return (!nameMatch || nameMatch->matches((const String&)(h)))
+	&& (!trackNameMatch || trackNameMatch->matches(h.trackNameOnly()));
+}
+
+unsigned int MessageDispatcher::fillHandlersInfo(const String* nameMatch,
+    const String* trackNameMatch, ObjList* details, unsigned int* total)
 {
     unsigned int n = 0;
     unsigned int matched = 0;
-    String tmp;
     RLock lck(m_handlersLock);
     for (ObjList* o = m_handlers.skipNull(); o; o = o->skipNext()) {
 	n++;
-	MessageHandler *h = static_cast<MessageHandler*>(o->get());
-	if (!match.matches(byName ? (const String&)(*h): h->trackNameOnly()))
+	MessageHandler* h = static_cast<MessageHandler*>(o->get());
+	if (!matchHandler(*h,nameMatch,trackNameMatch))
 	    continue;
 	matched++;
 	if (!details)
 	    continue;
-	tmp.printf("%s=%u|%s|%s",h->safe(),h->priority(),h->trackNameOnly().safe(),
+	String* tmp = new String;
+	tmp->printf("%s=%u|%s|%s",h->safe(),h->priority(),h->trackNameOnly().safe(),
 	    h->filter() ? "yes" : "no");
-	details->append(tmp,",");
+	details = details->append(tmp);
+    }
+    if (total)
+	*total = n;
+    return matched;
+}
+
+unsigned int MessageDispatcher::dumpHandlersInfo(const String* nameMatch,
+    const String* trackNameMatch, ObjList& buf, unsigned int* total)
+{
+    ObjList* add = &buf;
+    unsigned int n = 0;
+    unsigned int matched = 0;
+    RLock lck(m_handlersLock);
+    for (ObjList* o = m_handlers.skipNull(); o; o = o->skipNext()) {
+	n++;
+	MessageHandler* h = static_cast<MessageHandler*>(o->get());
+	if (!matchHandler(*h,nameMatch,trackNameMatch))
+	    continue;
+	matched++;
+	String* tmp = new String;
+	tmp->printf("%s priority=%u trackname='%s'",h->safe(),h->priority(),
+	    h->trackNameOnly().safe());
+	if (h->filter()) {
+	    String tmp2;
+	    *tmp << "\r\n  Filter:"
+		<< MatchingItemDump::dumpItem(h->filter(),tmp2,"\r\n  ","  ");
+	}
+	add = add->append(tmp);
     }
     if (total)
 	*total = n;

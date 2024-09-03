@@ -985,15 +985,29 @@ public:
      * Enable or disable message events time (queued / dispatch)
      * @param on True to enable, false to disable
      */
-    inline void traceTime(bool on = false)
+    inline void traceTime(bool on)
 	{ m_traceTime = on; }
+
+    /**
+     * Retrieve message events time (queued / dispatch) trace value
+     * @return True if enabled, false if disabled
+     */
+    inline bool traceTime() const
+	{ return m_traceTime; }
 
     /**
      * Enable or disable message handler duration
      * @param on True to enable, false to disable
      */
-    inline void traceHandlerTime(bool on = false)
+    inline void traceHandlerTime(bool on)
 	{ m_traceHandlerTime = on; }
+
+    /**
+     * Retrieve message handler duration trace value
+     * @return True if enabled, false if disabled
+     */
+    inline bool traceHandlerTime() const
+	{ return m_traceHandlerTime; }
 
     /**
      * Clear all the message handlers and post-dispatch hooks
@@ -1100,15 +1114,28 @@ public:
     bool setHook(MessagePostHook* hook, bool remove = false);
 
     /**
-     * Fill handlers status info
-     * @param matchName True to match message name, false to match handler trackname
-     * @param match Value to match. May be a regular expression
-     * @param details Optional pointer to string to be filled with details
+     * Fill handlers status info.
+     * Match all if 'nameMatch' and 'trackNameMatch' are both NULL
+     * @param nameMatch Message name match. NULL if not used
+     * @param trackNameMatch Message handler track name match. NULL if not used
+     * @param details Optional pointer to list to be filled with details
      * @param total Optional pointer to data to be filled with total number of handlers
      * @return The number of matched handlers
      */
-    unsigned int fillHandlersInfo(bool matchName, const String& match, String* details = 0,
-	unsigned int* total = 0);
+    unsigned int fillHandlersInfo(const String* nameMatch, const String* trackNameMatch,
+	ObjList* details = 0, unsigned int* total = 0);
+
+    /**
+     * Dump handlers status info.
+     * Match all if 'nameMatch' and 'trackNameMatch' are both NULL
+     * @param nameMatch Message name match. NULL if not used
+     * @param trackNameMatch Message handler track name match. NULL if not used
+     * @param buf Destination for built strings
+     * @param total Optional pointer to data to be filled with total number of handlers
+     * @return The number of matched handlers
+     */
+    unsigned int dumpHandlersInfo(const String* nameMatch, const String* trackNameMatch,
+	ObjList& buf, unsigned int* total = 0);
 
 protected:
     /**

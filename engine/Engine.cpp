@@ -549,21 +549,27 @@ bool EngineStatusHandler::received(Message &msg)
 	if (sel.startSkip("dispatcher")) {
 	    bool byMsg = sel.startSkip("handlers");
 	    if ((byMsg || sel.startSkip("handlers-trackname")) && sel) {
-		String str;
 		unsigned int count = 0;
 		unsigned int total = 0;
+		ObjList data;
 		MessageDispatcher* d = Engine::dispatcher();
 		if (d) {
-		    if (sel[0] == '^')
-			count = d->fillHandlersInfo(byMsg,Regexp(sel),details ? &str : 0,&total);
-		    else
-			count = d->fillHandlersInfo(byMsg,sel,details ? &str : 0,&total);
+		    const String* match = &sel;
+		    Regexp rex;
+		    if (sel[0] == '^') {
+			rex = sel;
+			match = &rex;
+		    }
+		    count = d->fillHandlersInfo(byMsg ? match : 0,byMsg ? 0 : match,
+			details ? &data : 0,&total);
 		}
 		msg.retValue()
 		    << "name=dispatcher,type=system,format=Priority|TrackName|Filtered;"
 		    << "handlers=" << total << ",count=" << count;
-		if (details)
-		    msg.retValue() << ';' << str;
+		if (details) {
+		    String str;
+		    msg.retValue() << ';' << str.append(data,",");
+		}
 		msg.retValue() << "\r\n";
 		return true;
 	    }
@@ -676,10 +682,20 @@ static const char s_logvOpt[] = "  logview\r\n";
 static const char s_logvMsg[] = "Show log of engine startup and initialization process\r\n";
 static const char s_runpOpt[] = "  runparam name=value\r\n";
 static const char s_runpMsg[] = "Add a new parameter to the Engine's runtime list\r\n";
-static const char s_dispatcherOpt[] = "  dispatcher {trace_msg_time|trace_msg_handler_time} <on|off>\r\n";
-static const char s_dispatcherMsg[] = "Enable or disable dispatcher debugging options\r\n";
-static const char s_dispatcherStatusOpt[] = "  status dispatcher {handlers|handlers-trackname} <match>\r\n";
-static const char s_dispatcherStatusMsg[] = "Show installed handlers by message name or track name. Matching value starting with ^ is handled as basic regular expression\r\n";
+static const char s_dispatcherHelpShort[] =
+    "  dispatcher {handlers|trace_msg_time|trace_msg_handler_time}\r\n"
+    "  status dispatcher ...\r\n";
+static const char s_dispatcherHelp[] =
+    "  dispatcher trace_msg_time [<on|off>]\r\n"
+    "Enable or disable tracing (internal set) of message queued time\r\n"
+    "  dispatcher trace_msg_handler_time [<on|off>]\r\n"
+    "Enable or disable tracing of time spent by a message in each handler (can be seen in handlers parameter)\r\n"
+    "  dispatcher handlers [name=] [trackname=]\r\n"
+    "Fully show installed message handlers. At least 'name' or 'trackname' is must be given.\r\n"
+    "Matching value starting with ^ is handled as basic regular expression\r\n"
+    "  status dispatcher {handlers|handlers-trackname} <match>\r\n"
+    "Show installed handlers by message name or track name. Matching value starting with ^ is handled as basic regular expression\r\n"
+    ;
 
 // get the base name of a module file
 static String moduleBase(const String& fname)
@@ -839,6 +855,7 @@ void EngineCommand::doCompletion(Message &msg, const String& partLine, const Str
 	    completeOne(msg.retValue(),YSTRING("clear"),partWord);
     }
     else if (partLine == YSTRING("dispatcher")) {
+	completeOne(msg.retValue(),YSTRING("handlers"),partWord);
 	completeOne(msg.retValue(),YSTRING("trace_msg_time"),partWord);
 	completeOne(msg.retValue(),YSTRING("trace_msg_handler_time"),partWord);
     }
@@ -921,16 +938,70 @@ bool EngineCommand::received(Message &msg)
 	    return false;
 	}
 	if (line.startSkip("dispatcher")) {
-	    bool traceMsgTime = line.startSkip("trace_msg_time");
-	    if (traceMsgTime || line.startSkip("trace_msg_handler_time")) {
-		MessageDispatcher* d = Engine::dispatcher();
+	    ObjList tmp;
+	    line.split(tmp,' ',false);
+	    String* cmd = static_cast<String*>(tmp.get());
+	    if (TelEngine::null(cmd))
+		return false;
+	    MessageDispatcher* d = Engine::dispatcher();
+	    ObjList* next = tmp.skipNext();
+	    if (*cmd == YSTRING("trace_msg_time")) {
 		if (d) {
-		    if (traceMsgTime)
-			d->traceTime(line.toBoolean());
-		    else
-			d->traceHandlerTime(line.toBoolean());
+		    if (next && *static_cast<String*>(next->get()))
+			d->traceTime(static_cast<String*>(next->get())->toBoolean());
+		    (msg.retValue() = "Message trace time is ") << (d->traceTime() ? "on" : "off") << "\r\n";
+		}
+		else
+		    msg.retValue() = "Message dispatcher is not available.\r\n";
+		return true;
+	    }
+	    if (*cmd == YSTRING("trace_msg_handler_time")) {
+		if (d) {
+		    if (next && *static_cast<String*>(next->get()))
+			d->traceHandlerTime(static_cast<String*>(next->get())->toBoolean());
+		    (msg.retValue() = "Message trace handler time is ") << (d->traceHandlerTime() ? "on" : "off") << "\r\n";
+		}
+		else
+		    msg.retValue() = "Message dispatcher is not available.\r\n";
+		return true;
+	    }
+	    if (*cmd == YSTRING("handlers")) {
+		String *byName = 0, *byTrackName = 0;
+		for (; next; next = next->skipNext()) {
+		    String* s = static_cast<String*>(next->get());
+		    if (s->startSkip("name=",false)) {
+			if (*s)
+			    byName = s;
+		    }
+		    else if (s->startSkip("trackname=",false)) {
+			if (*s)
+			    byTrackName = s;
+		    }
+		}
+		if (!(byName || byTrackName)) {
+		    msg.retValue() = "Empty name and trackname\r\n";
 		    return true;
 		}
+		Regexp rexName, rexTrack;
+		if (byName && (*byName)[0] == '^') {
+		    rexName = *byName;
+		    byName = &rexName;
+		}
+		if (byTrackName && (*byTrackName)[0] == '^') {
+		    rexTrack = *byTrackName;
+		    byTrackName = &rexTrack;
+		}
+		ObjList data;
+		if (d)
+		    d->dumpHandlersInfo(byName,byTrackName,data);
+		if (data.skipNull()) {
+		    msg.retValue() = "";
+		    msg.retValue().append(data,"\r\n");
+		}
+		else
+		    msg.retValue() = "Empty list";
+		msg.retValue() << "\r\n";
+		return true;
 	    }
 	    return false;
 	}
@@ -1009,7 +1080,7 @@ bool EngineHelp::received(Message &msg)
     const char* opts = (s_nounload ? s_cmdsOptNoUnload : s_cmdsOpt);
     String line = msg.getValue("line");
     if (line.null()) {
-	msg.retValue() << opts << s_evtsOpt << s_logvOpt << s_runpOpt << s_dispatcherOpt;
+	msg.retValue() << opts << s_evtsOpt << s_logvOpt << s_runpOpt << s_dispatcherHelpShort;
 	msg.retValue() << "  version\r\n";
 	return false;
     }
@@ -1022,8 +1093,7 @@ bool EngineHelp::received(Message &msg)
     else if (line == YSTRING("runparam"))
 	msg.retValue() << s_runpOpt << s_runpMsg;
     else if (line == YSTRING("dispatcher"))
-	msg.retValue() << s_dispatcherOpt << s_dispatcherMsg
-	    << s_dispatcherStatusOpt << s_dispatcherStatusMsg;
+	msg.retValue() << s_dispatcherHelp;
     else
 	return false;
     return true;
