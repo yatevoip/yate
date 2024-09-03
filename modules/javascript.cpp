@@ -1328,17 +1328,27 @@ class JsModuleMessage : public Message
     YCLASS(JsModuleMessage,Message)
 public:
     inline JsModuleMessage(const char* name, bool broadcast = false)
-	: Message(name,0,broadcast), m_dispatchedCb(0)
+	: Message(name,0,broadcast), m_dispatchedCb(0), m_accepted(0)
 	{}
     virtual ~JsModuleMessage()
 	{ TelEngine::destruct(m_dispatchedCb); }
     inline bool setDispatchedCallback(const ExpFunction& func, GenObject* context,
-	ExpOperVector& args, unsigned int argsOffs) {
+	ExpOperVector& args, unsigned int argsOffs, const NamedList* params = 0) {
 	    TelEngine::destruct(m_dispatchedCb);
 	    m_dispatchedCb = new JsScriptRunBuild(context,&func,&args,argsOffs);
 	    if (!m_dispatchedCb->valid())
 		TelEngine::destruct(m_dispatchedCb);
+	    else
+		m_accepted = getHandled(params);
 	    return 0 != m_dispatchedCb;
+	}
+    static inline bool checkHandled(const Message& msg, bool handled, int cfg)
+	{ return !cfg || msg.broadcast() || (cfg > 0) == handled; }
+    static inline int getHandled(const NamedList* params) {
+	    if (!params)
+		return 0;
+	    const String& tmp = (*params)[YSTRING("handled")];
+	    return tmp ? (tmp.toBoolean() ? 1 : -1) : 0;
 	}
 
 protected:
@@ -1349,19 +1359,22 @@ protected:
 		Message::dispatched(accepted);
 		return;
 	    }
-	    ScriptRun* runner = d->createRunner();
-	    if (runner) {
-		ObjList args;
-		JsMessage::build(args,this,runner->context(),0,false);
-		args.append(new ExpOperation(accepted));
-		d->callFunction(runner,args,true);
-		TelEngine::destruct(runner);
+	    if (checkHandled(*this,accepted,m_accepted)) {
+		ScriptRun* runner = d->createRunner();
+		if (runner) {
+		    ObjList args;
+		    JsMessage::build(args,this,runner->context(),0,false);
+		    args.append(new ExpOperation(accepted));
+		    d->callFunction(runner,args,true);
+		    TelEngine::destruct(runner);
+		}
 	    }
 	    TelEngine::destruct(d);
 	}
 
-protected:
+private:
     JsScriptRunBuild* m_dispatchedCb;    // Callback for message dispatched
+    int m_accepted;                      // Handle flag 0: any, negative: not handled, positive: handled
 };
 
 class JsHandler;
@@ -1544,19 +1557,29 @@ class JsPostHook : public MessagePostHook, public JsMessageHandle
 public:
     inline JsPostHook(const String& func, const String& id,
 	GenObject* context, unsigned int lineNo, const NamedList* params)
-	: JsMessageHandle(0,(const char*)0,(unsigned int)0,func,context,lineNo,params,id)
+	: JsMessageHandle(0,(const char*)0,(unsigned int)0,func,context,lineNo,params,id),
+	m_handled(JsModuleMessage::getHandled(params))
 	{}
     inline JsPostHook(const String& id, const String& func, const String& desc,
-	const String& handlerContext)
-	: JsMessageHandle(0,id,func,desc,(const char*)0,(unsigned int)0,handlerContext)
+	const String& handlerContext, const NamedList& params)
+	: JsMessageHandle(0,id,func,desc,(const char*)0,(unsigned int)0,handlerContext),
+	m_handled(JsModuleMessage::getHandled(&params))
 	{}
     inline JsPostHook(GenObject* context, const String& id, const String& func,
 	const String& handlerContext, unsigned int lineNo, const NamedList* params)
 	: JsMessageHandle(0,context,id,func,(const char*)0,(unsigned int)0,
-	    handlerContext,lineNo,params)
+	    handlerContext,lineNo,params),
+	m_handled(JsModuleMessage::getHandled(params))
 	{}
-    virtual void dispatched(const Message& msg, bool handled)
-	{ handle((Message&)msg,handled); }
+    virtual void dispatched(const Message& msg, bool handled) {
+	    if (JsModuleMessage::checkHandled(msg,handled,m_handled))
+		handle((Message&)msg,handled);
+	}
+    inline int handled() const
+	{ return m_handled; }
+
+private:
+    int m_handled;                       // Handle flag 0: any, negative: not handled, positive: handled
 };
 
 class JsMessageQueue : public MessageQueue, public ScriptInfoHolder
@@ -3929,7 +3952,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    *static_cast<ExpOperation*>(args[1]),context);
     }
     else if (oper.name() == YSTRING("enqueue")) {
-	// enqueue([callback[,reserved[,callback_params...]])
+	// enqueue([callback[,params[,callback_params...]])
 	ExpOperVector args;
 	if (!extractStackArgs(0,0,args,this,stack,oper,context))
 	    return false;
@@ -3939,7 +3962,7 @@ bool JsMessage::runNative(ObjList& stack, const ExpOperation& oper, GenObject* c
 	    if (m && args[0]) {
 		const ExpFunction* func = getFunction(args[0]);
 		JsModuleMessage* cb = func ? YOBJECT(JsModuleMessage,m) : 0;
-		if (!(cb && cb->setDispatchedCallback(*func,context,args,2)))
+		if (!(cb && cb->setDispatchedCallback(*func,context,args,2,getObjParams(args[1]))))
 		    return false;
 	    }
 	    clearMsg();
@@ -4405,6 +4428,10 @@ bool JsMessage::listHandlers(ObjList& stack, const ExpOperation& oper, GenObject
 	    jso->params().setParam(new ExpOperation(common->handlerContext(),"message_context"));
 	if (h && common->id())
 	    jso->params().setParam(new ExpOperation(common->id(),"id"));
+	if (hPost) {
+	    if (hPost->handled())
+		jso->params().setParam(new ExpOperation(hPost->handled() > 0,"handled"));
+	}
 	jsa->push(new ExpWrapper(jso));
     }
     pushStackResNull(stack,jsa ? new ExpWrapper(jsa,oper.name()) : 0);
@@ -8371,11 +8398,11 @@ void JsGlobal::loadHandlers(const NamedList* sect, bool handler)
 	if (!ns->name() || ns->name().startsWith("handlerparam:"))
 	    continue;
 	// Handler: name=filename,callback,priority,trackname,parameters_prefix,filter,context,script_name
-	// Posthook: id=filename,callback,parameters_prefix,filter,context,msg_name_filter,script_name
+	// Posthook: id=filename,callback,parameters_prefix,filter,context,msg_name_filter,script_name,handled
 	XDebug(&__plugin,DebugAll,"Processing %s %s=%s",what,ns->name().c_str(),ns->safe());
 	String scriptFile, callback, priority, trackName, prefix, filter, context,
-	    scriptName, msgName;
-	String* stringsPost[] = {&scriptFile,&callback,&prefix,&filter,&context,&msgName,&scriptName,0};
+	    scriptName, msgName, handled;
+	String* stringsPost[] = {&scriptFile,&callback,&prefix,&filter,&context,&msgName,&scriptName,&handled,0};
 	String* strings[] = {&scriptFile,&callback,&priority,&trackName,&prefix,&filter,&context,&scriptName,0};
 	String** setStr = handler ? strings : stringsPost;
 	ObjList* params = ns->split(',');
@@ -8430,6 +8457,7 @@ void JsGlobal::loadHandlers(const NamedList* sect, bool handler)
 	    nl.addParam("context",context);
 	    nl.addParam("script_name",scriptName);
 	    nl.addParam("msg_name_filter",msgName);
+	    nl.addParam("handled",handled);
 	}
 	String id;
 	nl.dump(id,"|",'"',true);
@@ -8470,7 +8498,7 @@ void JsGlobal::loadHandlers(const NamedList* sect, bool handler)
 		h->prepare(&filterName,&filterValue,sect,0,trackName,prio);
 	    }
 	    else {
-		hPost = new JsPostHook(id,callback,desc,context);
+		hPost = new JsPostHook(id,callback,desc,context,nl);
 		const NamedString* ns = prefix ? sect->getParam(prefix + "engine.timer") : 0;
 		if (!ns)
 		    hPost->prepare(&filterName,&filterValue,sect,&msgName);
