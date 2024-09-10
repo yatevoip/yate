@@ -2272,13 +2272,13 @@ static void dumpTable(const ExpOperation& oper, String& str, const char* eol,
 		    if (params) {
 			m_titleAlign = getAlign((*params)["column_align_title_" + m_name]);
 			m_dataAlign = getAlign((*params)["column_align_data_" + m_name]);
-			m_width = params->getIntValue("column_width_fixed_" + m_name,0);
+			m_width = params->getIntValue("column_width_fixed_" + m_name,0,0,4096);
 			if (m_width)
 			    m_widthMax = m_width;
 			else {
-			    m_width = params->getIntValue("column_width_min_" + m_name,0);
+			    m_width = params->getIntValue("column_width_min_" + m_name,0,0,4096);
 			    if (!m_width)
-				m_widthMax = params->getIntValue("column_width_max_" + m_name,0);
+				m_widthMax = params->getIntValue("column_width_max_" + m_name,0,0,4096);
 			}
 		    }
 		    const String& t = title ? title : (hdrMap ? (*hdrMap)[m_name] : String::empty());
