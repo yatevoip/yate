@@ -552,11 +552,11 @@ String::String()
     XDebug(DebugAll,"String::String() [%p]",this);
 }
 
-String::String(const char* value, int len)
+String::String(const char* value, int len, const char* extraVal, int extraLen)
     : m_string(0), m_length(0), m_hash(YSTRING_INIT_HASH), m_matches(0)
 {
-    XDebug(DebugAll,"String::String(\"%s\",%d) [%p]",value,len,this);
-    assign(value,len);
+    XDebug(DebugAll,"String::String(\"%s\",%d,\"%s\",%d) [%p]",value,len,extraVal,extraLen,this);
+    assign(value,len,extraVal,extraLen);
 }
 
 String::String(const String& value)
@@ -691,22 +691,31 @@ String::~String()
     }
 }
 
-String& String::assign(const char* value, int len)
+static inline int getAllocLength(const char* val, int len)
+{
+    if (len < 0)
+	return ::strlen(val);
+    int l = 0;
+    for (const char* p = val; l < len; l++)
+	if (!*p++)
+	    break;
+     return l;
+}
+
+String& String::assign(const char* value, int len, const char* extraVal, int extraLen)
 {
     if (len && value && *value) {
-	if (len < 0)
-	    len = ::strlen(value);
-	else {
-	    int l = 0;
-	    for (const char* p = value; l < len; l++)
-		if (!*p++)
-		    break;
-	    len = l;
-	}
-	if (value != m_string || len != (int)m_length) {
+	len = getAllocLength(value,len);
+	if (extraLen && extraVal && *extraVal)
+	    len += (extraLen = getAllocLength(extraVal,extraLen));
+	else
+	    extraLen = 0;
+	if (value != m_string || len != (int)m_length || extraLen) {
 	    char* data = (char*) ::malloc(len+1);
 	    if (data) {
-		::memcpy(data,value,len);
+		::memcpy(data,value,len - extraLen);
+		if (extraVal)
+		    ::memcpy(data + len - extraLen,extraVal,extraLen);
 		data[len] = 0;
 		char* odata = m_string;
 		m_string = data;
@@ -2481,8 +2490,8 @@ bool Regexp::isCaseInsensitive() const
 }
 
 
-NamedString::NamedString(const char* name, const char* value, int len)
-    : String(value,len), m_name(name)
+NamedString::NamedString(const char* name, const char* value, int len, const char* namePrefix)
+    : String(value,len), m_name(namePrefix ? namePrefix : name,-1,namePrefix ? name : 0)
 {
     XDebug(DebugAll,"NamedString::NamedString(\"%s\",\"%s\") [%p]",name,value,this);
 }

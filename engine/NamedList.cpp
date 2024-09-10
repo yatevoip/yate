@@ -69,11 +69,11 @@ NamedList& NamedList::addParam(NamedString* param)
     return *this;
 }
 
-NamedList& NamedList::addParam(const char* name, const char* value, bool emptyOK)
+NamedList& NamedList::addParam(const char* name, const char* value, bool emptyOK, const char* prefix)
 {
     XDebug(DebugInfo,"NamedList::addParam(\"%s\",\"%s\",%s)",name,value,String::boolText(emptyOK));
     if (emptyOK || !TelEngine::null(value))
-	m_params.append(new NamedString(name, value));
+	m_params.append(new NamedString(name, value, -1, prefix));
     return *this;
 }
 
@@ -99,7 +99,7 @@ NamedList& NamedList::setParam(NamedString* param)
 	o->append(param);
     else
 	m_params.append(param);
-    return *this;   
+    return *this;
 }
 
 static inline NamedString* nlSetParamCreate(NamedList& list, const String& name, ObjList*& append)
@@ -131,7 +131,7 @@ NamedList& NamedList::setParam(const String& name, unsigned int flags, const Tok
     ns->decodeFlags(flags,tokens,unknownflag);
     if (append)
 	append->append(ns);
-    return *this;   
+    return *this;
 }
 
 NamedList& NamedList::setParam(const String& name, uint64_t flags, const TokenDict64* tokens,
@@ -145,7 +145,7 @@ NamedList& NamedList::setParam(const String& name, uint64_t flags, const TokenDi
     ns->decodeFlags(flags,tokens,unknownflag);
     if (append)
 	append->append(ns);
-    return *this;   
+    return *this;
 }
 
 NamedList& NamedList::setParamHex(const String& name, const void* buf, unsigned int len, char sep)
@@ -156,7 +156,7 @@ NamedList& NamedList::setParamHex(const String& name, const void* buf, unsigned 
     ns->hexify((void*)buf,len,sep);
     if (append)
 	append->append(ns);
-    return *this;   
+    return *this;
 }
 
 template <class Obj> NamedList& nlSetParamValue(NamedList& list, const String& name, Obj& value)

@@ -3070,8 +3070,10 @@ public:
      * Creates a new initialized string.
      * @param value Initial value of the string
      * @param len Length of the data to copy, -1 for full string
+     * @param extraVal Optional value to concatenate to the first value
+     * @param extraLen Length of the data to copy from extraVal, -1 for full string
      */
-    String(const char* value, int len = -1);
+    String(const char* value, int len = -1, const char* extraVal = 0, int extraLen = -1);
 
     /**
      * Creates a new initialized string.
@@ -3490,9 +3492,11 @@ public:
      * Assigns a new value to the string from a character block.
      * @param value New value of the string
      * @param len Length of the data to copy, -1 for full string
+     * @param extraVal Optional value to concatenate to the first value
+     * @param extraLen Length of the data to copy from extraVal, -1 for full string
      * @return Reference to the String
      */
-    String& assign(const char* value, int len = -1);
+    String& assign(const char* value, int len = -1, const char* extraVal = 0, int extraLen = -1);
 
     /**
      * Assigns a new value by filling with a repeated character
@@ -5310,8 +5314,9 @@ public:
      * @param name Name of this string
      * @param value Initial value of the string
      * @param len Length of the value, -1 for full string
+     * @param namePrefix Prefix to put in front of the name of this string
      */
-    explicit NamedString(const char* name, const char* value = 0, int len = -1);
+    explicit NamedString(const char* name, const char* value = 0, int len = -1, const char* namePrefix = 0);
 
     /**
      * Retrieve the name of this string.
@@ -7770,9 +7775,36 @@ public:
      * @param name Name of the new string
      * @param value Value of the new string
      * @param emptyOK True to always add parameter, false to skip empty values
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
-    NamedList& addParam(const char* name, const char* value, bool emptyOK = true);
+    NamedList& addParam(const char* name, const char* value, bool emptyOK = true, const char* prefix = 0);
+
+    /**
+     * Append a named string in the parameter list from signed integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @param prefix String prefix for the name
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, int64_t value, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
+
+    /**
+     * Append a named string in the parameter list from unsigned integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @param prefix String prefix for the name
+     * @return Reference to this NamedList
+     */
+    inline NamedList& addParam(const char* name, uint64_t value, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
+	    *static_cast<String*>(ns) = value;
+	    return addParam(ns);
+	}
 
     /**
      * Append a named string in the parameter list from signed integer value
@@ -7780,8 +7812,8 @@ public:
      * @param value Value of the string
      * @return Reference to this NamedList
      */
-    inline NamedList& addParam(const char* name, int64_t value) {
-	    NamedString* ns = new NamedString(name);
+    inline NamedList& addParam(const char* name, int32_t value, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
 	    *static_cast<String*>(ns) = value;
 	    return addParam(ns);
 	}
@@ -7792,32 +7824,8 @@ public:
      * @param value Value of the string
      * @return Reference to this NamedList
      */
-    inline NamedList& addParam(const char* name, uint64_t value) {
-	    NamedString* ns = new NamedString(name);
-	    *static_cast<String*>(ns) = value;
-	    return addParam(ns);
-	}
-
-    /**
-     * Append a named string in the parameter list from signed integer value
-     * @param name Name of the string
-     * @param value Value of the string
-     * @return Reference to this NamedList
-     */
-    inline NamedList& addParam(const char* name, int32_t value) {
-	    NamedString* ns = new NamedString(name);
-	    *static_cast<String*>(ns) = value;
-	    return addParam(ns);
-	}
-
-    /**
-     * Append a named string in the parameter list from unsigned integer value
-     * @param name Name of the string
-     * @param value Value of the string
-     * @return Reference to this NamedList
-     */
-    inline NamedList& addParam(const char* name, uint32_t value) {
-	    NamedString* ns = new NamedString(name);
+    inline NamedList& addParam(const char* name, uint32_t value, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
 	    *static_cast<String*>(ns) = value;
 	    return addParam(ns);
 	}
@@ -7828,8 +7836,8 @@ public:
      * @param value Value of the string
      * @return Reference to this NamedList
      */
-    inline NamedList& addParam(const char* name, double value) {
-	    NamedString* ns = new NamedString(name);
+    inline NamedList& addParam(const char* name, double value, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
 	    *static_cast<String*>(ns) = value;
 	    return addParam(ns);
 	}
@@ -7840,8 +7848,8 @@ public:
      * @param value Value of the string
      * @return Reference to this NamedList
      */
-    inline NamedList& addParam(const char* name, bool value)
-	{ return addParam(name,String::boolText(value)); }
+    inline NamedList& addParam(const char* name, bool value, const char* prefix = 0)
+	{ return addParam(name,String::boolText(value),true,prefix); }
 
     /**
      * Add a named string in the parameter list from encoded flags
@@ -7852,8 +7860,8 @@ public:
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, unsigned int flags, const TokenDict* tokens,
-	bool unknownflag = true) {
-	    NamedString* ns = new NamedString(name);
+	bool unknownflag = true, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
 	    ns->decodeFlags(flags,tokens,unknownflag);
 	    return addParam(ns);
 	}
@@ -7867,8 +7875,8 @@ public:
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, uint64_t flags, const TokenDict64* tokens,
-	bool unknownflag = true) {
-	    NamedString* ns = new NamedString(name);
+	bool unknownflag = true, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
 	    ns->decodeFlags(flags,tokens,unknownflag);
 	    return addParam(ns);
 	}
@@ -7882,8 +7890,8 @@ public:
      * @return Reference to this NamedList
      */
     inline NamedList& addParamHex(const char* name, const void* buf,
-	unsigned int len, char sep = 0) {
-	    NamedString* ns = new NamedString(name);
+	unsigned int len, char sep = 0, const char* prefix = 0) {
+	    NamedString* ns = new NamedString(name,0,0,prefix);
 	    if (buf && len)
 		ns->hexify((void*)buf,len,sep);
 	    return addParam(ns);
