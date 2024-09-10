@@ -45,13 +45,18 @@
 
 
 [instances]
-; Build multiple instances of specified scripts
+; Build multiple instances of specified scripts.
+; The number of script instances is applied on module reload
 ; Each line has to be of the form
 ; name=number of instances
 ; The name must correspond with a [scripts] section entry
 ; Default value is one instance
 ; Examples:
 ;  faxes=3
+; NOTE: When instances are set to more than 1 commenting the instances parameter or
+;  setting it to 0 has no effect.
+;  The module will not change the number of instances.
+;  If you want to set a single instance you need to explicitly set instances to 1
 
 
 [scripts]
@@ -125,7 +130,7 @@ eliza=eliza.js
 ; These posthooks are running using a separate context for each handled message
 ;
 ; Description:
-; id=filename,callback,parameters_prefix,filter,context,msg_name_filter,script_name
+; id=filename,callback,parameters_prefix,filter,context,msg_name_filter,script_name,handled
 ;
 ; Parameters (optional, unless otherwise specified):
 ; id: Ignored
@@ -136,10 +141,11 @@ eliza=eliza.js
 ; msg_name_filter: Message name filter. Same as parameters filter
 ; context: String to be passed to callback function
 ; script_name: Name of the script. Used internally for debug purposes. Use 'filename' if empty
+; handled: Optional, boolean. Call the callback function only if message was handled or not
 ;
 ; Notes:
 ; - The following parameters are used to identify a posthook:
-;   id,filename,callback,filter,context,msg_name_filter,script_name
+;   id,filename,callback,filter,context,msg_name_filter,script_name,handled
 ;   An existing posthook whose identity changed (not found in config) is removed at reload
 
 ; handlerparam:<parameters_prefix>:<param_name>: string: Configure a parameters for a posthook
