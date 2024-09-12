@@ -6073,7 +6073,7 @@ bool JsXPath::runNative(ObjList& stack, const ExpOperation& oper, GenObject* con
 	char q = quot ? (*(String*)quot)[0] : '"';
 	String tmp;
 	XPath::escape(tmp,*str,q,literal ? literal->valBoolean() : true);
-	ExpEvaluator::pushOne(stack,new ExpOperation(tmp,"error"));
+	ExpEvaluator::pushOne(stack,new ExpOperation(tmp,"str"));
     }
     else
 	return JsObject::runNative(stack,oper,context);
