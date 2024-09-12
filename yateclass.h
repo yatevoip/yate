@@ -7810,6 +7810,7 @@ public:
      * Append a named string in the parameter list from signed integer value
      * @param name Name of the string
      * @param value Value of the string
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, int32_t value, const char* prefix = 0) {
@@ -7822,6 +7823,7 @@ public:
      * Append a named string in the parameter list from unsigned integer value
      * @param name Name of the string
      * @param value Value of the string
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, uint32_t value, const char* prefix = 0) {
@@ -7834,6 +7836,7 @@ public:
      * Append a named string in the parameter list from floating point value
      * @param name Name of the string
      * @param value Value of the string
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, double value, const char* prefix = 0) {
@@ -7846,6 +7849,7 @@ public:
      * Add a named string in the parameter list from boolean value
      * @param name Name of the string
      * @param value Value of the string
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, bool value, const char* prefix = 0)
@@ -7872,6 +7876,7 @@ public:
      * @param flags The flags
      * @param tokens The dictionary containing the flags
      * @param unknownflag True (default) to add unknown flags
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, uint64_t flags, const TokenDict64* tokens,
@@ -7886,7 +7891,8 @@ public:
      * @param name Parameter name
      * @param buf Buffer to add
      * @param len Buffer length
-     * @param sep Optiona separamtor (defaults to space)
+     * @param sep Optiona separator (defaults to space)
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParamHex(const char* name, const void* buf,
