@@ -2899,11 +2899,29 @@ public:
 		return data.checkIndex(m_opc);
 	    if (PosLast == m_type)
 		return data.checkPosLast();
-	    if (Text == m_type || Child == m_type) {
-		const String* txt = xml ?
-		    ((Child == m_type) ? xml->childText(m_name) : &(xml->getText())) : 0;
-		return ((!m_opc && txt) || (txt && runOpc(*txt))) ?
-		    XPathProcHandleCont : XPathProcCont;
+	    if (Text == m_type) {
+		// No operator: checking existence only
+		if (!m_opc)
+		    return (xml && xml->getText()) ? XPathProcHandleCont : XPathProcCont;
+		// We have an operator. Check if any item matches
+		ObjList* lst = xml ? xml->getChildren().skipNull() : 0;
+		for (XmlText* t = 0; 0 != (t = XmlFragment::getText(lst));) {
+		    if (runOpc(t->getText()))
+			return XPathProcHandleCont;
+		}
+		return XPathProcCont;
+	    }
+	    if (Child == m_type) {
+		// No operator: checking existence only
+		if (!m_opc)
+		    return (xml && xml->childText(m_name)) ? XPathProcHandleCont : XPathProcCont;
+		// We have an operator. Check if any item matches
+		ObjList* lst = xml ? xml->getChildren().skipNull() : 0;
+		for (XmlElement* x = 0; 0 != (x = XmlFragment::getElement(lst,&m_name));) {
+		    if (runOpc(x->getText()))
+			return XPathProcHandleCont;
+		}
+		return XPathProcCont;
 	    }
 	    if (Attribute == m_type) {
 		const ObjList* o = xml ? xml->attributes().paramList()->skipNull() : 0;
