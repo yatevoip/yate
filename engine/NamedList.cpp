@@ -77,7 +77,21 @@ NamedList& NamedList::addParam(const char* name, const char* value, bool emptyOK
     return *this;
 }
 
-NamedList& NamedList::setParam(NamedString* param)
+static inline void nlClearParam(const String& name, ObjList* lst)
+{
+    lst = lst ? lst->skipNull() : 0;
+    while (lst) {
+        NamedString* ns = static_cast<NamedString*>(lst->get());
+        if (ns->name() == name) {
+	    lst->remove();
+	    lst = lst->skipNull();
+	}
+	else
+	    lst = lst->skipNext();
+    }
+}
+
+NamedList& NamedList::setParam(NamedString* param, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%p) [%p]",param,this);
     if (!param)
@@ -87,6 +101,8 @@ NamedList& NamedList::setParam(NamedString* param)
         NamedString* s = static_cast<NamedString*>(o->get());
         if (s->name() == param->name()) {
 	    o->set(param);
+	    if (clearOther)
+		nlClearParam(param->name(),o->skipNext());
 	    return *this;
 	}
 	ObjList* next = o->skipNext();
@@ -102,122 +118,139 @@ NamedList& NamedList::setParam(NamedString* param)
     return *this;
 }
 
-static inline NamedString* nlSetParamCreate(NamedList& list, const String& name, ObjList*& append)
+static inline NamedString* nlSetParamCreate(NamedList& list, const String& name, bool clearOther)
 {
-    append = list.paramList()->skipNull();
-    while (append) {
+    ObjList* append = list.paramList()->skipNull();
+    if (!append)
+	return static_cast<NamedString*>(list.paramList()->append(new NamedString(name))->get());
+    while (true) {
         NamedString* ns = static_cast<NamedString*>(append->get());
         if (ns->name() == name) {
-	    append = 0;
+	    if (clearOther)
+		nlClearParam(name,append->skipNext());
 	    return ns;
 	}
 	ObjList* next = append->skipNext();
 	if (!next)
-	    return new NamedString(name);
+	    break;
 	append = next;
     }
-    append = list.paramList();
-    return new NamedString(name);
+    return static_cast<NamedString*>(append->append(new NamedString(name))->get());
 }
 
 NamedList& NamedList::setParam(const String& name, unsigned int flags, const TokenDict* tokens,
-    bool unknownflag)
+    bool unknownFlag, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) flags=%u tokens=%p unkFlag=%u [%p]",
-	name.safe(),flags,tokens,unknownflag,this);
-    ObjList* append = 0;
-    NamedString* ns = nlSetParamCreate(*this,name,append);
+	name.safe(),flags,tokens,unknownFlag,this);
+    NamedString* ns = nlSetParamCreate(*this,name,clearOther);
     *static_cast<String*>(ns) = "";
-    ns->decodeFlags(flags,tokens,unknownflag);
-    if (append)
-	append->append(ns);
+    ns->decodeFlags(flags,tokens,unknownFlag);
     return *this;
 }
 
 NamedList& NamedList::setParam(const String& name, uint64_t flags, const TokenDict64* tokens,
-    bool unknownflag)
+    bool unknownFlag, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) flags64=" FMT64U " tokens=%p unkFlag=%u [%p]",
-	name.safe(),flags,tokens,unknownflag,this);
-    ObjList* append = 0;
-    NamedString* ns = nlSetParamCreate(*this,name,append);
+	name.safe(),flags,tokens,unknownFlag,this);
+    NamedString* ns = nlSetParamCreate(*this,name,clearOther);
     *static_cast<String*>(ns) = "";
-    ns->decodeFlags(flags,tokens,unknownflag);
-    if (append)
-	append->append(ns);
+    ns->decodeFlags(flags,tokens,unknownFlag);
     return *this;
 }
 
-NamedList& NamedList::setParamHex(const String& name, const void* buf, unsigned int len, char sep)
+NamedList& NamedList::setParamHex(const String& name, const void* buf, unsigned int len, char sep,
+    bool upCase, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParamHex(%s,%p,%u,%c) [%p]",name.safe(),buf,len,sep,this);
-    ObjList* append = 0;
-    NamedString* ns = nlSetParamCreate(*this,name,append);
-    ns->hexify((void*)buf,len,sep);
-    if (append)
-	append->append(ns);
+    NamedString* ns = nlSetParamCreate(*this,name,clearOther);
+    ns->hexify((void*)buf,len,sep,upCase);
     return *this;
 }
 
-template <class Obj> NamedList& nlSetParamValue(NamedList& list, const String& name, Obj& value)
-{
-    ObjList* append = 0;
-    NamedString* ns = nlSetParamCreate(list,name,append);
-    *static_cast<String*>(ns) = value;
-    if (append)
-	append->append(ns);
-    return list;
+#define nlSetParamValue(name,value,clearOther) { \
+    NamedString* ns = nlSetParamCreate(*this,name,clearOther); \
+    *static_cast<String*>(ns) = value; \
+    return *this; \
 }
 
-NamedList& NamedList::setParam(const String& name, const char* value)
+NamedList& NamedList::setParam(const String& name, const char* value, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam('%s','%s') [%p]",name.c_str(),value,this);
-    return nlSetParamValue(*this,name,value);
+    nlSetParamValue(name,value,clearOther);
 }
 
-NamedList& NamedList::setParam(const String& name, int64_t value)
+NamedList& NamedList::setParam(const String& name, int64_t value, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) INT64=" FMT64 " [%p]",name.c_str(),value,this);
-    return nlSetParamValue(*this,name,value);
+    nlSetParamValue(name,value,clearOther);
 }
 
-NamedList& NamedList::setParam(const String& name, uint64_t value)
+NamedList& NamedList::setParam(const String& name, uint64_t value, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) UINT64=" FMT64U " [%p]",name.c_str(),value,this);
-    return nlSetParamValue(*this,name,value);
+    nlSetParamValue(name,value,clearOther);
 }
 
-NamedList& NamedList::setParam(const String& name, int32_t value)
+NamedList& NamedList::setParam(const String& name, int32_t value, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) INT32=%d [%p]",name.c_str(),value,this);
-    return nlSetParamValue(*this,name,value);
+    nlSetParamValue(name,value,clearOther);
 }
 
-NamedList& NamedList::setParam(const String& name, uint32_t value)
+NamedList& NamedList::setParam(const String& name, uint32_t value, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) UINT32=%u [%p]",name.c_str(),value,this);
-    return nlSetParamValue(*this,name,value);
+    nlSetParamValue(name,value,clearOther);
 }
 
-NamedList& NamedList::setParam(const String& name, double value)
+NamedList& NamedList::setParam(const String& name, double value, bool clearOther)
 {
     XDebug(DebugAll,"NamedList::setParam(%s) DOUBLE=%f [%p]",name.c_str(),value,this);
-    return nlSetParamValue(*this,name,value);
+    nlSetParamValue(name,value,clearOther);
 }
 
 NamedList& NamedList::clearParam(const String& name, char childSep, const String* value)
 {
-    XDebug(DebugInfo,"NamedList::clearParam(\"%s\",'%.1s')",
-	name.c_str(),&childSep);
-    String tmp;
-    if (childSep)
+    XDebug(DebugInfo,"NamedList::clearParam(\"%s\",'%.1s',(%p)'%s')",
+	name.c_str(),&childSep,value,TelEngine::c_safe(value));
+    ObjList* p = &m_params;
+    if (childSep) {
+	String tmp;
 	tmp << name << childSep;
-    ObjList *p = &m_params;
+	while (p) {
+	    NamedString* s = static_cast<NamedString*>(p->get());
+	    if (s && ((s->name() == name) || s->name().startsWith(tmp))
+		&& (!value || value->matches(*s)))
+		p->remove();
+	    else
+		p = p->next();
+	}
+    }
+    else if (value) {
+	while (p) {
+	    NamedString* s = static_cast<NamedString*>(p->get());
+	    if (s && (s->name() == name) && value->matches(*s))
+		p->remove();
+	    else
+		p = p->next();
+	}
+    }
+    else
+	nlClearParam(name,p);
+    return *this;
+}
+
+NamedList& NamedList::clearParamMatch(const Regexp& name, const String* value)
+{
+    XDebug(DebugInfo,"NamedList::clearParamMatch(\"%s\",(%p)'%s')",
+	name.c_str(),value,TelEngine::c_safe(value));
+    ObjList* p = &m_params;
     while (p) {
-        NamedString *s = static_cast<NamedString *>(p->get());
-        if (s && ((s->name() == name) || s->name().startsWith(tmp))
-	    && (!value || value->matches(*s)))
-            p->remove();
+	NamedString* s = static_cast<NamedString*>(p->get());
+	if (s && name.matches(s->name()) && (!value || value->matches(*s)))
+	    p->remove();
 	else
 	    p = p->next();
     }

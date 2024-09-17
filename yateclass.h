@@ -7860,13 +7860,14 @@ public:
      * @param name Name of the string
      * @param flags The flags
      * @param tokens The dictionary containing the flags
-     * @param unknownflag True (default) to add unknown flags
+     * @param unknownFlag True (default) to add unknown flags
+     * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, unsigned int flags, const TokenDict* tokens,
-	bool unknownflag = true, const char* prefix = 0) {
+	bool unknownFlag = true, const char* prefix = 0) {
 	    NamedString* ns = new NamedString(name,0,0,prefix);
-	    ns->decodeFlags(flags,tokens,unknownflag);
+	    ns->decodeFlags(flags,tokens,unknownFlag);
 	    return addParam(ns);
 	}
 
@@ -7875,14 +7876,14 @@ public:
      * @param name Name of the string
      * @param flags The flags
      * @param tokens The dictionary containing the flags
-     * @param unknownflag True (default) to add unknown flags
+     * @param unknownFlag True (default) to add unknown flags
      * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
     inline NamedList& addParam(const char* name, uint64_t flags, const TokenDict64* tokens,
-	bool unknownflag = true, const char* prefix = 0) {
+	bool unknownFlag = true, const char* prefix = 0) {
 	    NamedString* ns = new NamedString(name,0,0,prefix);
-	    ns->decodeFlags(flags,tokens,unknownflag);
+	    ns->decodeFlags(flags,tokens,unknownFlag);
 	    return addParam(ns);
 	}
 
@@ -7906,88 +7907,98 @@ public:
     /**
      * Set a named string in the parameter list.
      * @param param Parameter to set or add
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    NamedList& setParam(NamedString* param);
+    NamedList& setParam(NamedString* param, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list.
      * @param name Name of the string
      * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    NamedList& setParam(const String& name, const char* value);
-
-     /**
-     * Set a named string in the parameter list from signed integer value
-     * @param name Name of the string
-     * @param value Value of the string
-     * @return Reference to this NamedList
-     */
-    NamedList& setParam(const String& name, int64_t value);
-
-    /**
-     * Set a named string in the parameter list from unsigned integer value
-     * @param name Name of the string
-     * @param value Value of the string
-     * @return Reference to this NamedList
-     */
-    NamedList& setParam(const String& name, uint64_t value);
+    NamedList& setParam(const String& name, const char* value, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list from signed integer value
      * @param name Name of the string
      * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    NamedList& setParam(const String& name, int32_t value);
+    NamedList& setParam(const String& name, int64_t value, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list from unsigned integer value
      * @param name Name of the string
      * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    NamedList& setParam(const String& name, uint32_t value);
+    NamedList& setParam(const String& name, uint64_t value, bool clearOther = false);
+
+    /**
+     * Set a named string in the parameter list from signed integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, int32_t value, bool clearOther = false);
+
+    /**
+     * Set a named string in the parameter list from unsigned integer value
+     * @param name Name of the string
+     * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
+     * @return Reference to this NamedList
+     */
+    NamedList& setParam(const String& name, uint32_t value, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list from floating point value
      * @param name Name of the string
      * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    NamedList& setParam(const String& name, double value);
+    NamedList& setParam(const String& name, double value, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list from boolean value
      * @param name Name of the string
      * @param value Value of the string
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    inline NamedList& setParam(const String& name, bool value)
-	{ return setParam(name,String::boolText(value)); }
+    inline NamedList& setParam(const String& name, bool value, bool clearOther = false)
+	{ return setParam(name,String::boolText(value),clearOther); }
 
     /**
      * Set a named string in the parameter list from encoded flags
      * @param name Name of the string
      * @param flags The flags
      * @param tokens The dictionary containing the flags
-     * @param unknownflag True (default) to add unknown flags
+     * @param unknownFlag True (default) to add unknown flags
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
     NamedList& setParam(const String& name, unsigned int flags, const TokenDict* tokens,
-	bool unknownflag = true);
+	bool unknownFlag = true, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list from encoded flags
      * @param name Name of the string
      * @param flags The flags
      * @param tokens The dictionary containing the flags
-     * @param unknownflag True (default) to add unknown flags
+     * @param unknownFlag True (default) to add unknown flags
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
     NamedList& setParam(const String& name, uint64_t flags, const TokenDict64* tokens,
-	bool unknownflag = true);
+	bool unknownFlag = true, bool clearOther = false);
 
     /**
      * Set a named string in the parameter list.
@@ -7995,9 +8006,12 @@ public:
      * @param buf Buffer to hexify
      * @param len Buffer length
      * @param sep Optional separator
+     * @param upCase Set to true to use upper case characters in hexa
+     * @param clearOther Clear all other occurences of parameter
      * @return Reference to this NamedList
      */
-    NamedList& setParamHex(const String& name, const void* buf, unsigned int len, char sep = 0);
+    NamedList& setParamHex(const String& name, const void* buf, unsigned int len, char sep = 0,
+	bool upCase = false, bool clearOther = false);
 
     /**
      * Clears all instances of a named string in the parameter list.
@@ -8007,6 +8021,14 @@ public:
      * @return Reference to this NamedList
      */
     NamedList& clearParam(const String& name, char childSep = 0, const String* value = 0);
+
+    /**
+     * Clears all instances of a named string in the parameter list.
+     * @param name Regular expression used to match parameter name
+     * @param value Optional pointer to string used to match parameter's value (may be a regexp)
+     * @return Reference to this NamedList
+     */
+    NamedList& clearParamMatch(const Regexp& name, const String* value = 0);
 
     /**
      * Remove a specific parameter
