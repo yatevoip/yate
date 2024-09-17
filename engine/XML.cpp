@@ -25,6 +25,7 @@ using namespace TelEngine;
 
 const String XmlElement::s_ns = "xmlns";
 const String XmlElement::s_nsPrefix = "xmlns:";
+static const String s_xml("xml");
 static const String s_type("type");
 static const String s_name("name");
 
@@ -343,7 +344,7 @@ bool XmlSaxParser::parseInstruction()
 	    return setError(Incomplete);
 	name = m_buf.substr(0,len);
 	m_buf = m_buf.substr(!endDecl ? len : len + 2);
-	if (name == YSTRING("xml")) {
+	if (name == s_xml) {
 	    if (!endDecl)
 		return parseDeclaration();
 	    resetParsed();
@@ -1253,6 +1254,70 @@ void XmlDomParser::reset()
     XmlSaxParser::reset();
 }
 
+XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, NamedPointer** npOwner,
+    int* error, const char* parserName, DebugEnabler* dbg, int warnLevel)
+{
+    NamedString* ns = params.getParam(param ? param : s_xml);
+    if (!ns)
+	return 0;
+    NamedPointer* np = YOBJECT(NamedPointer,ns);
+    if (np) {
+	XmlElement* xml = YOBJECT(XmlElement,np);
+	if (xml) {
+	    if (npOwner)
+		*npOwner = np;
+	    else
+		np->takeData();
+	    return xml;
+	}
+    }
+    if (npOwner)
+	*npOwner = 0;
+    if (!*ns)
+	return 0;
+    const char* buf = *ns;
+    XmlDomParser parser(parserName,true);
+    if (dbg)
+	parser.debugChain(dbg);
+    bool ok = parser.parse(buf);
+    XmlElement* xml = parser.fragment()->popElement();
+    if (xml) {
+	if (dbg && dbg->debugAt(DebugInfo)) {
+	    XmlElement* extra = parser.fragment()->popElement();
+	    if (extra) {
+		TelEngine::destruct(extra);
+		Debug(dbg,DebugInfo,"Ignoring extra xml element in '%s'",params.safe());
+	    }
+	}
+	return xml;
+    }
+    if (!(warnLevel > 0 && dbg && dbg->debugAt(warnLevel)))
+	warnLevel = 0;
+    if (error || warnLevel) {
+	int code = 0;
+	if (parser.error())
+	    code = parser.error();
+	else if (!ok)
+	    code = XmlSaxParser::Unknown;
+	else {
+	    while (*buf) {
+		if (!XmlSaxParser::blank(*buf++)) {
+		    code = XmlSaxParser::IOError;
+		    break;
+		}
+	    }
+	}
+	if (error)
+	    *error = code;
+	if (warnLevel)
+	    TraceDebug(params[YSTRING("trace_id")],dbg,warnLevel,
+		"'%s' XML parser error (%d) '%s' for %s='%s' [%p]",
+		params.safe(),code,XmlSaxParser::getError(code),ns->name().safe(),
+		ns->safe(),dbg);
+    }
+    return 0;
+}
+
 
 /*
  * XmlDeclaration
@@ -1289,14 +1354,11 @@ XmlDeclaration::~XmlDeclaration()
 }
 
 // Create a String from this Xml Declaration
-void XmlDeclaration::toString(String& dump, bool esc) const
+String& XmlDeclaration::toString(String& dump, bool esc) const
 {
     dump << "<?" << "xml";
-    int n = m_declaration.count();
-    for (int i = 0;i < n;i ++) {
-	NamedString* ns = m_declaration.getParam(i);
-	if (!ns)
-	    continue;
+    for (ObjList* o = m_declaration.paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* ns = static_cast<NamedString*>(o->get());
 	dump += " ";
 	dump += ns->name();
 	dump << "=\"";
@@ -1306,7 +1368,7 @@ void XmlDeclaration::toString(String& dump, bool esc) const
 	    dump += *ns;
 	dump << "\"";
     }
-    dump << "?>";
+    return dump << "?>";
 }
 
 
@@ -1398,13 +1460,13 @@ void XmlFragment::copy(const XmlFragment& other, XmlParent* parent)
 }
 
 // Create a String from this XmlFragment
-void XmlFragment::toString(String& dump, bool escape, const String& indent,
+String& XmlFragment::toString(String& dump, bool escape, const String& indent,
     const String& origIndent, bool completeOnly, const String* auth,
     const XmlElement* parent) const
 {
     ObjList* ob = m_list.skipNull();
     if (!ob)
-	return;
+	return dump;
     ObjList buffers;
     for (;ob;ob = ob->skipNext()) {
 	String* s = new String;
@@ -1428,7 +1490,7 @@ void XmlFragment::toString(String& dump, bool escape, const String& indent,
 	else
 	    TelEngine::destruct(s);
     }
-    dump.append(buffers);
+    return dump.append(buffers);
 }
 
 XmlElement* XmlFragment::getElement(ObjList*& lst, const String* name, const String* ns,
@@ -1557,14 +1619,14 @@ XmlElement* XmlDocument::root(bool completed) const
     return (m_root && (m_root->completed() || !completed)) ? m_root : 0;
 }
 
-void XmlDocument::toString(String& dump, bool escape, const String& indent, const String& origIndent) const
+String& XmlDocument::toString(String& dump, bool escape, const String& indent, const String& origIndent) const
 {
     m_beforeRoot.toString(dump,escape,indent,origIndent);
     if (m_root) {
 	dump << origIndent;
 	m_root->toString(dump,escape,indent,origIndent);
     }
-    m_afterRoot.toString(dump,escape,indent,origIndent);
+    return m_afterRoot.toString(dump,escape,indent,origIndent);
 }
 
 // Reset this XmlDocument. Destroys root and clear the others xml objects
@@ -1751,6 +1813,17 @@ XmlElement::XmlElement(const char* name, const char* value, bool complete)
 	m_element.c_str(),this);
 }
 
+XmlElement::XmlElement(const char* name, const void* buf, unsigned int len, char sep,
+    bool upCase, bool complete)
+    : m_element(name), m_prefixed(0),
+    m_parent(0), m_inheritedNs(0),
+    m_empty(true), m_complete(complete)
+{
+    setPrefixed();
+    addText(buf,len,sep,upCase);
+    XDebug(DebugAll,"XmlElement::XmlElement(%s) [%p]",m_element.c_str(),this);
+}
+
 // Destructor
 XmlElement::~XmlElement()
 {
@@ -1800,10 +1873,9 @@ void XmlElement::setInheritedNs(const XmlElement* xml, bool inherit)
 void XmlElement::addInheritedNs(const NamedList& list)
 {
     XDebug(DebugAll,"XmlElement(%s) addInheritedNs(%s) [%p]",tag(),list.c_str(),this);
-    unsigned int n = list.count();
-    for (unsigned int i = 0; i < n; i++) {
-	NamedString* ns = list.getParam(i);
-	if (!(ns && isXmlns(ns->name())))
+    for (ObjList* o = list.paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* ns = static_cast<NamedString*>(o->get());
+	if (!isXmlns(ns->name()))
 	    continue;
 	// Avoid adding already overridden namespaces
 	if (m_element.getParam(ns->name()))
@@ -1838,12 +1910,7 @@ XmlChild* XmlElement::getFirstChild()
 
 XmlText* XmlElement::setText(const char* text)
 {
-    XmlText* txt = 0;
-    for (ObjList* o = getChildren().skipNull(); o; o = o->skipNext()) {
-	txt = (static_cast<XmlChild*>(o->get()))->xmlText();
-	if (txt)
-	    break;
-    }
+    XmlText* txt = XmlFragment::findText(getChildren().skipNull());
     if (txt) {
 	if (!text)
 	    return static_cast<XmlText*>(removeChild(txt));
@@ -1856,6 +1923,22 @@ XmlText* XmlElement::setText(const char* text)
     return txt;
 }
 
+XmlText* XmlElement::setText(const void* buf, unsigned int len, char sep, bool upCase)
+{
+    XmlText* txt = XmlFragment::findText(getChildren().skipNull());
+    if (txt) {
+	if (buf && len)
+	    txt->setText(buf,len,sep,upCase);
+	else
+	    txt = static_cast<XmlText*>(removeChild(txt));
+    }
+    else if (buf && len) {
+	txt = new XmlText(buf,len,sep,upCase);
+	addChild(txt);
+    }
+    return txt;
+}
+
 // Add a text child
 void XmlElement::addText(const char* text)
 {
@@ -1863,10 +1946,10 @@ void XmlElement::addText(const char* text)
 	addChild(new XmlText(text));
 }
 
-void XmlElement::addText(const void* buf, unsigned int len)
+void XmlElement::addText(const void* buf, unsigned int len, char sep, bool upCase)
 {
     if (buf && len)
-	addChild(new XmlText(buf,len));
+	addChild(new XmlText(buf,len,sep,upCase));
 }
 
 // Retrieve the element's tag (without prefix) and namespace
@@ -1919,20 +2002,17 @@ void XmlElement::setParent(XmlParent* parent)
 }
 
 // Obtain a string from this xml element
-void XmlElement::toString(String& dump, bool esc, const String& indent,
+String& XmlElement::toString(String& dump, bool esc, const String& indent,
     const String& origIndent, bool completeOnly, const String* auth) const
 {
     XDebug(DebugAll,"XmlElement(%s) toString(%u,%s,%s,%u,%p) complete=%u [%p]",
 	tag(),esc,indent.c_str(),origIndent.c_str(),completeOnly,auth,m_complete,this);
     if (!m_complete && completeOnly)
-	return;
+	return dump;
     String auxDump;
     auxDump << indent << "<" << m_element;
-    int n = m_element.count();
-    for (int i = 0; i < n; i++) {
-	NamedString* ns = m_element.getParam(i);
-	if (!ns)
-	    continue;
+    for (ObjList* o = m_element.paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* ns = static_cast<NamedString*>(o->get());
 	auxDump << " " << ns->name() << "=\"";
 	addAuth(auxDump,ns->name(),*ns,esc,auth);
 	auxDump << "\"";
@@ -1953,19 +2033,16 @@ void XmlElement::toString(String& dump, bool esc, const String& indent,
 	if (m_complete)
 	    auxDump << (!text ? indent : String::empty()) << "</" << getName() << ">";
     }
-    dump << auxDump;
+    return dump << auxDump;
 }
 
 // Copy element attributes to a list of parameters
 unsigned int XmlElement::copyAttributes(NamedList& list, const String& prefix) const
 {
     unsigned int copy = 0;
-    unsigned int n = m_element.length();
-    for (unsigned int i = 0; i < n; i++) {
-	NamedString* ns = m_element.getParam(i);
-	if (!(ns && ns->name()))
-	    continue;
-	list.addParam(prefix + ns->name(),*ns);
+    for (ObjList* o = m_element.paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* ns = static_cast<NamedString*>(o->get());
+	list.addParam(ns->name(),*ns,true,prefix);
 	copy++;
     }
     return copy;
@@ -2153,9 +2230,9 @@ XmlComment::~XmlComment()
 }
 
 // Obtain string representation of this xml comment
-void XmlComment::toString(String& dump, const String& indent) const
+String& XmlComment::toString(String& dump, const String& indent) const
 {
-    dump << indent << "<!--" << getComment() << "-->";
+    return dump << indent << "<!--" << getComment() << "-->";
 }
 
 
@@ -2184,9 +2261,9 @@ XmlCData::~XmlCData()
 }
 
 // Obtain string representation of this xml Cdata
-void XmlCData::toString(String& dump, const String& indent) const
+String& XmlCData::toString(String& dump, const String& indent) const
 {
-    dump << indent << "<![CDATA[" << getCData() << "]]>";
+    return dump << indent << "<![CDATA[" << getCData() << "]]>";
 }
 
 
@@ -2200,9 +2277,9 @@ XmlText::XmlText(const char* text)
     XDebug(DebugAll,"XmlText::XmlText(%s) [%p]",m_text.safe(),this);
 }
 
-XmlText::XmlText(const void* buf, unsigned int len)
+XmlText::XmlText(const void* buf, unsigned int len, char sep, bool upCase)
 {
-    m_text.hexify(buf,len);
+    setText(buf,len,sep,upCase);
     XDebug(DebugAll,"XmlText::XmlText(%p,%u) '%s' [%p]",buf,len,m_text.safe(),this);
 }
 
@@ -2221,7 +2298,7 @@ XmlText::~XmlText()
 }
 
 // Obtain string representation of this xml text
-void XmlText::toString(String& dump, bool esc, const String& indent,
+String& XmlText::toString(String& dump, bool esc, const String& indent,
     const String* auth, const XmlElement* parent) const
 {
     dump << indent;
@@ -2231,6 +2308,7 @@ void XmlText::toString(String& dump, bool esc, const String& indent,
         XmlSaxParser::escape(dump,m_text);
     else
 	dump << m_text;
+    return dump;
 }
 
 bool XmlText::onlySpaces()
@@ -2279,9 +2357,9 @@ XmlDoctype::~XmlDoctype()
 }
 
 // Obtain string representation of this xml doctype
-void XmlDoctype::toString(String& dump, const String& indent) const
+String& XmlDoctype::toString(String& dump, const String& indent) const
 {
-    dump << indent << "<!DOCTYPE " << m_doctype << ">";
+    return dump << indent << "<!DOCTYPE " << m_doctype << ">";
 }
 
 

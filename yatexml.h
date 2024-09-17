@@ -693,6 +693,29 @@ public:
     inline bool isCurrent(const XmlElement* el) const
 	{ return el == m_current; }
 
+    /**
+     * Retrieve an XML element from list parameter
+     * @param params Parameters list
+     * @param param Parameter name. Defaults to 'xml' if empty
+     * @param npOwner Optional pointer to data to be filled with NamedPointer owning the element.
+     *  If parameter is NamedPointer carrying an XmlElement and 'npOwner' is NULL the pointer will
+     *   be taken from it
+     * @param error Optional pointer to parser error code (if element is parsed from string)
+     *  0 means parameter is missing, empty or filled with blank characters
+     *  IOError means parser did not failed, has no error set but the string contains
+     *   a non blank character
+     * @param parserName Optional parser name if needing to parse from string
+     * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
+     * @param warnLevel Put a parse failure debug level (if at least 1).
+     *  This parameter is ignored if 'dbg' is NULL
+     * @return XmlElement pointer, NULL if missing or parser failure.
+     *  If 'npOwner' is given and set on return the returned pointer is owned by it.
+     *  If 'npOwner' is not given or not set on return the returned pointer is owned by the caller.
+     */
+    static XmlElement* getXml(const NamedList& params, const String& param, NamedPointer** npOwner,
+	int* error = 0, const char* parserName = 0, DebugEnabler* dbg = 0,
+	int warnLevel = DebugMild);
+
 protected:
 
     /**
@@ -880,8 +903,9 @@ public:
      * Build a String from this XmlDeclaration
      * @param dump The string where to append representation
      * @param escape True if the attributes values need to be escaped
+     * @return Destination buffer reference
      */
-    void toString(String& dump, bool escape = true) const;
+    String& toString(String& dump, bool escape = true) const;
 
 private:
     NamedList m_declaration;                 // The declaration
@@ -982,8 +1006,9 @@ public:
      *  parameter can be used when the result will be printed to output to avoid printing
      *  authentication data to output. The array must end with an empty string
      * @param parent Optional parent element whose tag will be searched in the auth list
+     * @return Destination buffer reference
      */
-    void toString(String& dump, bool escape = true, const String& indent = String::empty(),
+    String& toString(String& dump, bool escape = true, const String& indent = String::empty(),
 	const String& origIndent = String::empty(), bool completeOnly = true,
 	const String* auth = 0, const XmlElement* parent = 0) const;
 
@@ -1184,8 +1209,9 @@ public:
      * @param escape True if the attributes values need to be escaped
      * @param indent Spaces for output
      * @param origIndent Original indent
+     * @return Destination buffer reference
      */
-    void toString(String& dump, bool escape = true, const String& indent = String::empty(),
+    String& toString(String& dump, bool escape = true, const String& indent = String::empty(),
 	const String& origIndent = String::empty()) const;
 
     /**
@@ -1233,6 +1259,18 @@ public:
      * @param complete False to build an incomplete element
      */
     XmlElement(const char* name, const char* value, bool complete = true);
+
+    /**
+     * Constructor. Create a new element with a hexified text child
+     * @param name The name of the element
+     * @param buf Buffer to hexify
+     * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
+     * @param complete False to build an incomplete element
+     */
+    XmlElement(const char* name, const void* buf, unsigned int len, char sep = 0,
+	bool upCase = false, bool complete = true);
 
     /**
      * Copy constructor
@@ -1426,8 +1464,9 @@ public:
      * @param auth Optional list of tag and attribute names to be replaced with '***'. This
      *  parameter can be used when the result will be printed to output to avoid printing
      *  authentication data to output. The array must end with an empty string
+     * @return Destination buffer reference
      */
-    void toString(String& dump, bool escape = true, const String& indent = String::empty(),
+    String& toString(String& dump, bool escape = true, const String& indent = String::empty(),
 	const String& origIndent = String::empty(), bool completeOnly = true,
 	const String* auth = 0) const;
 
@@ -1525,6 +1564,18 @@ public:
     XmlText* setText(const char* text);
 
     /**
+     * Set hexified text for first XmlText element found in this XmlElement's children
+     * If child text element does not exist, create it and append it to the element's children.
+     * Reset text if given buffer is empty
+     * @param buf Pointer to buffer to hexify
+     * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
+     * @return The set XmlText if text was set, null if an XmlText was deleted
+     */
+    XmlText* setText(const void* buf, unsigned int len, char sep = 0, bool upCase = false);
+
+    /**
      * Add a text child
      * @param text Non empty text to add
      */
@@ -1534,8 +1585,10 @@ public:
      * Add a text child with hexified value
      * @param buf Pointer to buffer to hexify
      * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
      */
-    void addText(const void* buf, unsigned int len);
+    void addText(const void* buf, unsigned int len, char sep = 0, bool upCase = false);
 
     /**
      * Retrieve the list of attributes
@@ -1574,6 +1627,88 @@ public:
      */
     inline void setAttribute(const String& name, const char* value)
 	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from signed integer value
+     * @param name Attribute name
+     * @param value Attribute value
+     */
+    inline void setAttribute(const String& name, int64_t value)
+	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from unsigned integer value
+     * @param name Attribute name
+     * @param value Attribute value
+     */
+    inline void setAttribute(const String& name, uint64_t value)
+	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from signed integer value
+     * @param name Attribute name
+     * @param value Attribute value
+     */
+    inline void setAttribute(const String& name, int32_t value)
+	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from unsigned integer value
+     * @param name Attribute name
+     * @param value Attribute value
+     */
+    inline void setAttribute(const String& name, uint32_t value)
+	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from floating point value
+     * @param name Attribute name
+     * @param value Attribute value
+     */
+    inline void setAttribute(const String& name, double value)
+	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from boolean value
+     * @param name Attribute name
+     * @param value Attribute value
+     */
+    inline void setAttribute(const String& name, bool value)
+	{ m_element.setParam(name,value); }
+
+    /**
+     * Add or replace an attribute from encoded flags
+     * @param name Attribute name
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownFlag True (default) to add unknown flags
+     */
+    inline void setAttribute(const String& name, unsigned int flags, const TokenDict* tokens,
+	bool unknownFlag = true)
+	{ m_element.setParam(name,flags,tokens,unknownFlag); }
+
+    /**
+     * Add or replace an attribute from encoded flags
+     * @param name Attribute name
+     * @param flags The flags
+     * @param tokens The dictionary containing the flags
+     * @param unknownFlag True (default) to add unknown flags
+     */
+    inline void setAttribute(const String& name, uint64_t flags, const TokenDict64* tokens,
+	bool unknownFlag = true)
+	{ m_element.setParam(name,flags,tokens,unknownFlag); }
+
+    /**
+     * Add or replace an attribute with hexified value
+     * @param name Attribute name
+     * @param buf Pointer to buffer to hexify
+     * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
+     */
+    inline void setAttributeHex(const String& name, const void* buf, unsigned int len,
+	bool sep = 0, bool upCase = false)
+	{ m_element.setParamHex(name,buf,len,sep,upCase); }
 
     /**
      * Add or replace an attribute. Clears it if value is empty
@@ -1681,13 +1816,48 @@ public:
      * @param name The name of the element
      * @param buf Pointer to buffer to hexify
      * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
      * @return XmlElement pointer on success, NULL on failure
      */
-    inline XmlElement* addChildHex(const char* name, const void* buf, unsigned int len) {
-	    XmlElement* x = addChild(name);
-	    if (x)
-		x->addText(buf,len);
-	    return x;
+    inline XmlElement* addChildHex(const char* name, const void* buf, unsigned int len,
+	char sep = 0, bool upCase = false) {
+	    return TelEngine::null(name) ? 0
+		: static_cast<XmlElement*>(addChildSafe(new XmlElement(name,buf,len,sep,upCase)));
+	}
+
+    /**
+     * Put this element in a list parameter
+     * @param list Parameters list
+     * @param name Parameter name. Use 'xml' if NULL or empty
+     * @param txt Put element string. This parameter is ignored and handled as true if object is not set
+     * @param obj Put element object in parameter
+     * @param setParam Greater than 0: replace first occurence, append if not found.
+     *  Less than 0: replace first occurence and clear all other occurences, append if not found.
+     *  O: append
+     * @param copyObj Put a copy of element as object
+     * @return True if destination list is owning this object, false if not
+     */
+    inline bool exportParam(NamedList& list, const char* name, bool txt, bool obj,
+	int setParam = 1, bool copyObj = false) {
+	    if (TelEngine::null(name))
+		name = "xml";
+	    NamedString* ns = 0;
+	    if (obj) {
+		ns = new NamedPointer(name);
+		if (txt) // Set text now (will reset NamedPointer user data on change)
+		    toString(*ns);
+		static_cast<NamedPointer*>(ns)->userData(copyObj ? new XmlElement(*this) : this);
+	    }
+	    else {
+		ns = new NamedString(name);
+		toString(*ns);
+	    }
+	    if (setParam)
+		list.setParam(ns,setParam < 0);
+	    else
+		list.addParam(ns);
+	    return !copyObj;
 	}
 
     /**
@@ -1807,8 +1977,9 @@ public:
      * Build a String from this XmlComment
      * @param dump The string where to append representation
      * @param indent Spaces for output
+     * @return Destination buffer reference
      */
-    void toString(String& dump, const String& indent = String::empty()) const;
+    String& toString(String& dump, const String& indent = String::empty()) const;
 
     /**
      * Get the Xml comment
@@ -1858,8 +2029,9 @@ public:
      * Build a String from this XmlCData
      * @param dump The string where to append representation
      * @param indent Spaces for output
+     * @return Destination buffer reference
      */
-    void toString(String& dump, const String& indent = String::empty()) const;
+    String& toString(String& dump, const String& indent = String::empty()) const;
 
     /**
      * Get the Xml CData
@@ -1890,8 +2062,10 @@ public:
      * Constructor. Build a hexified text
      * @param buf Pointer to buffer to hexify
      * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
      */
-    XmlText(const void* buf, unsigned int len);
+    XmlText(const void* buf, unsigned int len, char sep = 0, bool upCase = false);
 
     /**
      * Copy constructor
@@ -1921,9 +2095,11 @@ public:
      * Set hexified data value
      * @param buf Pointer to buffer to hexify
      * @param len Buffer length
+     * @param sep Optional separator
+     * @param upCase Set to true to use upper case hexadecimal characters
      */
-    inline void setText(const void* buf, unsigned int len)
-	{ m_text.hexify(buf,len); }
+    inline void setText(const void* buf, unsigned int len, char sep = 0, bool upCase = false)
+	{ m_text.hexify(buf,len,sep,upCase); }
 
     /**
      * Build a String from this XmlText
@@ -1934,8 +2110,9 @@ public:
      *  parameter can be used when the result will be printed to output to avoid printing
      *  authentication data to output. The array must end with an empty string
      * @param parent Optional parent element whose tag will be searched in the auth list
+     * @return Destination buffer reference
      */
-    void toString(String& dump, bool escape = true, const String& indent = String::empty(),
+    String& toString(String& dump, bool escape = true, const String& indent = String::empty(),
 	const String* auth = 0, const XmlElement* parent = 0) const;
 
     /**
@@ -2000,8 +2177,9 @@ public:
      * Build a String from this XmlDoctype
      * @param dump The string where to append representation
      * @param indent Spaces for output
+     * @return Destination buffer reference
      */
-    void toString(String& dump, const String& indent = String::empty()) const;
+    String& toString(String& dump, const String& indent = String::empty()) const;
 
 private:
     String m_doctype;                          // The document type
