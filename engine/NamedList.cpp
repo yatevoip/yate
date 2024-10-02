@@ -22,6 +22,53 @@
 
 using namespace TelEngine;
 
+static inline const String* validName(const String& str, String& tmp)
+{
+    if (!str)
+	return 0;
+    const char* s = str.c_str();
+    unsigned int n = String::c_trim_blanks(s);
+    if (n == str.length())
+	return &str;
+    return n ? &tmp.assign(s,n) : 0;
+}
+
+static inline bool isNameSep(const String& name, const String& check, char sep)
+{
+    return name == check
+	|| (sep && check.length() > name.length() && check.startsWith(name)
+	&& check[name.length()] == sep);
+}
+
+static inline ObjList* listAddParam(ObjList& list, NamedString* ns)
+{
+    return list.append(ns);
+}
+
+static inline ObjList* listAddParam(ObjList& list, const char* name, const char* value)
+{
+    return listAddParam(list,new NamedString(name,value));
+}
+
+static inline ObjList* listCopyParam(ObjList& list, const NamedList& src, const String& name)
+{
+    const NamedString* ns = src.getParam(name);
+    return ns ? listAddParam(list,name,*ns) : &list;
+}
+
+static inline ObjList* listAddSubParams(ObjList& list, const NamedList& src,
+    const String& name, char sep)
+{
+    ObjList* dest = &list;
+    for (const ObjList* o = src.paramList()->skipNull(); o; o = o->skipNext()) {
+	const NamedString* s = static_cast<const NamedString*>(o->get());
+	if (isNameSep(name,s->name(),sep))
+	    dest = listAddParam(*dest,s->name(),*s);
+    }
+    return dest;
+}
+
+
 static const NamedList s_empty("");
 
 const NamedList& NamedList::empty()
@@ -217,12 +264,9 @@ NamedList& NamedList::clearParam(const String& name, char childSep, const String
 	name.c_str(),&childSep,value,TelEngine::c_safe(value));
     ObjList* p = &m_params;
     if (childSep) {
-	String tmp;
-	tmp << name << childSep;
 	while (p) {
 	    NamedString* s = static_cast<NamedString*>(p->get());
-	    if (s && ((s->name() == name) || s->name().startsWith(tmp))
-		&& (!value || value->matches(*s)))
+	    if (s && isNameSep(name,s->name(),childSep) && (!value || value->matches(*s)))
 		p->remove();
 	    else
 		p = p->next();
@@ -269,86 +313,116 @@ NamedList& NamedList::clearParam(NamedString* param, bool delParam)
     return *this;
 }
 
-NamedList& NamedList::copyParam(const NamedList& original, const String& name, char childSep)
+NamedList& NamedList::copyParam(const NamedList& original, const String& name, char childSep,
+    bool replace, bool clearMissing)
 {
-    XDebug(DebugInfo,"NamedList::copyParam(%p,\"%s\",'%.1s')",
-	&original,name.c_str(),&childSep);
+    XDebug(DebugInfo,"NamedList::copyParam(%p,'%s','%.1s',%s,%s) [%p]",
+	&original,name.c_str(),&childSep,String::boolText(replace),String::boolText(clearMissing),this);
     if (!childSep) {
-	// faster and simpler - used in most cases
 	const NamedString* s = original.getParam(name);
-	return s ? setParam(name,*s) : clearParam(name);
+	if (s) {
+	    if (replace)
+		setParam(name,*s);
+	    else
+		listAddParam(m_params,name,*s);
+	}
+	else if (replace && clearMissing)
+	    clearParam(name);
     }
-    clearParam(name,childSep);
-    String tmp;
-    tmp << name << childSep;
-    ObjList* dest = &m_params;
-    for (const ObjList* l = original.m_params.skipNull(); l; l = l->skipNext()) {
-	const NamedString* s = static_cast<const NamedString*>(l->get());
-        if ((s->name() == name) || s->name().startsWith(tmp))
-	    dest = dest->append(new NamedString(s->name(),*s));
+    else if (!replace)
+	listAddSubParams(m_params,original,name,childSep);
+    else if (clearMissing) {
+	clearParam(name,childSep);
+	listAddSubParams(m_params,original,name,childSep);
+    }
+    else {
+	// Replace existing, append all other
+	for (const ObjList* o = original.paramList()->skipNull(); o; o = o->skipNext()) {
+	    const NamedString* ns = static_cast<const NamedString*>(o->get());
+	    if (isNameSep(name,ns->name(),childSep))
+		setParam(ns->name(),*ns);
+	}
     }
     return *this;
 }
 
-static inline NamedString* nlCopyParam(const NamedString& param)
+NamedList& NamedList::copyParams(bool replace, const NamedList& original, const char* addPrefix)
 {
-    NamedPointer* np = YOBJECT(NamedPointer,&param);
-    if (!(np && np->userData()))
-	return 0;
-    GenObject* ud = 0;
-#define NP_COPY_PARAM_INTERNAL(Type) \
-    ud = YOBJECT(Type,np->userData()); \
-    if (ud) \
-	return new NamedPointer(np->name(),new Type(*(Type*)ud),*np)
-    NP_COPY_PARAM_INTERNAL(DataBlock);
-    NP_COPY_PARAM_INTERNAL(XmlElement);
-#undef NP_COPY_PARAM_INTERNAL
-    return 0;
-}
-    
-NamedList& NamedList::copyParams(bool replace, const NamedList& original, bool copyUserData)
-{
-    XDebug(DebugInfo,"NamedList::copyParams(%p,%u) [%p]",&original,replace,this);
+    XDebug(DebugInfo,"NamedList::copyParams(%s,%p,%s) [%p]",
+	String::boolText(replace),&original,TelEngine::c_safe(addPrefix),this);
     ObjList* append = replace ? 0 : &m_params;
+    if (addPrefix && !*addPrefix)
+	addPrefix = 0;
     for (const ObjList* l = original.m_params.skipNull(); l; l = l->skipNext()) {
 	const NamedString* p = static_cast<const NamedString*>(l->get());
-	NamedString* ns = 0;
-	if (copyUserData)
-	    ns = nlCopyParam(*p);
-	if (!ns)
-	    ns = new NamedString(p->name(),*p);
 	if (append)
-	    append = append->append(ns);
-	else
-	    setParam(ns);
+	    append = append->append(new NamedString(p->name(),*p,p->length(),addPrefix));
+	else if (!addPrefix)
+	    setParam(p->name(),*p);
+	else {
+	    ObjList* o = m_params.skipNull();
+	    while (o) {
+		ObjList* next = 0;
+		NamedString* s = static_cast<NamedString*>(o->get());
+		if (s->name() == p->name()) {
+		    o->remove();
+		    next = o->skipNull();
+		}
+		else
+		    next = o->skipNext();
+		if (!next)
+		    break;
+		o = next;
+	    }
+	    NamedString* ns = new NamedString(p->name(),*p,p->length(),addPrefix);
+	    if (o)
+		o->append(ns);
+	    else
+		m_params.append(ns);
+	}
     }
     return *this;
 }
 
-NamedList& NamedList::copyParams(const NamedList& original, ObjList* list, char childSep)
+NamedList& NamedList::copyParams(const NamedList& original, ObjList* list, char childSep,
+    bool replace, bool clearMissing)
 {
-    XDebug(DebugInfo,"NamedList::copyParams(%p,%p,'%.1s') [%p]",
-	&original,list,&childSep,this);
+    XDebug(DebugInfo,"NamedList::copyParams(%p,%p,'%.1s',%s,%s) [%p]",&original,list,
+	&childSep,String::boolText(replace),String::boolText(clearMissing),this);
+    if (!list)
+	return *this;
+    String tmp;
+    ObjList* append = replace ? 0 : &m_params;
     for (; list; list = list->next()) {
 	GenObject* obj = list->get();
 	if (!obj)
 	    continue;
-	String name = obj->toString();
-	name.trimBlanks();
-	if (name)
-	    copyParam(original,name,childSep);
+	const String* name = validName(obj->toString(),tmp);
+	if (!name)
+	    continue;
+	if (!append)
+	    copyParam(original,*name,childSep,true,clearMissing);
+	else if (!childSep) {
+	    const NamedString* ns = original.getParam(*name);
+	    if (ns)
+		append = listAddParam(*append,*name,*ns);
+	}
+	else
+	    append = listAddSubParams(*append,original,*name,childSep);
     }
     return *this;
 }
 
-NamedList& NamedList::copyParams(const NamedList& original, const String& list, char childSep)
+NamedList& NamedList::copyParams(const NamedList& original, const char* list, char childSep,
+    bool replace, bool clearMissing)
 {
-    XDebug(DebugInfo,"NamedList::copyParams(%p,\"%s\",'%.1s') [%p]",
-	&original,list.c_str(),&childSep,this);
-    ObjList* l = list.split(',',false);
-    if (l) {
-	copyParams(original,l,childSep);
-	l->destruct();
+    XDebug(DebugInfo,"NamedList::copyParams(%p,\"%s\",'%.1s',%s,%s) [%p]",&original,
+	TelEngine::c_safe(list),&childSep,
+	String::boolText(replace),String::boolText(clearMissing),this);
+    if (!TelEngine::null(list)) {
+	ObjList oList;
+	if (String::c_split(oList,list,',',false,true,true))
+	    return copyParams(original,oList.skipNull(),childSep,replace,clearMissing);
     }
     return *this;
 }
@@ -356,19 +430,19 @@ NamedList& NamedList::copyParams(const NamedList& original, const String& list, 
 NamedList& NamedList::copySubParams(const NamedList& original, const String& prefix,
     bool skipPrefix, bool replace)
 {
-    XDebug(DebugInfo,"NamedList::copySubParams(%p,\"%s\",%s,%s) [%p]",
-	&original,prefix.c_str(),String::boolText(skipPrefix),
+    XDebug(DebugInfo,"NamedList::copySubParams(%p,'%s',%s,%s) [%p]",
+	&original,prefix.safe(),String::boolText(skipPrefix),
 	String::boolText(replace),this);
     if (prefix) {
 	unsigned int offs = skipPrefix ? prefix.length() : 0;
-	ObjList* dest = &m_params;
+	ObjList* dest = replace ? 0 : &m_params;
 	for (const ObjList* l = original.m_params.skipNull(); l; l = l->skipNext()) {
 	    const NamedString* s = static_cast<const NamedString*>(l->get());
 	    if (s->name().startsWith(prefix)) {
 		const char* name = s->name().c_str() + offs;
 		if (!*name)
 		    continue;
-		if (!replace)
+		if (dest)
 		    dest = dest->append(new NamedString(name,*s));
 		else if (offs)
 		    setParam(name,*s);

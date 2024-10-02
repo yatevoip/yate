@@ -8090,22 +8090,25 @@ public:
     NamedList& clearParam(NamedString* param, bool delParam = true);
 
     /**
-     * Copy a parameter from another NamedList, clears it if not present there
+     * Copy a parameter from another NamedList
      * @param original NamedList to copy the parameter from
      * @param name Name of the string to copy or clear
      * @param childSep If set copies all child parameters in format name+childSep+anything
+     * @param replace Replace (set params) or append (add param)
+     * @param clearMissing Clear parameter in list if replace is required and is missing in original list
      * @return Reference to this NamedList
      */
-    NamedList& copyParam(const NamedList& original, const String& name, char childSep = 0);
+    NamedList& copyParam(const NamedList& original, const String& name, char childSep = 0,
+	bool replace = true, bool clearMissing = true);
 
     /**
      * Copy all parameters from another NamedList, does not clear list first
      * @param replace Replace (set params) or append (add param)
      * @param original NamedList to copy the parameters from
-     * @param copyUserData Copy user data for known objects (DataBlock, XmlElement)
+     * @param addPrefix Optional prefix to be added to parameter name
      * @return Reference to this NamedList
      */
-    NamedList& copyParams(bool replace, const NamedList& original, bool copyUserData = false);
+    NamedList& copyParams(bool replace, const NamedList& original, const char* addPrefix = 0);
 
     /**
      * Copy all parameters from another NamedList, does not clear list first
@@ -8116,22 +8119,28 @@ public:
 	{ return copyParams(true,original); }
 
     /**
-     * Copy multiple parameters from another NamedList, clears them if not present there
+     * Copy multiple parameters from another NamedList
      * @param original NamedList to copy the parameters from
      * @param list List of objects (usually String) whose name (blanks stripped) is used as parameters names
      * @param childSep If set copies all child parameters in format name+childSep+anything
+     * @param replace Replace (set params, clear if missing in original list) or append (add param)
+     * @param clearMissing Clear parameter in list if replace is required and is missing in original list
      * @return Reference to this NamedList
      */
-    NamedList& copyParams(const NamedList& original, ObjList* list, char childSep = 0);
+    NamedList& copyParams(const NamedList& original, ObjList* list, char childSep = 0,
+	bool replace = true, bool clearMissing = true);
 
     /**
-     * Copy multiple parameters from another NamedList, clears it if not present there
+     * Copy multiple parameters from another NamedList
      * @param original NamedList to copy the parameter from
      * @param list Comma separated list of parameters to copy or clear
      * @param childSep If set copies all child parameters in format name+childSep+anything
+     * @param replace Replace (set params, clear if missing in original list) or append (add param)
+     * @param clearMissing Clear parameter in list if replace is required and is missing in original list
      * @return Reference to this NamedList
      */
-    NamedList& copyParams(const NamedList& original, const String& list, char childSep = 0);
+    NamedList& copyParams(const NamedList& original, const char* list, char childSep = 0,
+	bool replace = true, bool clearMissing = true);
 
     /**
      * Copy subparameters from another list
