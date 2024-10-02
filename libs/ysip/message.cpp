@@ -260,7 +260,7 @@ void SIPMessage::complete(SIPEngine* engine, const char* user, const char* domai
     }
     if (isAnswer()) {
 	if (!(flags & NotSetReceived)) {
-	    Lock lock(getParty()->mutex());
+	    Lock lck(getParty()->lock(),-1,true);
 	    hl->setParam("received",getParty()->getPartyAddr());
 	}
 	const String* rport = hl->getParam("rport");

@@ -110,14 +110,14 @@ static TokenDict sip_responses[] = {
 
 TokenDict* TelEngine::SIPResponses = sip_responses;
 
-SIPParty::SIPParty(Mutex* mutex)
-    : m_mutex(mutex), m_reliable(false), m_localPort(0), m_partyPort(0)
+SIPParty::SIPParty(RWLock* lck)
+    : m_lock(lck), m_reliable(false), m_localPort(0), m_partyPort(0)
 {
     DDebug(DebugAll,"SIPParty::SIPParty() [%p]",this);
 }
 
-SIPParty::SIPParty(bool reliable, Mutex* mutex)
-    : m_mutex(mutex), m_reliable(reliable), m_localPort(0), m_partyPort(0)
+SIPParty::SIPParty(bool reliable, RWLock* lck)
+    : m_lock(lck), m_reliable(reliable), m_localPort(0), m_partyPort(0)
 {
     DDebug(DebugAll,"SIPParty::SIPParty(%d) [%p]",reliable,this);
 }
@@ -129,20 +129,13 @@ SIPParty::~SIPParty()
 
 void SIPParty::setAddr(const String& addr, int port, bool local)
 {
-    Lock lock(m_mutex);
+    Lock lck(m_lock);
     String& a = local ? m_local : m_party;
     int& p = local ? m_localPort : m_partyPort;
     a = addr;
     p = port;
     DDebug(DebugAll,"SIPParty updated %s address '%s' [%p]",
 	local ? "local" : "remote",SocketAddr::appendTo(a,p).c_str(),this);
-}
-
-void SIPParty::getAddr(String& addr, int& port, bool local)
-{
-    Lock lock(m_mutex);
-    addr = local ? m_local : m_party;
-    port = local ? m_localPort : m_partyPort;
 }
 
 

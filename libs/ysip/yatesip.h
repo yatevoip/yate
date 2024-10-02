@@ -56,8 +56,8 @@ class SIPEvent;
 class YSIP_API SIPParty : public RefObject
 {
 public:
-    SIPParty(Mutex* mutex = 0);
-    SIPParty(bool reliable, Mutex* mutex = 0);
+    SIPParty(RWLock* lck = 0);
+    SIPParty(bool reliable, RWLock* lck = 0);
     virtual ~SIPParty();
     /**
      * Transmit an event
@@ -69,16 +69,25 @@ public:
     virtual bool setParty(const URI& uri) = 0;
     virtual void* getTransport() = 0;
     void setAddr(const String& addr, int port, bool local);
-    void getAddr(String& addr, int& port, bool local);
+    inline void getAddr(String& addr, int& port, bool local) {
+	    Lock lck(m_lock,-1,true);
+	    addr = local ? m_local : m_party;
+	    port = local ? m_localPort : m_partyPort;
+	}
     inline void appendAddr(String& buf, bool local, bool unsafe = true) {
-	    Lock lock(unsafe ? m_mutex : 0);
+	    Lock lck(unsafe ? m_lock : 0,-1,true);
 	    if (local)
 		SocketAddr::appendTo(buf,m_local,m_localPort);
 	    else
 		SocketAddr::appendTo(buf,m_party,m_partyPort);
 	}
-    inline Mutex* mutex()
-	{ return m_mutex; }
+    inline void addAddr(NamedList& params, const char* param, bool local, bool unsafe = true) {
+	    NamedString* ns = new NamedString(param);
+	    appendAddr(*ns,local,unsafe);
+	    params.addParam(ns);
+	}
+    inline RWLock* lock()
+	{ return m_lock; }
     inline const String& getLocalAddr() const
 	{ return m_local; }
     inline const String& getPartyAddr() const
@@ -90,7 +99,7 @@ public:
     inline bool isReliable() const
 	{ return m_reliable; }
 protected:
-    Mutex* m_mutex;
+    RWLock* m_lock;
     bool m_reliable;
     String m_local;
     String m_party;
