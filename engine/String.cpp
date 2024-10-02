@@ -33,6 +33,36 @@
 #define ENDIANNESS_OPPOSITE (UChar::BE)
 #endif
 
+#define DO_C_TRIM(trimmedLen,str,len,funcCheck) \
+while (!TelEngine::null(str)) { \
+    const char* last = 0; \
+    if (len < 0) { \
+	while (funcCheck(*str)) \
+	    str++; \
+	if (!*str) \
+	    break; \
+	last = str; \
+	for (const char* check = last; *check; check++) { \
+	    if (!funcCheck(*check)) \
+		last = check; \
+	} \
+    } \
+    else { \
+	unsigned int n = len; \
+	while (n && funcCheck(*str)) \
+	    advanceStr(str,n); \
+	if (!(*str && n)) \
+	    break; \
+	last = str; \
+	for (const char* check = last; n && *check;) { \
+	    if (!funcCheck(*check)) \
+		last = check; \
+	    advanceStr(check,n); \
+	} \
+    } \
+    trimmedLen = last - str + 1; \
+    break; \
+}
 
 namespace TelEngine {
 
@@ -60,6 +90,12 @@ static inline bool strAllocChanged(char*& dest, char*& destPtr, const char* crt,
 	*dest = 0;
     destPtr = dest + len;
     return true;
+}
+
+static inline void advanceStr(const char*& str, unsigned int& len)
+{
+    str++;
+    len--;
 }
 
 // String to regular integer conversion, takes into account overflows
@@ -1761,41 +1797,6 @@ void String::clearMatches()
 	m_matches->clear();
 }
 
-ObjList* String::split(ObjList& list, char separator, bool emptyOK) const
-{
-    ObjList* ret = 0;
-    ObjList* dest = &list;
-    int p = 0;
-    int s;
-    while ((s = find(separator,p)) >= 0) {
-	if (emptyOK || (s > p))
-	    ret = dest = dest->append(new String(m_string+p,s-p));
-	p = s + 1;
-    }
-    if (emptyOK || (m_string && m_string[p]))
-	return dest->append(new String(m_string+p));
-    return ret;
-}
-
-ObjList* String::split(ObjList& list, const Regexp& reg, bool emptyOK) const
-{
-    String s = *this;
-    ObjList* ret = 0;
-    ObjList* dest = &list;
-    while (true) {
-	if (!(s && s.matches(reg))) {
-	    if (s || emptyOK)
-		return dest->append(new String(s));
-	    break;
-	}
-	int pos = s.matchOffset(0);
-	if (emptyOK || pos > 0)
-	    ret = dest = dest->append(new String(s.c_str(),pos));
-	s = s.substr(pos + s.matchLength(0));
-    }
-    return ret;
-}
-
 String String::msgEscape(const char* str, char extraEsc)
 {
     String s;
@@ -2231,6 +2232,66 @@ const String* String::atom(const String*& str, const char* val)
 	s_mutex.unlock();
     }
     return str;
+}
+
+unsigned int String::c_trim_blanks(const char*& str, int len)
+{
+    unsigned int n = 0;
+    DO_C_TRIM(n,str,len,String::isBlank);
+    return n;
+}
+
+static inline ObjList* splitHandle(ObjList& list, ObjList*& append, ObjList*& last,
+    bool emptyOk, bool trimBlanks, bool unique,
+    const char* str, unsigned int len)
+{
+    if (trimBlanks && len)
+	len = String::c_trim_blanks(str,len);
+    if (!(emptyOk || len))
+	return last;
+    String* s = new String(str,len);
+    if (unique && list.find(*s))
+	s->destruct();
+    else
+	last = append = append->append(s);
+    return last;
+}
+
+ObjList* String::c_split(ObjList& list, const char* str, char sep, bool emptyOk,
+    bool trimBlanks, bool unique)
+{
+    ObjList* last = 0;
+    ObjList* append = &list;
+    if (!str)
+	return splitHandle(list,append,last,emptyOk,trimBlanks,unique,"",0);
+    if (sep && *str)
+	while (true) {
+	    const char* found = ::strchr(str,sep);
+	    if (!found)
+		break;
+	    splitHandle(list,append,last,emptyOk,trimBlanks,unique,str,found - str);
+	    str = found + 1;
+	}
+    return splitHandle(list,append,last,emptyOk,trimBlanks,unique,str,::strlen(str));
+}
+
+ObjList* String::c_split(ObjList& list, const char* str, const Regexp& reg, bool emptyOk,
+    bool trimBlanks, bool unique)
+{
+    ObjList* last = 0;
+    ObjList* append = &list;
+    if (TelEngine::null(str))
+	return splitHandle(list,append,last,emptyOk,trimBlanks,unique,"",0);
+    String buf = str;
+    while (buf && buf.matches(reg)) {
+	int pos = buf.matchOffset(0);
+	int skip = pos + buf.matchLength(0);
+	if (pos < 0 || skip <= 0)
+	    break;
+	splitHandle(list,append,last,emptyOk,trimBlanks,unique,buf.c_str(),pos);
+	buf.assign(buf.c_str() + skip);
+    }
+    return splitHandle(list,append,last,emptyOk,trimBlanks,unique,buf.safe(),buf.length());
 }
 
 static unsigned int c_find_str(bool start, const char* str, const char* what,

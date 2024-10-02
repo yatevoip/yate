@@ -4045,19 +4045,27 @@ public:
      * Splits the string at a delimiter character
      * @param list Destination list
      * @param separator Character where to split the string
-     * @param emptyOK True if empty strings should be inserted in list
+     * @param emptyOk True if empty strings should be inserted in list
+     * @param trimBlanks Trim blanks in strings before checking empty and unique
+     * @param unique Set it to true to set only unique values (ignore duplicates in list)
      * @return Pointer to last added item, NULL if no item was added
      */
-    ObjList* split(ObjList& list, char separator, bool emptyOK = true) const;
+    inline ObjList* split(ObjList& list, char separator, bool emptyOk = true,
+	bool trimBlanks = false, bool unique = false) const
+	{ return c_split(list,c_str(),separator,emptyOk,trimBlanks,unique); }
 
     /**
      * Splits the string at Regexp delimiter
      * @param list Destination list
      * @param reg Regexp describing the delimiter
-     * @param emptyOK True if empty strings should be inserted in list
+     * @param emptyOk True if empty strings should be inserted in list
+     * @param trimBlanks Trim blanks in strings before checking empty and unique
+     * @param unique Set it to true to set only unique values (ignore duplicates in list)
      * @return Pointer to last added item, NULL if no item was added
      */
-    ObjList* split(ObjList& list, const Regexp& reg, bool emptyOK = true) const;
+    inline ObjList* split(ObjList& list, const Regexp& reg, bool emptyOk = true,
+	bool trimBlanks = false, bool unique = false) const
+	{ return c_split(list,c_str(),reg,emptyOk,trimBlanks,unique); }
 
     /**
      * Splits the string at a delimiter character
@@ -4257,6 +4265,48 @@ public:
      * @return Pointer to shared atom string
      */
     static const String* atom(const String*& str, const char* val);
+
+    /**
+     * Check if character is blank (SPACE or TAB)
+     * @param c Character to check
+     * @return True if given character is a blank one
+     */
+    static inline bool isBlank(char c)
+	{ return c == ' ' || c == '\t'; }
+
+    /**
+     * Trim leading and trailing blanks
+     * @param str String to check
+     * @param len Optional maximum length to check in string, negative to check the whole string
+     * @return Non 0 string length ('str' points to first non blank character). 0 if 'str' is empty
+     */
+    static unsigned int c_trim_blanks(const char*& str, int len = -1);
+
+    /**
+     * Splits a string at a delimiter character
+     * @param list Destination list
+     * @param str String to split
+     * @param sep Character where to split the string
+     * @param emptyOk True if empty strings should be inserted in list
+     * @param trimBlanks Trim blanks in strings before checking empty and unique
+     * @param unique Set it to true to set only unique values (ignore duplicates in list)
+     * @return Pointer to last added item, NULL if no item was added
+     */
+    static ObjList* c_split(ObjList& list, const char* str, char sep,
+	bool emptyOk = true, bool trimBlanks = false, bool unique = false);
+
+    /**
+     * Splits a string at Regexp delimiter
+     * @param list Destination list
+     * @param str String to split
+     * @param reg Regexp describing the delimiter
+     * @param emptyOk True if empty strings should be inserted in list
+     * @param trimBlanks Trim blanks in strings before checking empty and unique
+     * @param unique Set it to true to set only unique values (ignore duplicates in list)
+     * @return Pointer to last added item, NULL if no item was added
+     */
+    static ObjList* c_split(ObjList& list, const char* str, const Regexp& reg,
+	bool emptyOk = true, bool trimBlanks = false, bool unique = false);
 
     /**
      * Checks if a string starts with a substring
