@@ -5414,9 +5414,10 @@ public:
      * @param data Initial pointer value. The pointer will be owned by this object
      * @param value Initial string value
      * @param len Length of the value, -1 for full string
+     * @param namePrefix Prefix to put in front of the name of this string
      */
     explicit NamedPointer(const char* name, GenObject* data = 0, const char* value = 0,
-	int len = -1);
+	int len = -1, const char* namePrefix = 0);
 
     /**
      * Destructor. Release the pointer

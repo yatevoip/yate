@@ -2570,8 +2570,9 @@ void* NamedString::getObject(const String& name) const
 }
 
 
-NamedPointer::NamedPointer(const char* name, GenObject* data, const char* value, int len)
-    : NamedString(name,value,len),
+NamedPointer::NamedPointer(const char* name, GenObject* data, const char* value, int len,
+    const char* namePrefix)
+    : NamedString(name,value,len,namePrefix),
     m_data(0)
 {
     userData(data);
