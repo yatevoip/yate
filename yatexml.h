@@ -84,6 +84,9 @@ public:
 	InvalidEncoding,
 	UnsupportedEncoding,
 	UnsupportedVersion,
+	// Errors set by XmlDomParser::getXml()
+	GetXmlMissing,
+	GetXmlEmpty,
     };
     enum Type {
 	None           = 0,
@@ -700,10 +703,7 @@ public:
      * @param npOwner Optional pointer to data to be filled with NamedPointer owning the element.
      *  If parameter is NamedPointer carrying an XmlElement and 'npOwner' is NULL the pointer will
      *   be taken from it
-     * @param error Optional pointer to parser error code (if element is parsed from string)
-     *  0 means parameter is missing, empty or filled with blank characters
-     *  IOError means parser did not failed, has no error set but the string contains
-     *   a non blank character
+     * @param error Optional pointer to parser error code
      * @param parserName Optional parser name if needing to parse from string
      * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
      * @param warnLevel Put a parse failure debug level (if at least 1).
@@ -715,6 +715,27 @@ public:
     static XmlElement* getXml(const NamedList& params, const String& param, NamedPointer** npOwner,
 	int* error = 0, const char* parserName = 0, DebugEnabler* dbg = 0,
 	int warnLevel = DebugMild);
+
+    /**
+     * Retrieve an XML element from list parameter
+     * @param params Parameters list
+     * @param param Parameter name. Defaults to 'xml' if empty
+     * @param autoDel Owner of returned xml if any. It will own the xml element if we built one
+     * @param error Optional pointer to parser error code
+     * @param parserName Optional parser name if needing to parse from string
+     * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
+     * @param warnLevel Put a parse failure debug level (if at least 1).
+     *  This parameter is ignored if 'dbg' is NULL
+     * @return XmlElement pointer, NULL if missing or parser failure.
+     */
+    static inline XmlElement* getXml(const NamedList& params, const String& param, AutoGenObject& autoDel,
+	int* error = 0, const char* parserName = 0, DebugEnabler* dbg = 0,
+	int warnLevel = DebugMild) {
+	    NamedPointer* np = 0;
+	    XmlElement* xml = getXml(params,param,&np,error,parserName,dbg,warnLevel);
+	    autoDel.set(np ? 0 : (GenObject*)xml);
+	    return xml;
+	}
 
 protected:
 
@@ -1837,6 +1858,7 @@ public:
      *  O: append
      * @param copyObj Put a copy of element as object
      * @return True if destination list is owning this object, false if not
+     *  NOTE: Do not alter element contents or release it if owned by list
      */
     inline bool exportParam(NamedList& list, const char* name, bool txt, bool obj,
 	int setParam = 1, bool copyObj = false) {

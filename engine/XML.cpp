@@ -93,6 +93,8 @@ const TokenDict XmlSaxParser::s_errorString[] = {
 	{"Invalid encoding",              InvalidEncoding},
 	{"Unsupported encoding",          UnsupportedEncoding},
 	{"Unsupported version",           UnsupportedVersion},
+	{"Missing parameter",             GetXmlMissing},
+	{"Empty data",                    GetXmlEmpty},
 	{0,0}
 };
 
@@ -1258,11 +1260,14 @@ XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, N
     int* error, const char* parserName, DebugEnabler* dbg, int warnLevel)
 {
     NamedString* ns = params.getParam(param ? param : s_xml);
-    if (!ns)
+    if (!ns) {
+	if (error)
+	    *error = GetXmlMissing;
 	return 0;
+    }
     NamedPointer* np = YOBJECT(NamedPointer,ns);
     if (np) {
-	XmlElement* xml = YOBJECT(XmlElement,np);
+	XmlElement* xml = YOBJECT(XmlElement,np->userData());
 	if (xml) {
 	    if (npOwner)
 		*npOwner = np;
@@ -1273,8 +1278,11 @@ XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, N
     }
     if (npOwner)
 	*npOwner = 0;
-    if (!*ns)
+    if (!*ns) {
+	if (error)
+	    *error = GetXmlEmpty;
 	return 0;
+    }
     const char* buf = *ns;
     XmlDomParser parser(parserName,true);
     if (dbg)
@@ -1297,13 +1305,18 @@ XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, N
 	int code = 0;
 	if (parser.error())
 	    code = parser.error();
-	else if (!ok)
-	    code = XmlSaxParser::Unknown;
 	else {
-	    while (*buf) {
-		if (!XmlSaxParser::blank(*buf++)) {
-		    code = XmlSaxParser::IOError;
-		    break;
+	    code = XmlSaxParser::Unknown;
+	    if (!ok) {
+		while (*buf) {
+		    if (!XmlSaxParser::blank(*buf++)) {
+			if (error) {
+			    *error = XmlSaxParser::GetXmlEmpty;
+			    return 0;
+			}
+			code = XmlSaxParser::GetXmlEmpty;
+			break;
+		    }
 		}
 	    }
 	}
