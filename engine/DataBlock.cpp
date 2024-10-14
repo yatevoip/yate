@@ -405,7 +405,7 @@ bool DataBlock::changeHex(unsigned int pos, const char* data, unsigned int len, 
     unsigned int n = 0;
     if (!sep) {
 	if (0 != (len % 2))
-	    return retResult(false,-3,res);
+	    return retResult(false,HexInvalidLength,res);
 	n = len / 2;
     }
     else {
@@ -420,7 +420,7 @@ bool DataBlock::changeHex(unsigned int pos, const char* data, unsigned int len, 
 	if (!len)
 	    return retResult(emptyOk,0,res);
 	if (2 != (len % 3))
-	    return retResult(false,-3,res);
+	    return retResult(false,HexInvalidLength,res);
 	n = (len + 1) / 3;
     }
     if (!n)
@@ -430,7 +430,7 @@ bool DataBlock::changeHex(unsigned int pos, const char* data, unsigned int len, 
     unsigned int aLen = allocLen(newLen);
     void* newData = dbAlloc(aLen);
     if (!newData)
-	return retResult(false,-1,res);
+	return retResult(false,HexAllocFailed,res);
     if (pos > m_length)
 	pos = m_length;
     char* buf = (char*)newData + pos;
@@ -444,7 +444,7 @@ bool DataBlock::changeHex(unsigned int pos, const char* data, unsigned int len, 
     }
     if (iBuf < n) {
 	::free(newData);
-	return retResult(false,-2,res);
+	return retResult(false,HexInvalidFormat,res);
     }
     if (m_data)
 	rebuildDataInsert(newData,newLen,m_data,m_length,pos,n);
@@ -622,6 +622,69 @@ void DataBlock::rebuildDataRemove(void* dest, unsigned int dLen, const void* src
     }
     if (fillAfter >= 0 && cp < dLen)
 	::memset((uint8_t*)dest + cp,fillAfter,dLen - cp);
+}
+
+bool DataBlock::exportParam(NamedList& list, const char* name, bool hex, bool obj,
+    int setParam, char sep, bool upCase, bool copyObj)
+{
+    if (TelEngine::null(name))
+	name = "data";
+    NamedString* ns = 0;
+    if (obj) {
+	ns = new NamedPointer(name);
+	if (hex) // Set text now (will reset NamedPointer user data on change)
+	    ns->hexify(data(),length(),sep,upCase);
+	static_cast<NamedPointer*>(ns)->userData(copyObj ? new DataBlock(*this) : this);
+    }
+    else {
+	ns = new NamedString(name);
+	ns->hexify(data(),length(),sep,upCase);
+    }
+    if (setParam)
+	list.setParam(ns,setParam < 0);
+    else
+	list.addParam(ns);
+    return !copyObj;
+}
+
+DataBlock* DataBlock::getParam(const NamedList& params, const String& param, NamedPointer** npOwner,
+    int* res, String* error, bool emptyOk, char sep, bool guessSep)
+{
+    int code = HexMissing;
+    NamedString* ns = param ? params.getParam(param) : params.getParam(YSTRING("data"));
+    if (ns) {
+	NamedPointer* np = YOBJECT(NamedPointer,ns);
+	if (np) {
+	    DataBlock* db = YOBJECT(DataBlock,np->userData());
+	    if (db && (db->length() || emptyOk)) {
+		if (npOwner)
+		    *npOwner = np;
+		else
+		    np->takeData();
+		return db;
+	    }
+	}
+	if (*ns) {
+	    DataBlock* db = new DataBlock;
+	    if (db->changeHex(0,ns->c_str(),ns->length(),sep,guessSep,emptyOk,&code))
+		return db;
+	    TelEngine::destruct(db);
+	}
+	else if (emptyOk)
+	    return new DataBlock;
+	else
+	    code = HexEmpty;
+    }
+    if (res)
+	*res = code;
+    if (error) {
+	switch (code) {
+	    case HexMissing: *error = "missing"; break;
+	    case HexEmpty: *error = "empty"; break;
+	    default: *error = code;
+	}
+    }
+    return 0;
 }
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

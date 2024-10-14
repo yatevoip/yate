@@ -6132,6 +6132,18 @@ class YATE_API DataBlock : public GenObject
     YCLASS(DataBlock,GenObject)
 public:
     /**
+     * Error (result) codes returned by unHexify() / getParam()
+     */
+    enum UnhexifyError
+    {
+	HexEmpty = 0,
+	HexAllocFailed = -1,
+	HexInvalidFormat = -2,
+	HexInvalidLength = -3,
+	HexMissing = -4,
+    };
+
+    /**
      * Constructs an empty data block
      * @param overAlloc How many bytes of memory to overallocate
      */
@@ -7207,6 +7219,66 @@ public:
     static inline void lsbSet(uint8_t* buf, uint64_t val, uint8_t bytes)
 	{ return lsbSetAdvance(buf,val,bytes); }
 
+    /**
+     * Put this DataBlock in a list parameter
+     * @param list Parameters list
+     * @param name Parameter name. Use 'data' if NULL or empty
+     * @param hex Put block hex string. This parameter is ignored and handled as true if object is not set
+     * @param obj Put DataBlock object in parameter
+     * @param setParam Greater than 0: replace first occurence, append if not found.
+     *  Less than 0: replace first occurence and clear all other occurences, append if not found.
+     *  O: append
+     * @param sep Separator character to use between octets
+     * @param upCase Set to true to use upper case characters in hexa
+     * @param copyObj Put a copy of DataBlock as object
+     * @return True if destination list is owning the given object, false if not
+     *  NOTE: Do not alter block contents or release it if owned by list
+     */
+    bool exportParam(NamedList& list, const char* name, bool hex = true, bool obj = false,
+	int setParam = 1, char sep = 0, bool upCase = false, bool copyObj = false);
+
+    /**
+     * Retrieve a DataBlock from list parameter
+     * @param params Parameters list
+     * @param param Parameter name. Defaults to 'data' if empty
+     * @param npOwner Optional pointer to data to be filled with NamedPointer owning the block.
+     *  If parameter is NamedPointer carrying an DataBlock and 'npOwner' is NULL the pointer will
+     *   be taken from it
+     * @param res Optional pointer to be filled with failure code
+     * @param error Optional string to be filled with error string
+     * @param emptyOk Return success (valid pointer) on empty hex buffer, false otherwise
+     * @param sep Separator character used between octets. 0 if no separator is expected or
+     *  should be guessed
+     * @param guessSep Guess separator value. Ignored if 'sep' is non 0
+     * @return DataBlock pointer, NULL if missing or invalid.
+     *  If 'npOwner' is given and set on return the returned pointer is owned by it.
+     *  If 'npOwner' is not given or not set on return the returned pointer is owned by the caller.
+     */
+    static DataBlock* getParam(const NamedList& params, const String& param, NamedPointer** npOwner,
+	int* res = 0, String* error = 0, bool emptyOk = false, char sep = 0, bool guessSep = true);
+
+    /**
+     * Retrieve a DataBlock from list parameter
+     * @param params Parameters list
+     * @param param Parameter name. Defaults to 'data' if empty
+     * @param autoDel Owner of returned block if any. It will own the returned block if we built one
+     * @param res Optional pointer to be filled with failure code
+     * @param error Optional string to be filled with error string
+     * @param emptyOk Return success (valid pointer) on empty hex buffer, false otherwise
+     * @param sep Separator character used between octets. 0 if no separator is expected or
+     *  should be guessed
+     * @param guessSep Guess separator value. Ignored if 'sep' is non 0
+     * @return DataBlock pointer, NULL if missing or invalid
+     */
+    static inline DataBlock* getParam(const NamedList& params, const String& param,
+	AutoGenObject& autoDel, int* res = 0, String* error = 0, bool emptyOk = false,
+	char sep = 0, bool guessSep = true) {
+	    NamedPointer* np = 0;
+	    DataBlock* db = getParam(params,param,&np,res,error,emptyOk,sep,guessSep);
+	    autoDel.set(np ? 0 : db);
+	    return db;
+	}
+
 private:
     inline unsigned int allocLen(unsigned int len) const {
 	    // allocate a multiple of 8 bytes
@@ -7943,7 +8015,7 @@ public:
      * @param name Parameter name
      * @param buf Buffer to add
      * @param len Buffer length
-     * @param sep Optiona separator (defaults to space)
+     * @param sep Optional separator
      * @param prefix String prefix for the name
      * @return Reference to this NamedList
      */
