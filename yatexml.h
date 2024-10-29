@@ -938,6 +938,7 @@ private:
  */
 class YATE_API XmlFragment : public XmlParent
 {
+    friend class XmlElement;
 public:
 
     /**
@@ -1085,6 +1086,13 @@ public:
 		x = (static_cast<XmlChild*>(lst->get()))->xmlText();
 	    return x;
 	}
+
+    /**
+     * Append valid XmlElement objects to destination vector. Change its autodelete property
+     * @param vect Destination vector
+     * @param lst List of XmlChild
+     */
+    static void addElements(ObjVector& vect, ObjList* lst);
 
 private:
     static XmlElement* elementMatch(XmlElement* xml, const String* name, const String* ns,
@@ -1492,6 +1500,50 @@ public:
 	const String* auth = 0) const;
 
     /**
+     * Build (append to) a String from this XmlElement for debug output purposes
+     * @param dump The destination string
+     * @param enclose Add multiline enclose chars (-----). Ignored if destination buffer is not empty
+     * @param auth Optional list of tag and attribute names to be replaced with '***'. This
+     *  parameter can be used when the result will be printed to output to avoid printing
+     *  authentication data to output. The array must end with an empty string
+     * @return Destination buffer reference
+     */
+    inline String& toStringDbg(String& dump, const String* auth = 0, bool enclose = true) const {
+	    if (enclose) {
+		if (!dump)
+		    dump << "\r\n-----";
+		else
+		    enclose = false;
+	    }
+	    toString(dump,false,"\r\n","  ",false,auth);
+	    if (enclose)
+		return dump << "\r\n-----";
+	    return dump;
+	}
+
+    /**
+     * Build (append to) a String from this XmlElement for debug output purposes
+     * @param auth Optional list of tag and attribute names to be replaced with '***'. This
+     *  parameter can be used when the result will be printed to output to avoid printing
+     *  authentication data to output. The array must end with an empty string
+     * @param enclose Add multiline enclose chars (-----)
+     * @return String with data
+     */
+    inline String toStringDbgDump(const String* auth = 0, bool enclose = true) const {
+	    String dump;
+	    return toStringDbg(dump,auth,enclose);
+	}
+
+    /**
+     * Build (append to) a String from this XmlElement for nice file write purposes
+     * @param dump The destination string
+     * @param escape True if the attributes values need to be escaped
+     * @return Destination buffer reference
+     */
+    inline String& toStringFile(String& dump, bool escape = true) const
+	{ return toString(dump,escape,"\r\n","  ",false); }
+
+    /**
      * Find the first XmlElement child of this XmlElement
      * @param name Optional name of the child
      * @param ns Optional child namespace
@@ -1576,13 +1628,36 @@ public:
     const String& getText() const;
 
     /**
+     * Retrieve a pointer first XmlText child text value
+     * @return String pointer, NULL if not found
+     */
+    String* text() const;
+
+    /**
+     * Reset the text for first XmlText or add one if not found
+     * @return XmlText reference
+     */
+    inline XmlText& setText()
+	{ return *(setText("")); }
+
+    /**
      * Set text for first XmlText element found in this XmlElement's children
      * If child text element does not exist, create it and append it to the element's children.
-     * @param text Text to set to the XmlElement. If null, the first found XmlText element
+     * @param text Text to set to the XmlElement. If NULL, the first found XmlText element
      *  will be deleted.
-     * @return The set XmlText if text was set, null if an XmlText was deleted
+     * @param len Optional text length, -1 to use all string
+     * @return The set XmlText if text was set, NULL if an XmlText was deleted
      */
-    XmlText* setText(const char* text);
+    XmlText* setTextLen(const char* text, int len = -1);
+
+    /**
+     * Set text for first XmlText element found in this XmlElement's children
+     * If child text element does not exist, create it and append it to the element's children.
+     * @param text Text to set to the XmlElement. Delete the first found XmlText if this parameter is NULL
+     * @return The set XmlText if text was set, NULL if an XmlText was deleted
+     */
+    inline XmlText* setText(const char* text)
+	{ return setTextLen(text); }
 
     /**
      * Set hexified text for first XmlText element found in this XmlElement's children
@@ -1592,7 +1667,7 @@ public:
      * @param len Buffer length
      * @param sep Optional separator
      * @param upCase Set to true to use upper case hexadecimal characters
-     * @return The set XmlText if text was set, null if an XmlText was deleted
+     * @return The set XmlText if text was set, NULL if an XmlText was deleted
      */
     XmlText* setText(const void* buf, unsigned int len, char sep = 0, bool upCase = false);
 
@@ -1610,6 +1685,20 @@ public:
      * @param upCase Set to true to use upper case hexadecimal characters
      */
     void addText(const void* buf, unsigned int len, char sep = 0, bool upCase = false);
+
+    /**
+     * Clear (remove) XML text
+     * @param all Set it to true to remove all text children
+     * @return True if at least one text item was removed, false otherwise
+     */
+    bool clearText(bool all = false);
+
+    /**
+     * Compact text children: trim spaces, remove if empty
+     * @param recursive Recursively apply to XmlElement children also
+     * @return True if at least one text item was removed/changed, false otherwise
+     */
+    bool compactText(bool recursive = true);
 
     /**
      * Retrieve the list of attributes
@@ -1640,6 +1729,14 @@ public:
 	    else
 		m_element.copyParams(list);
 	}
+
+    /**
+     * Add or replace an attribute
+     * @param name Attribute name
+     * @return Reference to attribute value (empty)
+     */
+    inline String& setAttribute(const String& name)
+	{ return m_element.setParamRet(name); }
 
     /**
      * Add or replace an attribute
@@ -1953,6 +2050,8 @@ private:
 	    if (pos != -1)
 		m_prefixed = new NamedString(m_element.substr(pos + 1),m_element.substr(0,pos));
 	}
+    inline ObjList& getChildrenList()
+	{ return m_children.m_list; }
 
     XmlFragment m_children;                      // Children of this element
     NamedList m_element;                         // The element
@@ -2112,6 +2211,13 @@ public:
      */
     inline void setText(const char* text)
 	{ m_text = text; }
+
+    /**
+     * Retrieve a non const reference to held text
+     * @return Reference to held text
+     */
+    inline String& text()
+	{ return m_text; }
 
     /**
      * Set hexified data value

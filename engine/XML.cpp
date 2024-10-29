@@ -1543,6 +1543,26 @@ XmlElement* XmlFragment::getElement(ObjList*& lst, const String* name, const Str
     return 0;
 }
 
+void XmlFragment::addElements(ObjVector& vect, ObjList* lst)
+{
+    if (!lst)
+	return;
+    unsigned int idx = 0;
+    while (true) {
+	XmlElement* xml = getElement(lst);
+	if (!xml)
+	    break;
+	if (!idx) {
+	    vect.setDelete(false);
+	    idx = vect.length();
+	    vect.resize(idx + 1 + (lst ? lst->count() : 0));
+	}
+	vect.set(xml,idx++);
+    }
+    if (idx && idx < vect.length())
+	vect.resize(idx,true,false);
+}
+
 // Replaces all ${paramname} in fragment's children with the corresponding parameters
 void XmlFragment::replaceParams(const NamedList& params)
 {
@@ -1914,6 +1934,14 @@ const String& XmlElement::getText() const
     return txt ? txt->getText() : String::empty();
 }
 
+String* XmlElement::text() const
+{
+    XmlText* txt = 0;
+    for (ObjList* ob = getChildren().skipNull(); ob && !txt; ob = ob->skipNext())
+	txt = (static_cast<XmlChild*>(ob->get()))->xmlText();
+    return txt ? &txt->text() : 0;
+}
+
 XmlChild* XmlElement::getFirstChild()
 {
     if (!m_children.getChildren().skipNull())
@@ -1921,35 +1949,45 @@ XmlChild* XmlElement::getFirstChild()
     return static_cast<XmlChild*>(m_children.getChildren().skipNull()->get());
 }
 
-XmlText* XmlElement::setText(const char* text)
+static inline bool xmlTextHolder(ObjList& list, ObjList*& pos)
 {
-    XmlText* txt = XmlFragment::findText(getChildren().skipNull());
-    if (txt) {
-	if (!text)
-	    return static_cast<XmlText*>(removeChild(txt));
-	txt->setText(text);
+    ObjList* o = list.skipNull();
+    if (!o) {
+	pos = &list;
+	return false;
     }
-    else if (text) {
-	txt = new XmlText(text);
-	addChild(txt);
+    for (; o; o = o->skipNext()) {
+	pos = o;
+	if ((static_cast<XmlChild*>(o->get()))->xmlText())
+	    return true;
     }
-    return txt;
+    return false;
+}
+
+XmlText* XmlElement::setTextLen(const char* text, int len)
+{
+    if (!text) {
+	clearText();
+	return 0;
+    }
+    ObjList* txt = 0;
+    if (!xmlTextHolder(getChildrenList(),txt))
+	txt = txt->append(new XmlText(""));
+    (static_cast<XmlText*>(txt->get()))->text().assign(text,len);
+    return static_cast<XmlText*>(txt->get());
 }
 
 XmlText* XmlElement::setText(const void* buf, unsigned int len, char sep, bool upCase)
 {
-    XmlText* txt = XmlFragment::findText(getChildren().skipNull());
-    if (txt) {
-	if (buf && len)
-	    txt->setText(buf,len,sep,upCase);
-	else
-	    txt = static_cast<XmlText*>(removeChild(txt));
+    if (!(buf && len)) {
+	clearText();
+	return 0;
     }
-    else if (buf && len) {
-	txt = new XmlText(buf,len,sep,upCase);
-	addChild(txt);
-    }
-    return txt;
+    ObjList* txt = 0;
+    if (!xmlTextHolder(getChildrenList(),txt))
+	txt = txt->append(new XmlText(""));
+    (static_cast<XmlText*>(txt->get()))->text().hexify(buf,len,sep,upCase);
+    return static_cast<XmlText*>(txt->get());
 }
 
 // Add a text child
@@ -1963,6 +2001,50 @@ void XmlElement::addText(const void* buf, unsigned int len, char sep, bool upCas
 {
     if (buf && len)
 	addChild(new XmlText(buf,len,sep,upCase));
+}
+
+bool XmlElement::clearText(bool all)
+{
+    bool chg = false;
+    for (ObjList* o = getChildren().skipNull(); o;) {
+	if ((static_cast<XmlChild*>(o->get()))->xmlText()) {
+	    o->remove();
+	    o = all ? o->skipNull() : 0;
+	    chg = true;
+	}
+	else
+	    o = o->skipNext();
+    }
+    return chg;
+}
+
+bool XmlElement::compactText(bool recursive)
+{
+    bool chg = false;
+    for (ObjList* o = getChildren().skipNull(); o;) {
+	bool keep = true;
+	XmlElement* xml = (static_cast<XmlChild*>(o->get()))->xmlElement();
+	if (xml) {
+	    if (recursive)
+		chg = xml->compactText(recursive) || chg;
+	}
+	else {
+	    XmlText* txt = (static_cast<XmlChild*>(o->get()))->xmlText();
+	    if (txt) {
+		unsigned int n = txt->text().length();
+		keep = !txt->text().trimSpaces().null();
+		chg = n != txt->text().length() || chg;
+	    }
+	}
+	if (keep)
+	    o = o->skipNext();
+	else {
+	    o->remove();
+	    o = o->skipNull();
+	    chg = true;
+	}
+    }
+    return chg;
 }
 
 // Retrieve the element's tag (without prefix) and namespace
