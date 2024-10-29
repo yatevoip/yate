@@ -8137,6 +8137,15 @@ public:
 	bool upCase = false, bool clearOther = false);
 
     /**
+     * Set a named string in the parameter list.
+     * @param name Name of the string
+     * @param value Optional value
+     * @param clearOther Clear all other occurences of parameter
+     * @return Reference to added parameter
+     */
+    NamedString& setParamRet(const String& name, const char* value = 0, bool clearOther = false);
+
+    /**
      * Clears all instances of a named string in the parameter list.
      * @param name Name of the string to remove
      * @param childSep If set clears all child parameters in format name+childSep+anything

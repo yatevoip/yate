@@ -258,6 +258,14 @@ NamedList& NamedList::setParam(const String& name, double value, bool clearOther
     nlSetParamValue(name,value,clearOther);
 }
 
+NamedString& NamedList::setParamRet(const String& name, const char* value, bool clearOther)
+{
+    XDebug(DebugAll,"NamedList::setParamRet(%s,%s) [%p]",name.safe(),TelEngine::c_safe(value),this);
+    NamedString* ns = nlSetParamCreate(*this,name,clearOther);
+    ns->assign(value);
+    return *ns;
+}
+
 NamedList& NamedList::clearParam(const String& name, char childSep, const String* value)
 {
     XDebug(DebugInfo,"NamedList::clearParam(\"%s\",'%.1s',(%p)'%s')",
