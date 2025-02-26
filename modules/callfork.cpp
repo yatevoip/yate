@@ -55,8 +55,8 @@ protected:
     RefPointer<CallEndpoint> m_discPeer;
     ObjList m_slaves;
     String m_ringing;
-    Regexp m_failures;
-    int m_index;
+    MatchingItemBase* m_failures;
+    unsigned int m_index;
     bool m_answered;
     bool m_rtpForward;
     bool m_rtpStrict;
@@ -67,11 +67,15 @@ protected:
     bool m_timerDrop;
     bool m_execNext;
     bool m_chanMsgs;
-    bool m_failuresRev;
     bool m_setId;
     String m_reason;
     String m_media;
+    NamedList m_mediaParams;
+    NamedList m_mediaMsgParams;
+    String m_mediaForce;
+    String m_mediaFakeMsg;
     unsigned int m_targetIdx;
+    unsigned int m_targetCount;
     int m_level;
 };
 
@@ -153,11 +157,12 @@ private:
 
 
 ForkMaster::ForkMaster(ObjList* targets, int lvl)
-    : m_index(0), m_answered(false), m_rtpForward(false), m_rtpStrict(false),
+    : m_failures(0), m_index(0), m_answered(false), m_rtpForward(false), m_rtpStrict(false),
       m_fake(false), m_targets(targets), m_exec(0),
       m_timer(0), m_timerDrop(false), m_execNext(false), m_chanMsgs(false),
-      m_failuresRev(false), m_setId(false), m_reason("hangup"),
-      m_targetIdx(0), m_level(lvl)
+      m_setId(false), m_reason("hangup"),
+      m_mediaParams(""), m_mediaMsgParams(""),
+      m_targetIdx(0), m_targetCount(targets ? targets->count() : 0), m_level(lvl)
 {
     String tmp(MOD_PREFIX "/");
     tmp << ++s_current;
@@ -197,6 +202,7 @@ ForkMaster::~ForkMaster()
 	msg->addParam("cdrtrack",String::boolText(false));
 	Engine::enqueue(msg);
     }
+    TelEngine::destruct(m_failures);
 }
 
 void ForkMaster::disconnected(bool final, const char* reason)
@@ -217,6 +223,8 @@ String* ForkMaster::getNextDest()
     String* ret = 0;
     while (!ret && m_targets && m_targets->count())
 	ret = static_cast<String*>(m_targets->remove(false));
+    if (ret)
+	m_targetIdx++;
     return ret;
 }
 
@@ -349,20 +357,65 @@ bool ForkMaster::startCalling(Message& msg)
 	Engine::enqueue(m);
     }
     // stoperror is OBSOLETE
-    m_failures = msg.getValue("fork.stop",msg.getValue("stoperror"));
-    if (m_failures.endsWith("^")) {
-	m_failuresRev = true;
-	m_failures = m_failures.substr(0,m_failures.length()-1);
+    String tmp = msg.getValue("fork.stop",msg.getValue("stoperror"));
+    bool negated = tmp.endsWith("^");
+    if (negated)
+	tmp = tmp.substr(0,tmp.length() - 1);
+    if (tmp)
+	m_failures = new MatchingItemRegexp("",tmp,negated);
+    for (ObjList* o = m_exec->paramList()->skipNull(); o; ) {
+	bool rm = true;
+	NamedString* ns = static_cast<NamedString*>(o->get());
+	const String& name = ns->name();
+	if (name == YSTRING("fork.setid"))
+	    m_setId = ns->toBoolean();
+	else if (name == YSTRING("rtp_forward")) {
+	    m_rtpForward = ns->toBoolean();
+	    rm = false;
+	}
+	else if (name == YSTRING("rtpstrict")) {
+	    m_rtpStrict = ns->toBoolean();
+	    rm = false;
+	}
+	else if (name == YSTRING("fork.fake"))
+	    m_mediaParams.assign(*ns);
+	else if (name == YSTRING("autorepeat"))
+	    m_mediaParams.addParam(ns->name(),*ns);
+	else if (name.startsWith("fork.fake.")) {
+	    if (name.length() > 9)
+		m_mediaParams.addParam(name.c_str() + 10,*ns);
+	}
+	else if (name.startsWith("fork.fake_msg_param.")) {
+	    if (name.length() > 19)
+		m_mediaMsgParams.addParam(name.c_str() + 20,*ns);
+	}
+	else if (name == YSTRING("fork.fake_force")) {
+	    m_mediaForce = *ns;
+	    if (m_mediaForce && m_mediaForce != YSTRING("call.progress")
+		&& m_mediaForce != YSTRING("call.ringing"))
+		m_mediaForce = "-";
+	}
+	else if (name == YSTRING("fork.fake_result_param"))
+	    m_mediaMsgParams.assign(*ns);
+	else if (name == YSTRING("fork.fakemessage"))
+	    m_mediaFakeMsg = *ns;
+	else if (name == YSTRING("stoperror") || name == YSTRING("fork.stop")
+	    || name == YSTRING("peerid"))
+	    // Remove
+	    ;
+	else
+	    rm = false;
+	if (rm) {
+	    o->remove();
+	    o = o->skipNull();
+	}
+	else
+	    o = o->skipNext();
     }
-    m_setId = msg.getBoolValue("fork.setid");
-    m_exec->clearParam("stoperror");
-    m_exec->clearParam("fork.stop");
-    m_exec->clearParam("fork.setid");
-    m_exec->clearParam("peerid");
     m_exec->setParam("fork.master",id());
     m_exec->setParam("fork.origid",getPeerId());
-    m_rtpForward = msg.getBoolValue("rtp_forward");
-    m_rtpStrict = msg.getBoolValue("rtpstrict");
+    if (m_mediaForce)
+	m_media = m_mediaParams;
     if (!callContinue()) {
 	const char* err = m_exec->getValue("reason");
 	if (err)
@@ -398,11 +451,13 @@ bool ForkMaster::callContinue()
     int forks = 0;
     while (m_exec && !m_answered) {
 	// get the fake media source at start of each group
-	m_media = m_exec->getValue("fork.fake");
+	if (!m_mediaForce)
+	    m_media = m_mediaParams;
 	String* dest = getNextDest();
 	if (!dest)
 	    break;
-	XDebug(this,DebugAll,"Handling target #%u '%s' [%p]",++m_targetIdx,dest->c_str(),this);
+	XDebug(this,DebugAll,"Handling target %u/%u '%s' [%p]",
+	    m_targetIdx,m_targetCount,dest->c_str(),this);
 	if (dest->startSkip("|",false)) {
 	    m_execNext = false;
 	    if (*dest) {
@@ -475,7 +530,7 @@ void ForkMaster::lostSlave(ForkSlave* slave, const char* reason)
 	return;
     if (reason)
 	m_exec->setParam("fork.reason",reason);
-    if (reason && m_failures && (m_failures.matches(reason) != m_failuresRev)) {
+    if (reason && m_failures && m_failures->matchString(reason)) {
 	Debug(this,DebugCall,"Call '%s' terminating early on reason '%s' [%p]",
 	    getPeerId().c_str(),reason,this);
     }
@@ -499,7 +554,7 @@ void ForkMaster::lostSlave(ForkSlave* slave, const char* reason)
 		    break;
 	    }
 	}
-	Debug(this,DebugNote,
+	Debug(this,DebugCall,
 	    "Call '%s' lost%s slave '%s' reason '%s' remaining %u regulars, %u auxiliars, %u persistent [%p]",
 	    getPeerId().c_str(),ringing ? " ringing" : "",
 	    slave->id().c_str(),reason,
@@ -510,7 +565,7 @@ void ForkMaster::lostSlave(ForkSlave* slave, const char* reason)
 	}
 	if (regulars || callContinue())
 	    return;
-	Debug(this,DebugCall,"Call '%s' failed after %d attempts with reason '%s' [%p]",
+	Debug(this,DebugCall,"Call '%s' failed after %u attempts with reason '%s' [%p]",
 	    getPeerId().c_str(),m_index,reason,this);
     }
     m_timer = 0;
@@ -579,7 +634,14 @@ bool ForkMaster::msgProgress(Message& msg, const String& dest)
     RefPointer<DataEndpoint> dataEp = getEndpoint();
     if (m_ringing.null())
 	m_ringing = dest;
-    if (m_fake || !dataEp) {
+    bool setMedia = true;
+    if (m_mediaForce) {
+	if (m_mediaForce[0] != '-')
+	    setMedia = m_mediaForce == msg;
+	if (setMedia && m_media)
+	    setEndpoint();
+    }
+    else if (m_fake || !dataEp) {
 	const CallEndpoint* call = slave->getPeer();
 	if (!call)
 	    call = static_cast<const CallEndpoint*>(msg.userObject(YATOM("CallEndpoint")));
@@ -606,29 +668,35 @@ bool ForkMaster::msgProgress(Message& msg, const String& dest)
 	msg.setParam("fork.master",id());
     msg.setParam("peerid",peer->id());
     msg.setParam("targetid",peer->id());
-    if (m_media) {
-	Debug(this,DebugInfo,"Call '%s' faking media '%s'",
-	    peer->id().c_str(),m_media.c_str());
-	String newMsg;
-	if (m_exec)
-	    newMsg = m_exec->getValue("fork.fakemessage");
+    if (setMedia && m_media) {
+	Debug(this,DebugAll,"Call '%s' faking media '%s'",peer->id().c_str(),m_mediaParams.safe());
+	m_media.clear();
+	bool move = m_mediaForce || m_targetIdx >= m_targetCount;
+	lock.drop();
 	Message m("chan.attach");
 	m.userData(this);
 	m.addParam("id",id());
-	m.addParam("source",m_media);
+	m.addParam("source",m_mediaParams.safe());
 	m.addParam("single",String::boolText(true));
-	if (m_exec)
-	    m.copyParam(*m_exec,"autorepeat");
-	m_media.clear();
-	lock.drop();
-	if (Engine::dispatch(m)) {
+	if (move)
+	    m_mediaParams.moveParams(&m);
+	else
+	    m.copyParams(false,m_mediaParams);
+	bool ok = Engine::dispatch(m);
+	if (ok) {
 	    m_fake = true;
-	    if (newMsg)
-		msg = newMsg;
+	    if (m_mediaFakeMsg)
+		msg = m_mediaFakeMsg;
+	    if (move)
+		m_mediaMsgParams.moveParams(&msg);
+	    else
+		msg.copyParams(false,m_mediaMsgParams);
 	}
+	if (m_mediaMsgParams)
+	    msg.addParam(m_mediaMsgParams,ok);
     }
-    Debug(this,DebugNote,"Call '%s' going on '%s' to '%s'%s%s [%p]",
-	peer->id().c_str(),dest.c_str(),msg.getValue("id"),
+    Debug(this,DebugInfo,"Call(%s) '%s' going on '%s' to '%s'%s%s [%p]",
+	msg.safe(),peer->id().c_str(),dest.c_str(),msg.getValue("id"),
 	(dataEp || m_fake) ? " with audio data" : "",
 	m_fake ? " (fake)" : "",this);
     return true;
