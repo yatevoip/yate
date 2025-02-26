@@ -822,12 +822,15 @@ bool Channel::msgControl(Message& msg)
     setMaxcall(msg);
     setMaxPDD(msg);
     setChanParams(msg);
+    bool ok = false;
     for (ObjList* o = m_data.skipNull(); o; o = o->skipNext()) {
 	DataEndpoint* dep = static_cast<DataEndpoint*>(o->get());
-	if (dep->control(msg))
-	    return true;
+	ok = dep->control(msg);
+	if (ok)
+	    break;
     }
-    return false;
+    handleComplete(msg);
+    return ok;
 }
 
 void Channel::statusParams(String& str)
@@ -1554,6 +1557,7 @@ bool Driver::received(Message &msg, int id)
 	    return false;
 	case Locate:
 	    msg.userData(chan);
+	    chan->handleComplete(msg);
 	    return true;
 	case Control:
 	    return chan->msgControl(msg);

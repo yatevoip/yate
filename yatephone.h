@@ -2130,6 +2130,23 @@ public:
 	}
 
     /**
+     * Put channel data into a message if requested
+     * @param msg Message to fill in
+     */
+    inline void handleComplete(Message& msg) const {
+	    if (msg.getBoolValue(YSTRING("complete"))) {
+		complete(msg,msg.getBoolValue(YSTRING("complete_minimal")));
+		if (msg.getBoolValue(YSTRING("complete_params"))) {
+		    Lock lck(paramMutex(),-1,true);
+		    msg.copyParams(parameters());
+		}
+	    }
+	    else if (msg.getBoolValue(YSTRING("chan_params")))
+		copyChanParams(msg);
+	}
+
+
+    /**
      * Notification for dispatched messages
      * @param msg Message that was dispatched
      * @param handled Result of handling the message
