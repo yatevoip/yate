@@ -2317,8 +2317,8 @@ bool JsArray::runNativeSort(ObjList& stack, const ExpOperation& oper, GenObject*
 
 static inline void initRegexp(JsRegExp& rex)
 {
-    rex.params().addParam("ignoreCase",String::boolText(rex.regexp().isCaseInsensitive()));
-    rex.params().addParam("basicPosix",String::boolText(!rex.regexp().isExtended()));
+    rex.params().addParam(new ExpOperation(rex.regexp().isCaseInsensitive(),"ignoreCase"));
+    rex.params().addParam(new ExpOperation(!rex.regexp().isExtended(),"basicPosix"));
 }
 
 JsRegExp::JsRegExp(ScriptMutex* mtx)
