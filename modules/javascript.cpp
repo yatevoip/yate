@@ -2672,7 +2672,7 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 
 	int level = DebugNote;
 	int limit = s_allowAbort ? DebugFail : DebugTest;
-	if (op->number() > 1 && op->isInteger()) {
+	if (oper.number() > 1 && op->isInteger()) {
 	    level = (int)op->number();
 	    if (level > DebugAll)
 		level = DebugAll;
@@ -6109,20 +6109,20 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    return false;
 	ScriptContext* list = YOBJECT(ScriptContext,static_cast<ExpOperation*>(args[0]));
 	ExpOperation* name = static_cast<ExpOperation*>(args[1]);
-	ExpOperation* text = static_cast<ExpOperation*>(args[2]);
 	if (!name || !list || !m_xml)
 	    return false;
+	ExpOperation* text = static_cast<ExpOperation*>(args[2]);
+	int put = 0;
+	if (text) {
+	    if (!text->isBoolean())
+		put = text->valInteger();
+	    else if (text->toBoolean())
+		put = 1;
+	}
 	NamedList* params = list->nativeParams();
 	if (!params)
 	    params = &list->params();
-	params->clearParam(*name);
-	String txt;
-	if (text && text->valBoolean())
-	    m_xml->toString(txt);
-	if (!text || (text->valInteger() != 1))
-	    params->addParam(new NamedPointer(*name,new XmlElement(*m_xml),txt));
-	else
-	    params->addParam(*name,txt);
+	m_xml->exportParam(*params,*name,1 == put || 2 == put,1 != put,-1,true);
     }
     else if (oper.name() == YSTRING("getOwner")) {
 	if (extractArgs(stack,oper,context,args) != 0)
