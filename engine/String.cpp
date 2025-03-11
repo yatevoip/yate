@@ -2551,9 +2551,14 @@ bool Regexp::isCaseInsensitive() const
 }
 
 
-NamedString::NamedString(const char* name, const char* value, int len, const char* namePrefix)
-    : String(value,len), m_name(namePrefix ? namePrefix : name,-1,namePrefix ? name : 0)
+NamedString::NamedString(const char* name, const char* value, int len,
+    const char* namePrefix, int nameLen)
+    : String(value,len)
 {
+    if (namePrefix)
+	m_name.assign(namePrefix,-1,name,nameLen);
+    else
+	m_name.assign(name,nameLen);
     XDebug(DebugAll,"NamedString::NamedString(\"%s\",\"%s\") [%p]",name,value,this);
 }
 

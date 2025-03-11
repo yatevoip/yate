@@ -5365,8 +5365,10 @@ public:
      * @param value Initial value of the string
      * @param len Length of the value, -1 for full string
      * @param namePrefix Prefix to put in front of the name of this string
+     * @param nameLen Length of name, -1 for full string
      */
-    explicit NamedString(const char* name, const char* value = 0, int len = -1, const char* namePrefix = 0);
+    explicit NamedString(const char* name, const char* value = 0, int len = -1,
+	const char* namePrefix = 0, int nameLen = -1);
 
     /**
      * Retrieve the name of this string.
