@@ -280,7 +280,7 @@ private:
 	JsObject* thisObj, JsObject* scopeObj) const;
     void resolveObjectParams(JsObject* obj, ObjList& stack, GenObject* context) const;
     void resolveObjectParams(JsObject* object, ObjList& stack, GenObject* context, JsContext* ctxt,
-	    JsObject* objProto, JsArray* arrayProto) const;
+	    JsObject* objProto, JsArray* arrayProto, JsRegExp* rexProto) const;
     inline JsFunction* getGlobalFunction(const String& name) const
 	{ return YOBJECT(JsFunction,m_globals[name]); }
     long int m_label;
@@ -2708,7 +2708,14 @@ bool JsCode::runOperation(ObjList& stack, const ExpOperation& oper, GenObject* c
     return true;
 }
 
-void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* context, JsContext* ctxt, JsObject* objProto, JsArray* arrayProto) const
+static inline void resolveSetProto(JsObject& object, JsObject* proto)
+{
+    if (proto && proto->ref())
+	object.params().addParam(new ExpWrapper(proto,JsObject::protoName()));
+}
+
+void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* context,
+    JsContext* ctxt, JsObject* objProto, JsArray* arrayProto, JsRegExp* rexProto) const
 {
     DDebug(this,DebugAll,"JsCode::resolveObjectParams(%p,%p,%p,%p,%p,%p)",
 	object,&stack,context,ctxt,objProto,arrayProto);
@@ -2716,7 +2723,7 @@ void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* co
 	String* param = object->params().getParam(i);
 	JsObject* tmpObj = YOBJECT(JsObject,param);
 	if (tmpObj) {
-	    resolveObjectParams(tmpObj,stack,context,ctxt,objProto,arrayProto);
+	    resolveObjectParams(tmpObj,stack,context,ctxt,objProto,arrayProto,rexProto);
 	    continue;
 	}
 	ExpOperation* op = YOBJECT(ExpOperation,param);
@@ -2744,12 +2751,13 @@ void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* co
     if (object->frozen() || object->params().getParam(JsObject::protoName()))
 	return;
     JsArray* arr = YOBJECT(JsArray,object);
-    if (arr) {
-	if (arrayProto && arrayProto->ref())
-	    object->params().addParam(new ExpWrapper(arrayProto,JsObject::protoName()));
-    }
-    else if (objProto && objProto->ref())
-	object->params().addParam(new ExpWrapper(objProto,JsObject::protoName()));
+    JsRegExp* rex = arr ? 0 : YOBJECT(JsRegExp,object);
+    if (arr)
+	resolveSetProto(*object,arrayProto);
+    else if (rex)
+	resolveSetProto(*object,rexProto);
+    else
+	resolveSetProto(*object,objProto);
 }
 
 void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* context) const
@@ -2760,16 +2768,13 @@ void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* co
     JsContext* ctx = YOBJECT(JsContext,sr->context());
     if (!ctx)
 	return;
-    JsFunction* objCtr = 0;
+    JsFunction* objCtr = YOBJECT(JsFunction,ctx->params().getParam(YSTRING("RegExp")));
+    JsRegExp* rexProto = objCtr ?
+	YOBJECT(JsRegExp,objCtr->params().getParam(YSTRING("prototype"))) : 0;
     // check first for regexp built /expr/ syntax
     JsRegExp* reg = YOBJECT(JsRegExp,object);
     if (reg) {
-	objCtr = YOBJECT(JsFunction,ctx->params().getParam(YSTRING("RegExp")));
-	if (objCtr) {
-	    JsRegExp* regexpProto = YOBJECT(JsRegExp,objCtr->params().getParam(YSTRING("prototype")));
-	    if (regexpProto && regexpProto->ref())
-		object->params().addParam(new ExpWrapper(regexpProto,JsObject::protoName()));
-	}
+	resolveSetProto(*object,rexProto);
 	return;
     }
 
@@ -2783,7 +2788,7 @@ void JsCode::resolveObjectParams(JsObject* object, ObjList& stack, GenObject* co
     if (objCtr)
 	arrayProto = YOBJECT(JsArray,objCtr->params().getParam(YSTRING("prototype")));
 
-    resolveObjectParams(object,stack,context,ctx,objProto,arrayProto);
+    resolveObjectParams(object,stack,context,ctx,objProto,arrayProto,rexProto);
 }
 
 bool JsCode::runFunction(ObjList& stack, const ExpOperation& oper, GenObject* context) const
