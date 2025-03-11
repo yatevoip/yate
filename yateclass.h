@@ -8405,6 +8405,17 @@ public:
     }
 
     /**
+     * Move all list parameters to another list. Replace existing in destination
+     * @param dest Destination list
+     * @param replaceAllExisting Remove all occurences of existing parameters (existing parameter
+     *  in this list will remove all occurences in destination).
+     *  Set it to false to remove only found instances (each existing parameter in this list will
+     *  replace a single parameter in destination)
+     * @return Destination list reference
+    */
+    NamedList& moveParamsReplace(NamedList& dest, bool replaceAllExisting = true);
+
+    /**
      * Dumps the name and all parameters to a string in a human readable format.
      * No escaping takes place so this method should be used for debugging only
      * @param str String to which the name and parameters are appended

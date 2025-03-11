@@ -699,4 +699,30 @@ int NamedList::replaceParams(String& str, bool sqlEsc, char extraEsc) const
     return cnt;
 }
 
+NamedList& NamedList::moveParamsReplace(NamedList& dest, bool replaceAllExisting)
+{
+    NamedString* mark = new NamedString("");
+    ObjList* append = dest.paramList()->append(mark);
+    for (ObjList* o = paramList()->skipNull(); o; o = o->skipNull()) {
+	NamedString* ns = static_cast<NamedString*>(o->remove(false));
+	for (ObjList* oDest = dest.paramList()->skipNull(); oDest; ) {
+	    NamedString* nsMsg = static_cast<NamedString*>(oDest->get());
+	    if (nsMsg == mark)
+		break;
+	    if (nsMsg->name() != ns->name())
+		oDest = oDest->skipNext();
+	    else {
+		append = oDest;
+		oDest->remove();
+		oDest = oDest->skipNull();
+		if (!replaceAllExisting)
+		    break;
+	    }
+	}
+	append = append->append(ns);
+    }
+    dest.clearParam(mark);
+    return dest;
+}
+
 /* vi: set ts=8 sw=4 sts=4 noet: */
