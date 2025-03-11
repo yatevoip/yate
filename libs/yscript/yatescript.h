@@ -2712,6 +2712,22 @@ public:
     }
 
     /**
+     * Set string fields from parameters list
+     * @param list Parameters list
+     * @return Number of set fields
+     */
+    inline unsigned int setStringFields(const NamedList& list)
+    {
+	unsigned int n = 0;
+	for (ObjList* o = list.paramList()->skipNull(); o; o = o->skipNext()) {
+	    const NamedString* ns = static_cast<NamedString*>(o->get());
+	    if (ns->name() != protoName() && setStringField(ns->name(),*ns))
+		n++;
+	}
+	return n;
+    }
+
+    /**
      * Set a object field in this object
      * @param name Name of field to set
      * @param obj Object value to set
