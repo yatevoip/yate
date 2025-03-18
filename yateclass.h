@@ -1958,6 +1958,69 @@ public:
 };
 
 /**
+ * @short RefObject holding a GenObject
+ */
+template <class Obj = GenObject> class GenObjectRef : public RefObject
+{
+public:
+    /**
+     * Constructor
+     * @param obj Optional pointer to object
+     */
+    inline GenObjectRef(Obj* obj = 0)
+	: m_obj(obj)
+	{}
+
+    /**
+     * Destructor
+     */
+    inline ~GenObjectRef()
+	{ assign(); }
+
+    /**
+     * Retrieve the stored object
+     * @return Pointer to the stored object
+     */
+    inline Obj* data()
+	{ return m_obj; }
+
+    /**
+     * Retrieve the stored object
+     * @return Pointer to the stored object
+     */
+    inline const Obj* data() const
+	{ return m_obj; }
+
+    /**
+     * Set a new stored pointer
+     * @param obj Pointer to the new stored object, NULL to reset
+     * @return Pointer to the stored object
+     */
+    inline Obj* assign(Obj* obj = 0) {
+	    if (m_obj) {
+		if (m_obj == obj)
+		    return m_obj;
+		m_obj->destruct();
+	    }
+	    m_obj = obj;
+	    return m_obj;
+	}
+
+    /**
+     * Retrieve and reset the stored object
+     * @return Pointer to the stored object
+     */
+    inline Obj* take() {
+	    Obj* tmp = m_obj;
+	    m_obj = 0;
+	    return tmp;
+	}
+
+protected:
+    Obj* m_obj;
+};
+
+/**
  * @short Templated pointer that can be inserted in a list
  */
 template <class Obj = GenObject> class GenPointer : public GenObject
@@ -2758,6 +2821,8 @@ private:
     unsigned int m_size;
     unsigned int m_allocChunk;
 };
+
+typedef GenObjectRef<ObjVector> ObjVectorRef;
 
 /**
  * A simple Array class derivated from RefObject
