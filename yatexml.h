@@ -737,6 +737,22 @@ public:
 	    return xml;
 	}
 
+    /**
+     * Parse an XML element from string value
+     * @param buf Buffer to parse
+     * @param error Optional pointer to parser error code
+     * @param parserName Optional parser name
+     * @param dbg Optional DebugEnabler to chain temporary parser and use for failure warning
+     * @param warnLevel Put a parse failure debug level (if at least 1).
+     *  This parameter is ignored if 'dbg' is NULL
+     * @param params Optional pointer to parameters list if buffer is obtained from it (for debug purposes)
+     * @param param Optional pointer to parameter (for debug purposes)
+     * @return XmlElement pointer, NULL if missing or parser failure
+     */
+    static XmlElement* parseXml(const String& buf, int* error = 0, const char* parserName = 0,
+	DebugEnabler* dbg = 0, int warnLevel = DebugMild,
+	const NamedList* params = 0, const NamedString* param = 0);
+
 protected:
 
     /**
@@ -1415,7 +1431,7 @@ public:
 
     /**
      * Set this element's parent. Update inherited namespaces
-     * @return The parent of this element
+     * @param parent The parent of this element
      */
     virtual void setParent(XmlParent* parent);
 

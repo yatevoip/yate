@@ -1278,23 +1278,29 @@ XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, N
     }
     if (npOwner)
 	*npOwner = 0;
-    if (!*ns) {
+    return parseXml(*ns,error,parserName,dbg,warnLevel,&params,ns);
+}
+
+XmlElement* XmlDomParser::parseXml(const String& buf, int* error, const char* parserName,
+    DebugEnabler* dbg, int warnLevel, const NamedList* params, const NamedString* param)
+{
+    if (!buf) {
 	if (error)
 	    *error = GetXmlEmpty;
 	return 0;
     }
-    const char* buf = *ns;
+    const char* str = buf;
     XmlDomParser parser(parserName,true);
     if (dbg)
 	parser.debugChain(dbg);
-    bool ok = parser.parse(buf);
+    bool ok = parser.parse(str);
     XmlElement* xml = parser.fragment()->popElement();
     if (xml) {
-	if (dbg && dbg->debugAt(DebugInfo)) {
+	if (params && dbg && dbg->debugAt(DebugInfo)) {
 	    XmlElement* extra = parser.fragment()->popElement();
 	    if (extra) {
 		TelEngine::destruct(extra);
-		Debug(dbg,DebugInfo,"Ignoring extra xml element in '%s'",params.safe());
+		Debug(dbg,DebugInfo,"Ignoring extra xml element in '%s'",params->safe());
 	    }
 	}
 	return xml;
@@ -1308,8 +1314,8 @@ XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, N
 	else {
 	    code = XmlSaxParser::Unknown;
 	    if (!ok) {
-		while (*buf) {
-		    if (!XmlSaxParser::blank(*buf++)) {
+		while (*str) {
+		    if (!XmlSaxParser::blank(*str++)) {
 			if (error) {
 			    *error = XmlSaxParser::GetXmlEmpty;
 			    return 0;
@@ -1322,11 +1328,11 @@ XmlElement* XmlDomParser::getXml(const NamedList& params, const String& param, N
 	}
 	if (error)
 	    *error = code;
-	if (warnLevel)
-	    TraceDebug(params[YSTRING("trace_id")],dbg,warnLevel,
+	if (warnLevel && params && param)
+	    TraceDebug((*params)[YSTRING("trace_id")],dbg,warnLevel,
 		"'%s' XML parser error (%d) '%s' for %s='%s' [%p]",
-		params.safe(),code,XmlSaxParser::getError(code),ns->name().safe(),
-		ns->safe(),dbg);
+		params->safe(),code,XmlSaxParser::getError(code),
+		param->name().safe(),param->safe(),dbg);
     }
     return 0;
 }
