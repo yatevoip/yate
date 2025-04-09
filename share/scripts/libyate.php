@@ -27,6 +27,13 @@
     sed -i.bak -e 's/static \(function\)/\1/' libyate.php
 */
 
+@include_once("libyate_config.php");
+
+if (!isset($yate_buffer_read_full_line))
+    $yate_buffer_read_full_line = false;
+else
+    $yate_buffer_read_full_line = !!$yate_buffer_read_full_line;
+
 /**
  * The Yate class encapsulates the object oriented interface of PHP to Yate
  */
@@ -349,21 +356,41 @@ class Yate
      */
     static function GetEvent()
     {
-	global $yate_stdin, $yate_socket, $yate_buffer;
+	global $yate_stdin, $yate_socket, $yate_buffer, $yate_buffer_read_full_line;
 	if ($yate_socket) {
-	    $line = @socket_read($yate_socket,$yate_buffer,PHP_NORMAL_READ);
-	    // check for error
-	    if ($line == false) {
-		switch (socket_last_error($yate_socket)) {
-		    case 4:  // EINTR
-		    case 11: // EAGAIN
-			return true;
+	    $repeat = false;
+	    if ($yate_buffer_read_full_line)
+		$buf = "";
+	    while (true) {
+		$line = @socket_read($yate_socket,$yate_buffer,PHP_NORMAL_READ);
+		// check for error
+		if ($line == false) {
+		    switch (socket_last_error($yate_socket)) {
+			case 4:  // EINTR
+			case 11: // EAGAIN
+			    return true;
+		    }
+		    return false;
 		}
-		return false;
+		// check for EOF
+		if ($line === "") {
+		    if (!($repeat && strlen($buf) > 0))
+			return false;
+		    $line = $buf;
+		    break;
+		}
+		if (!$yate_buffer_read_full_line)
+		    break;
+		// Done if read less then requested or last char is data end markup
+		$n = strlen($line);
+		if ($n != $yate_buffer || $line[$n - 1] == "\n") {
+		    if (strlen($buf) > 0)
+			$line = $buf . $line;
+		    break;
+		}
+		$buf .= $line;
+		$repeat = true;
 	    }
-	    // check for EOF
-	    if ($line === "")
-		return false;
 	}
 	else {
 	    if ($yate_stdin == false)
@@ -371,7 +398,12 @@ class Yate
 	    // check for EOF
 	    if (feof($yate_stdin))
 		return false;
-	    $line=fgets($yate_stdin,$yate_buffer);
+	    if ($yate_buffer_read_full_line)
+		// Buffering. Read a full line
+		$line = fgets($yate_stdin);
+	    else
+		// No buffering. Read up to $yate_buffer bytes
+		$line = fgets($yate_stdin,$yate_buffer + 1);
 	    // check for async read no data
 	    if ($line == false)
 		return true;
@@ -458,12 +490,15 @@ class Yate
      * @param $addr Hostname to connect to or UNIX socket path
      * @param $port TCP port to connect to, zero to use UNIX sockets
      * @param $role Role of this connection - "global" or "channel"
+     * @param $buffer Buffer length
+     * @param $readFullLine Read full line. null: use default. Otherwise: enable/disable
      * @return True if initialization succeeded, false if failed
      */
-    static function Init($async = false, $addr = "", $port = 0, $role = "", $buffer = 8192)
+    static function Init($async = false, $addr = "", $port = 0, $role = "", $buffer = 8192,
+	$readFullLine = null)
     {
 	global $yate_stdin, $yate_stdout, $yate_stderr;
-	global $yate_socket, $yate_buffer, $yate_debug, $yate_output;
+	global $yate_socket, $yate_buffer, $yate_debug, $yate_output, $yate_buffer_read_full_line;
 	$yate_debug = false;
 	$yate_stdin = false;
 	$yate_stdout = false;
@@ -475,6 +510,8 @@ class Yate
 	else if ($buffer > 65536)
 	    $buffer = 65536;
 	$yate_buffer = $buffer;
+	if (null !== $readFullLine)
+	    $yate_buffer_read_full_line = !!$readFullLine;
 	if ($addr) {
 	    $ok = false;
 	    if (!function_exists("socket_create")) {
