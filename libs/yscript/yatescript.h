@@ -2568,8 +2568,17 @@ public:
      * Set the object prototype
      * @param context  Pointer to arbitrary object passed from evaluation methods
      * @param objName Name of the object prototype to set the this object
+     * @return True on success, false if not found
      */
-    void setPrototype(GenObject* context, const String& objName);
+    bool setPrototype(GenObject* context, const String& objName);
+
+    /**
+     * Set the object prototype
+     * @param params Parameters list to search for prototype
+     * @param objName Name of the object prototype to set the this object
+     * @return True on success, false if not found
+     */
+    bool setPrototype(NamedList& params, const String& objName);
 
     /**
      * Deep copy method
@@ -3204,6 +3213,22 @@ public:
 	{ m_length = len; }
 
     /**
+     * Retrieve item at index
+     * @param idx Index to search for
+     * @return Pointer to item, NULL if not set
+     */
+    inline GenObject* at(int32_t idx)
+	{ return params().getParam(String(idx)); }
+
+    /**
+     * Retrieve item at index
+     * @param idx Index to search for
+     * @return Pointer to item, NULL if not set
+     */
+    inline const GenObject* at(int32_t idx) const
+	{ return params().getParam(String(idx)); }
+
+    /**
      * Add an item at the end of the array
      * @param item Item to add to array
      */
@@ -3799,6 +3824,28 @@ public:
      */
     inline static JsObject* objPresent(const ExpOperation* oper)
 	{ return oper ? objPresent(*oper) : 0; }
+
+    /**
+     * Retrieve a string from ExpOperation
+     * @param oper Operation to check
+     * @return Empty string if oper is undefined/null, operation value otherwise
+     */
+    static inline const String& getString(const ExpOperation* oper)
+	{ return isMissing(oper) ? String::empty() : *oper; }
+
+    /**
+     * Set a string from ExpOperation if not 'undefined'. Clear if 'null'
+     * @param buf The string to set
+     * @param oper Operation to check
+     * @return String reference
+     */
+    static inline String& setString(String& buf, const ExpOperation* oper) {
+	    if (!oper || isUndefined(*oper))
+		return buf;
+	    if (isNull(*oper))
+		return (buf = "");
+	    return buf.assign(*oper);
+	}
 
 private:
     String m_basePath;

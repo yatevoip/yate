@@ -41,6 +41,8 @@ public:
 	    construct->params().addParam(new ExpFunction("global"));
 	    construct->params().addParam(new ExpFunction("assign"));
 	    construct->params().addParam(new ExpFunction("assignProps"));
+	    construct->params().addParam(new ExpFunction("copy"));
+	    construct->params().addParam(new ExpFunction("deepCopy"));
 	    MKASSIGN(SkipPrefix);
 	    MKASSIGN(SkipNull);
 	    MKASSIGN(SkipUndefined);
@@ -919,21 +921,27 @@ void JsObject::internalToJSON(const GenObject* obj, bool isStr, String& buf, int
 	buf << strEscape(*oper);
 }
 
-void JsObject::setPrototype(GenObject* context, const String& objName)
+bool JsObject::setPrototype(GenObject* context, const String& objName)
 {
     ScriptContext* ctxt = YOBJECT(ScriptContext,context);
     if (!ctxt) {
 	ScriptRun* sr = static_cast<ScriptRun*>(context);
 	if (!(sr && (ctxt = YOBJECT(ScriptContext,sr->context()))))
-	    return;
+	    return false;
     }
-    JsObject* objCtr = YOBJECT(JsObject,ctxt->params().getParam(objName));
-    if (objCtr) {
-	JsObject* proto = YOBJECT(JsObject,objCtr->params().getParam(YSTRING("prototype")));
-	if (proto && proto->ref())
-	    params().addParam(new ExpWrapper(proto,protoName()));
-    }
+    return setPrototype(ctxt->params(),objName);
 }
+
+bool JsObject::setPrototype(NamedList& list, const String& objName)
+{
+    JsObject* proto = YOBJECT(JsObject,list.getParam(objName));
+    if (proto)
+	proto = YOBJECT(JsObject,proto->params().getParam(YSTRING("prototype")));
+    if (!(proto && proto->ref()))
+	return false;
+    params().setParam(new ExpWrapper(proto,protoName()));
+    return true;
+};
 
 JsObject* JsObject::buildCallContext(ScriptMutex* mtx, JsObject* thisObj)
 {
@@ -1620,26 +1628,29 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 	}
 	ExpEvaluator::pushOne(stack,destOp->clone());
     }
-    else if (oper.name() == YSTRING("assignProps")) {
+    else if (oper.name() == YSTRING("assignProps") || oper.name() == YSTRING("copy")
+	|| oper.name() == YSTRING("deepCopy")) {
 	// assignProps(dest,src[,flags,props,prefix,addPrefix])
-	ObjList args;
+	// copy(src[,flags,props,prefix,addPrefix])
+	// deepCopy(src[,flags,props,prefix,addPrefix])
+	ExpOperVector args;
+	bool assign = oper.name() == YSTRING("assignProps");
+	int optStart = assign ? 2 : 1;
 	int n = extractArgs(this,stack,oper,context,args);
-	if (n < 2)
+	if (n < optStart)
 	    return false;
-	ExpOperation* destOp = YOBJECT(ExpOperation,args.get());
-	JsObject* dest = JsParser::objPresent(destOp);
-	ObjList* o = args.next();
-	JsObject* src = JsParser::objPresent(YOBJECT(ExpOperation,o->get()));
-	n = 0;
+	JsObject* first = JsParser::objPresent(args[0]);
+	JsObject* dest = assign ? first : (first ? first->clone(*args[0]) : 0);
+	JsObject* src = JsParser::objPresent(args[assign ? 1 : 0]);
 	if (dest && src) {
 	    unsigned int flags = 0;
 	    ObjList* props = 0;
 	    const String* prefix = 0;
 	    const String* addPrefix = 0;
-	    o = o->next();
-	    for (int i = 0; o; o = o->next(), ++i) {
-		ExpOperation* op = YOBJECT(ExpOperation,o->get());
-		if (!op || JsParser::isNull(*op) || JsParser::isUndefined(*op))
+	    n -= optStart;
+	    for (int i = 0; i < n; ++i) {
+		ExpOperation* op = args[i + optStart];
+		if (!op || JsParser::isMissing(*op))
 		    continue;
 		switch (i) {
 		    case 0: // flags
@@ -1665,13 +1676,20 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 		}
 		break;
 	    }
+	    if (oper.name() == YSTRING("deepCopy"))
+		flags |= AssignDeepCopy;
 	    n = dest->assignProps(src,flags,props,prefix ? *prefix : String::empty(),
 		addPrefix ? *addPrefix : String::empty(),context);
 	    TelEngine::destruct(props);
-	    if (n < 0)
+	    if (n < 0 && assign)
 		return false;
 	}
-	ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)n));
+	if (assign)
+	    ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)n));
+	else if (dest)
+	    ExpEvaluator::pushOne(stack,new ExpWrapper(dest));
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else
 	return JsObject::runNative(stack,oper,context);
