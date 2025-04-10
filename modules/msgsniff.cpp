@@ -32,65 +32,54 @@
 using namespace TelEngine;
 namespace { // anonymous
 
-class MatchingItemMessage : public MatchingItemCustom
+class MatchingItemMessage : public MatchingItemCustom, public MessageFilter
 {
     YCLASS(MatchingItemMessage,MatchingItemCustom)
 public:
     inline MatchingItemMessage(const char* name, MatchingItemBase* msg, MatchingItemBase* params = 0,
 	uint64_t age = 0)
-	: MatchingItemCustom(name,"message"),
-	m_matchName(msg), m_matchParams(params), m_minAge(age)
+	: MatchingItemCustom("message",name,"Message"), MessageFilter(msg,params), m_minAge(age)
 	{}
-    ~MatchingItemMessage() {
-	    TelEngine::destruct(m_matchName);
-	    TelEngine::destruct(m_matchParams);
-	}
     inline bool empty() const
-	{ return !(m_matchName || m_matchParams || m_minAge); }
-    inline const MatchingItemBase* matchName() const
-	{ return m_matchName; }
-    inline const MatchingItemBase* matchParams() const
-	{ return m_matchParams; }
+	{ return !(m_minAge || getMsgFilter() || getFilter()); }
     inline uint64_t minAge() const
 	{ return m_minAge; }
-    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const {
-	    if (m_minAge) {
-		const Message* msg = YOBJECT(Message,&list);
-		if (msg) {
-		    if (!params) {
-			if (m_minAge > Time::now() - msg->msgTime().usec())
-			    return false;
-		    }
-		    else {
-			if (!params->m_now)
-			    params->m_now = Time::now();
-			if (m_minAge > params->m_now - msg->msgTime().usec())
-			    return false;
-		    }
-		}
-	    }
-	    return (!m_matchName || m_matchName->matchString(list,params))
-		&& (!m_matchParams || m_matchParams->matchListParam(list,params));
-	}
-    virtual MatchingItemBase* copy() const {
-	    return new MatchingItemMessage(name(),m_matchName ? m_matchName->copy() : 0,
-		m_matchParams ? static_cast<MatchingItemList*>(m_matchParams->copy()) : 0,
-		m_minAge);
-	}
-    virtual String& dump(String& buf, const MatchingItemDump* dump = 0,
-	const String& indent = String::empty(), const String& origIndent = String::empty(),
-	unsigned int depth = 0) const {
-	    AutoGenObject tmpDump;
-	    if (!dump) {
-		tmpDump = new MatchingItemDump;
-		dump = static_cast<const MatchingItemDump*>(tmpDump.data());
-	    }
-	    String msg, params;
-	    dump->dumpValue(m_matchName,msg);
-	    dump->dump(m_matchParams,params,indent,origIndent);
+    virtual const String& dumpValue(const MatchingItemDump& dump, String& buf) const {
+	    String val;
+	    dump.dumpValue(getMsgFilter(),val);
 	    if (m_minAge)
-		msg.printfAppend("%sage %u.%06u",msg ? " " : "",
+		val.printfAppend("%sage %u.%06u",val ? " " : "",
 		    (unsigned int)(m_minAge / 1000000),(unsigned int)(m_minAge % 1000000));
+	    return buf << val;
+	}
+    virtual bool runMatchListParam(const NamedList& list, MatchingParams* params = 0) const {
+	    const Message* msg = m_minAge ? YOBJECT(Message,&list) : 0;
+	    if (msg) {
+		if (params) {
+		    if (!params->m_now)
+			params->m_now = Time::now();
+		    if (m_minAge > params->m_now - msg->msgTime().usec())
+			return false;
+		}
+		else if (m_minAge > Time::now() - msg->msgTime().usec())
+		    return false;
+	    }
+	    return matchesList(list,params);
+	}
+    virtual MatchingItemBase* customCopyItem() const {
+	    return new MatchingItemMessage(name(),getMsgFilter() ? getMsgFilter()->copy() : 0,
+		getFilter() ? getFilter()->copy() : 0,m_minAge);
+	}
+    virtual String& dump(const MatchingItemDump& dump, String& buf,
+	const String& indent, const String& addIndent, unsigned int depth) const {
+	    String params;
+	    return buf << dump.dump(getFilter(),params,indent + addIndent,addIndent);
+	}
+    virtual String& dumpFull(const MatchingItemDump& dump, String& buf,
+	const String& indent, const String& addIndent, unsigned int depth) const {
+	    String msg, params;
+	    dumpValue(dump,msg);
+	    dump.dump(getFilter(),params,indent,addIndent);
 	    if (!(msg || params))
 		return buf;
 	    if (name())
@@ -99,20 +88,18 @@ public:
 		buf << indent << "Message: " << msg;
 	    buf << params;
 	    return buf;
-	    
 	}
 
 private:
-    MatchingItemBase* m_matchName;       // Message name match
-    MatchingItemBase* m_matchParams;     // Message parameters match
-    uint64_t m_minAge;                   // Minimum age. No match is message age is less than this value
+    uint64_t m_minAge;                   // Minimum age. No match if message age is less than this value
+    mutable String m_value;
 };
 
 class SniffMatch : public RefObject
 {
 public:
     inline SniffMatch(MatchingItemList* lst)
-	: m_match(lst ? lst : new MatchingItemList(""))
+	: m_match(lst)
 	{}
     ~SniffMatch()
 	{ TelEngine::destruct(m_match); }
@@ -121,16 +108,17 @@ public:
     inline bool matches(const Message& msg, MatchingParams& params) const
 	{ return m_match->matchListParam(msg,&params); }
     inline void dump(String& buf) {
-	    unsigned int n = m_match->count();
+	    unsigned int n = m_match->length();
 	    if (!n)
 		return;
-	    String s;
+	    String s, indent("\r\n"), addIndent("  ");
 	    MatchingItemDump d;
+	    d.m_flags = MatchingItemDump::DumpCustomFull;
 	    // We are always building regexp, no enclose needed
 	    d.m_rexEnclose = 0;
 	    for (unsigned int i = 0; i < n; i++) {
 		String tmp;
-		s.append(d.dump(m_match->at(i),tmp,"\r\n","  "),"\r\n-----");
+		s.append(d.dump(m_match->at(i),tmp,indent,addIndent),"\r\n-----");
 	    }
 	    const char* sep = (s && n > 1) ? "\r\n-----" : "";
 	    buf << sep << s << sep;
@@ -168,7 +156,7 @@ public:
     inline void setFilter(MatchingItemList* lst = 0) {
 	    SniffMatch* sm = lst ? new SniffMatch(lst) : 0;
 	    WLock lck(m_lock);
-	    m_filter = (sm && sm->matching()->count()) ? sm : 0;
+	    m_filter = (sm && sm->matching() && sm->matching()->length()) ? sm : 0;
 	    TelEngine::destruct(sm);
 	}
     inline bool getFilter(RefPointer<SniffMatch>& flt) {
@@ -207,6 +195,10 @@ public:
 
 static bool s_active = false;
 static bool s_timer = false;
+static bool s_dumpMsgData = false;
+static bool s_dumpMsgDataShort = true;
+static bool s_dumpParamPtrData = false;
+static bool s_dumpParamPtrDataShort = true;
 static const String s_command = "sniffer";
 static const String s_onOff[] = {"on", "off", ""};
 static const String s_commands[] = {"set", "reset", "filter", "params", "age", ""};
@@ -291,12 +283,12 @@ MsgSniff::MsgSniff()
 void MsgSniff::initialize()
 {
     Output("Initializing module MsgSniffer");
+    const NamedList* genSect = Engine::config().getSection(YSTRING("general"));
+    const NamedList& gen = genSect ? *genSect : NamedList::empty();
     if (m_first) {
 	m_first = false;
 	String trackName;
-	NamedList* genSect = Engine::config().getSection(YSTRING("general"));
 	if (genSect) {
-	    NamedList& gen = *genSect;
 	    s_active = gen.getBoolValue(YSTRING("msgsniff"));
 	    MatchingItemList* lst = 0;
 	    String filter = gen[YSTRING("filtersniff")];
@@ -330,6 +322,48 @@ void MsgSniff::initialize()
 	Engine::install(new SniffHandler(trackName));
 	Engine::self()->setHook(new HookHandler);
     }
+    s_dumpMsgData = gen.getBoolValue(YSTRING("dump_msg_data"));
+    s_dumpMsgDataShort = gen.getBoolValue(YSTRING("dump_msg_data_short"),true);
+    s_dumpParamPtrData = gen.getBoolValue(YSTRING("dump_msg_param_ptr_data"));
+    s_dumpParamPtrDataShort = gen.getBoolValue(YSTRING("dump_msg_param_ptr_data_short"),true);
+}
+
+static inline String& dumpPtr(bool dump, bool shortInfo, String& buf, const GenObject* gen, const String* paramVal = 0)
+{
+    if (paramVal) {
+	buf.printfAppend(" [%p]",gen);
+	if (*paramVal) {
+	    if (!gen)
+		return buf;
+	    return buf << " '" << gen->toString() << '\'';
+	}
+    }
+    else
+	buf.printfAppend("%p",gen);
+    if (!gen)
+	return buf;
+    if (dump) {
+	String content;
+	XmlElement* xml = YOBJECT(XmlElement,gen);
+	if (xml) {
+	    if (shortInfo)
+		return buf << " XML '" << gen->toString() << '\'';
+	    return buf << " XML '" << xml->toString(content) << '\'';
+	}
+	DataBlock* db = YOBJECT(DataBlock,gen);
+	if (db) {
+	    buf.printfAppend(" DATA[%u]",db->length());
+	    if (shortInfo)
+		return buf;
+	    return buf << " '" << content.hexify(db->data(),db->length()) << '\'';
+	}
+	Array* arr = YOBJECT(Array,gen);
+	if (arr)
+	    return buf.printfAppend(" Array[%d,%d]",arr->getRows(),arr->getColumns());
+    }
+    if (paramVal)
+	return buf << " '" << gen->toString() << '\'';
+    return buf;
 }
 
 void MsgSniff::handleMsg(const Message& msg, bool* handled)
@@ -347,6 +381,8 @@ void MsgSniff::handleMsg(const Message& msg, bool* handled)
     else
 	age = Time::now();
 
+    bool dumpParamPtrData = s_dumpParamPtrData;
+    bool dumpParamPtrDataShort = s_dumpParamPtrDataShort;
     String par;
     for (ObjList* o = msg.paramList()->skipNull(); o; o = o->skipNext()) {
 	const NamedString* s = static_cast<NamedString*>(o->get());
@@ -356,16 +392,12 @@ void MsgSniff::handleMsg(const Message& msg, bool* handled)
 	    tmp << "(hidden)";
 	else
 	    tmp << "'" << *s << "'";
-	if (const NamedPointer* p = YOBJECT(NamedPointer,s)) {
-	    GenObject* obj = p->userData();
-	    if (obj)
-		tmp.printfAppend(" [%p] '%s'",obj,obj->toString().safe());
-	    else
-		tmp.printfAppend(" [%p]",obj);
-	}
+	if (const NamedPointer* p = YOBJECT(NamedPointer,s))
+	    dumpPtr(dumpParamPtrData,dumpParamPtrDataShort,tmp,p->userData(),s);
 	par << tmp;
     }
 
+    String data;
     uint64_t mt = msg.msgTime().usec();
     age -= mt;
     if (!handled) {
@@ -375,7 +407,7 @@ void MsgSniff::handleMsg(const Message& msg, bool* handled)
 	    extra.printf(" queued=%u.%06u",(unsigned int)(dur / 1000000),
 		(unsigned int)(dur % 1000000));
 	}
-	Output("Sniffed '%s' time=%u.%06u age=%u.%06u%s%s\r\n  thread=%p '%s'\r\n  data=%p\r\n  retval='%s'%s",
+	Output("Sniffed '%s' time=%u.%06u age=%u.%06u%s%s\r\n  thread=%p '%s'\r\n  data=%s\r\n  retval='%s'%s",
 	    msg.c_str(),
 	    (unsigned int)(mt / 1000000),
 	    (unsigned int)(mt % 1000000),
@@ -385,7 +417,7 @@ void MsgSniff::handleMsg(const Message& msg, bool* handled)
 	    (msg.broadcast() ? " (broadcast)" : ""),
 	    Thread::current(),
 	    Thread::currentName(),
-	    msg.userData(),
+	    dumpPtr(s_dumpMsgData,s_dumpMsgDataShort,data,msg.userData()).safe(),
 	    msg.retValue().c_str(),
 	    par.safe());
     }
@@ -396,7 +428,7 @@ void MsgSniff::handleMsg(const Message& msg, bool* handled)
 	    rval = "(hidden)";
 	    rsep = "";
 	}
-	Output("Returned %s '%s' delay=%u.%06u%s\r\n  thread=%p '%s'\r\n  data=%p\r\n  retval=%s%s%s%s",
+	Output("Returned %s '%s' delay=%u.%06u%s\r\n  thread=%p '%s'\r\n  data=%s\r\n  retval=%s%s%s%s",
 	    String::boolText(*handled),
 	    msg.c_str(),
 	    (unsigned int)(age / 1000000),
@@ -404,7 +436,7 @@ void MsgSniff::handleMsg(const Message& msg, bool* handled)
 	    (msg.broadcast() ? " (broadcast)" : ""),
 	    Thread::current(),
 	    Thread::currentName(),
-	    msg.userData(),
+	    dumpPtr(s_dumpMsgData,s_dumpMsgDataShort,data,msg.userData()).safe(),
 	    rsep,rval,rsep,
 	    par.safe());
     }
@@ -551,7 +583,7 @@ MatchingItemMessage* MsgSniff::buildFilter(String* filterParams,
 #endif
     MatchingItemBase* matchName = 0;
     if (!TelEngine::null(filter))
-	matchName = MatchingItemRegexp::build("",*filter,-1,false,false,0);
+	matchName = MatchingItemRegexp::build("",*filter,0,false,-1);
     MatchingItemBase* matchParams = 0;
     if (!TelEngine::null(params)) {
 	static const Regexp s_matchParamListParam("^( *)?(any|negated)( .*)?$",true);
@@ -566,17 +598,22 @@ MatchingItemMessage* MsgSniff::buildFilter(String* filterParams,
 	    else if (tmp == YSTRING("negated"))
 		negated = true;
 	}
-	MatchingItemList* lst = new MatchingItemList("Params",matchAll,negated);
+	ObjList items;
 	while (params->matches(s_matchParam)) {
 	    MatchingItemBase* p = MatchingItemRegexp::build(params->matchString(2),
-		params->matchString(3).trimSpaces(),-1,false,false,0);
-	    lst->insert(p);
+		params->matchString(3).trimSpaces(),0,false,-1);
+	    if (p)
+		items.insert(p);
 	    *params = params->matchString(1);
 	}
-	if (lst->count())
-	    matchParams = lst;
-	else
-	    TelEngine::destruct(lst);
+	if (items.skipNull()) {
+	    MatchingItemList* l = new MatchingItemList("Params",matchAll,negated);
+	    l->append(items);
+	    if (l->length())
+		matchParams = l;
+	    else
+		TelEngine::destruct(matchParams);
+	}
     }
     uint64_t minAge = 0;
     if (age) {
@@ -584,10 +621,10 @@ MatchingItemMessage* MsgSniff::buildFilter(String* filterParams,
 	minAge = (uint64_t)(1000000.0 * (d >= 0 ? d : -d));
     }
     if (old) {
-	if (!filter && old->matchName())
-	    matchName = old->matchName()->copy();
-	if (!params && old->matchParams())
-	    matchParams = old->matchParams()->copy();
+	if (!filter && old->getMsgFilter())
+	    matchName = old->getMsgFilter()->copy();
+	if (!params && old->getFilter())
+	    matchParams = old->getFilter()->copy();
 	if (!age)
 	    minAge = old->minAge();
     }
@@ -613,11 +650,13 @@ MatchingItemList* MsgSniff::changeListItem(MatchingItemList* lst, MatchingItemMe
 	    return 0;
 	if (!old)
 	    old = item;
+	int idx = lst->indexOf(old->name());
 #ifdef SNIFF_DEBUG_CHANGE_LIST
-	Debug(this,SNIFF_DEBUG_CHANGE_LIST,"Removing item '%s' index=%d",
-	    old->name().safe(),lst->indexOf(old->name()));
+	Debug(this,SNIFF_DEBUG_CHANGE_LIST,"Removing item '%s' index=%d list=(%p,%u)",
+	    old->name().safe(),idx,lst,lst->length());
 #endif
-	lst->set(0,lst->indexOf(old->name()));
+	if (idx >= 0)
+	    lst->set(0,lst->indexOf(old->name()));
 	TelEngine::destruct(item);
 	return lst;
     }
@@ -627,8 +666,9 @@ MatchingItemList* MsgSniff::changeListItem(MatchingItemList* lst, MatchingItemMe
     if (tmp)
 	tmp = "\r\n-----" + tmp + "\r\n-----";
     int idx = lst ? lst->indexOf(item->name()) : -1;
-    Debug(this,SNIFF_DEBUG_CHANGE_LIST,"%s item list (%p) index=%d%s",
-	idx >= 0 ? "Replacing" : "Adding",lst,idx,tmp.safe());
+    Debug(this,SNIFF_DEBUG_CHANGE_LIST,"%s item=(%p) list=(%p,%u) index=%d%s",
+	idx >= 0 ? "Replacing" : "Adding",item,lst,lst ? lst->length() : 0,
+	idx,tmp.safe());
 #endif
     if (!lst) {
 	lst = new MatchingItemList("",false);
