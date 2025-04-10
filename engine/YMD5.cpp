@@ -72,7 +72,7 @@ static void byteReverse(unsigned char *buf, unsigned longs)
  */
 static void MD5Transform(u_int32_t buf[4], u_int32_t const in[16])
 {
-    register u_int32_t a, b, c, d;
+    u_int32_t a, b, c, d;
 
     a = buf[0];
     b = buf[1];
