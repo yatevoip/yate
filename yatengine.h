@@ -26,7 +26,7 @@
 #error C++ is required
 #endif
 
-#include <yateclass.h>
+#include <yatematchingitem.h>
 
 /**
  * Holds all Telephony Engine related classes.
@@ -596,9 +596,11 @@ class YATE_API MessageFilter
 public:
     /**
      * Constructor
+     * @param msg Optional message name filter. Will be owned and destroyed by the filter
+     * @param params Optional parameters fitler. Will be owned and destroyed by the filter
      */
-    inline MessageFilter()
-	: m_filter(0), m_msgFilter(0)
+    inline MessageFilter(MatchingItemBase* msg = 0, MatchingItemBase* params = 0)
+	: m_filter(params), m_msgFilter(msg)
 	{}
 
     /**
@@ -610,10 +612,19 @@ public:
     /**
      * Check if a message matches this filter's rules
      * @param msg The message to match
+     * @param params Optional matching params
      */
-    inline bool matchesMsg(const Message& msg) const {
-	    return (!m_msgFilter || m_msgFilter->matchString(msg))
-		&& (!m_filter || m_filter->matchListParam(msg));
+    inline bool matchesMsg(const Message& msg, MatchingParams* params = 0) const
+	{ return matchesList(msg,params); }
+
+    /**
+     * Check if a message matches this filter's rules
+     * @param msg The message to match
+     * @param params Optional matching params
+     */
+    inline bool matchesList(const NamedList& msg, MatchingParams* params = 0) const {
+	    return (!m_msgFilter || m_msgFilter->matchString(msg,params))
+		&& (!m_filter || m_filter->matchListParam(msg,params));
 	}
 
     /**
