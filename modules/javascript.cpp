@@ -59,6 +59,31 @@
 using namespace TelEngine;
 namespace { // anonymous
 
+// Used when needing write access to NamedList parameters
+class JsNamedListWrite
+{
+public:
+    JsNamedListWrite(ExpOperation* oper);
+    inline NamedList* params()
+	{ return m_params; }
+    inline unsigned int setJsoParams(unsigned int ret = 0) {
+	    if (m_jso && m_params == &m_jsoParams) {
+		ret = m_jso->setStringFields(m_jsoParams);
+		m_jsoParams.clearParams();
+	    }
+	    return ret;
+	}
+
+private:
+    JsObject* m_jso;
+    NamedList* m_params;
+    NamedList m_jsoParams;
+};
+
+// Set a contructor prototype from Engine object held by running context
+static JsObject* setEngineConstructorPrototype(GenObject* context, JsObject* jso,
+    const String& name);
+
 static inline void pushStackResNull(ObjList& stack, ExpOperation* oper)
 {
     if (oper)
@@ -72,7 +97,7 @@ static inline void pushStackObjNull(ObjList& stack, JsObject* jso, const char* n
     if (jso)
 	ExpEvaluator::pushOne(stack,new ExpWrapper(jso,name));
     else
-	ExpEvaluator::pushOne(stack,JsParser::nullClone());
+	ExpEvaluator::pushOne(stack,JsParser::nullClone(name));
 }
 
 static inline ScriptContext* getScriptContext(GenObject* gen)
@@ -90,12 +115,6 @@ static inline const ExpFunction* getFunction(ExpOperation* op)
 	return f;
     JsFunction* jsf = YOBJECT(JsFunction,op);
     return jsf ? jsf->getFunc() : 0;
-}
-
-static inline const NamedList* getObjParams(GenObject* op)
-{
-    JsObject* jso = YOBJECT(JsObject,op);
-    return jso ? (jso->nativeParams() ? jso->nativeParams() : &jso->params()) : 0;
 }
 
 static inline const String& nonObjStr(const NamedString* ns)
@@ -973,6 +992,10 @@ class JsMatchingItem : public JsObject
 {
     YCLASS_ENCLOSED(JsMatchingItem,JsObject,m_match)
 public:
+    enum BuildObjFlags {
+	BuildObjForceBoolProps = MatchingItemDump::DumpPrivate,
+	BuildObjForceEmptyName = MatchingItemDump::DumpPrivate << 1,
+    };
     inline JsMatchingItem(ScriptMutex* mtx)
 	: JsObject("MatchingItem",mtx,true), m_match(0)
 	{
@@ -980,6 +1003,8 @@ public:
 	    params().addParam(new ExpFunction("matches"));
 	    params().addParam(new ExpFunction("getDesc"));
 	    params().addParam(new ExpFunction("dump"));
+	    params().addParam(new ExpFunction("dumpList"));
+	    params().addParam(new ExpFunction("dumpXml"));
 	}
     inline JsMatchingItem(MatchingItemBase* match, ScriptMutex* mtx, unsigned int line,
 	const char* name = 0)
@@ -994,24 +1019,35 @@ public:
 	}
     inline MatchingItemBase* copyMatching(bool optimize = false) const {
 	    MatchingItemBase* ret = m_match ? m_match->copy(): 0;
-	    if (ret && optimize && ret->itemList())
+	    if (ret && optimize && ret->type() == MatchingItemBase::TypeList)
 		return MatchingItemList::optimize(static_cast<MatchingItemList*>(ret));
 	    return ret;
 	}
     virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
     virtual void initConstructor(JsFunction* construct) {
 	    construct->params().addParam(new ExpFunction("validate"));
+	    construct->params().addParam(new ExpFunction("load"));
 	}
     virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
-	unsigned int line = 0) const;
-    MatchingItemBase* buildItemFromArgs(ExpOperVector& args, const char** reason = 0);
+	unsigned int line = 0) const
+	{ return build(copyMatching(),context,mtx ? *mtx : mutex(),line); }
+    // Build from args: value[,name[,params]]
+    static MatchingItemBase* buildItemFromArgs(ExpOperVector& args, String* error = 0);
+    // Build from object: {name:"", value:???, params:{}, ...}
+    static MatchingItemBase* buildItemFromObj(GenObject* gen, uint64_t flags,
+	String* error, bool allowObjValue = true);
     static MatchingItemBase* buildItem(GenObject* value, const String* name,
-	const NamedList* params, unsigned int flags,
-	const char** reason = 0, bool allowObjValue = true);
+	const NamedList* params, uint64_t flags, String* error = 0, bool allowObjValue = true,
+	const String& type = String::empty());
     static JsObject* buildJsObj(const MatchingItemBase* item,
-	GenObject* context, unsigned int line, ScriptMutex* mutex, bool forceBoolProps = false);
+	GenObject* context, unsigned int line, ScriptMutex* mutex, uint64_t flags = 0);
     static MatchingItemBase* buildFilter(const String& name, GenObject* value,
 	GenObject* flt = 0, bool emptyValueOk = true);
+    static inline JsMatchingItem* build(MatchingItemBase* mi, GenObject* context,
+	ScriptMutex* mtx, unsigned int line, bool fail = true) {
+	    return static_cast<JsMatchingItem*>(setEngineConstructorPrototype(context,
+		new JsMatchingItem(mi,mtx,line),YSTRING("MatchingItem")));
+	}
 
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -1156,16 +1192,6 @@ public:
     inline const String& getDebugName() const
 	{ return m_debugName; }
     void setDebug(String str);
-    inline void setConstructorPrototype(JsObject* jso, const String& name) {
-	    if (!jso)
-		return;
-	    JsObject* proto = YOBJECT(JsObject,params().getParam(name));
-	    if (proto)
-		proto = YOBJECT(JsObject,proto->params().getParam(YSTRING("prototype")));
-	    if (proto && proto->ref())
-		jso->params().setParam(new ExpWrapper(proto,protoName()));
-	}
-
     // Retrieve JsEngine object held by running context
     // 'eng' given: unsafe, lock context, return reference
     static inline JsEngine* get(GenObject* context, RefPointer<JsEngine>* eng = 0) {
@@ -1177,15 +1203,6 @@ public:
 	    Lock lck(ctx->mutex());
 	    *eng = YOBJECT(JsEngine,ctx->params().getParam(YSTRING("Engine")));
 	    return *eng;
-	}
-    // Set a contructor prototype from Engine object held by running context
-    static inline void setConstructorPrototype(GenObject* context, JsObject* jso, const String& name) {
-	    if (!(context && jso))
-		return;
-	    ScriptContext* ctx = getScriptContext(context);
-	    JsEngine* eng = ctx ? YOBJECT(JsEngine,ctx->params().getParam(YSTRING("Engine"))) : 0;
-	    if (eng)
-		eng->setConstructorPrototype(jso,name);
 	}
 
 protected:
@@ -1207,6 +1224,21 @@ private:
 #undef MKDUMP
 #undef MKSCRIPTYPE
 #undef MKEVENT
+
+static JsObject* setEngineConstructorPrototype(GenObject* context, JsObject* jso,
+    const String& name)
+{
+    if (!jso)
+	return 0;
+    if (context) {
+	ScriptContext* ctx = getScriptContext(context);
+	JsEngine* eng = ctx ? YOBJECT(JsEngine,ctx->params().getParam(YSTRING("Engine"))) : 0;
+	if (eng)
+	    jso->setPrototype(eng->params(),name);
+    }
+    return jso;
+}
+
 
 class JsMessage : public JsObject
 {
@@ -1689,6 +1721,10 @@ class JsConfigSection : public JsObject
 {
     friend class JsConfigFile;
     YCLASS(JsConfigSection,JsObject)
+public:
+    inline NamedList* section()
+	{ return m_owner->config().getSection(toString()); }
+
 protected:
     inline JsConfigSection(JsConfigFile* owner, const char* name, unsigned int lineNo)
 	: JsObject(owner->mutex(),name,lineNo,true),
@@ -1730,6 +1766,10 @@ public:
 	    params().addParam(new ExpFunction("getError"));
 	    params().addParam(new ExpFunction("describeError"));
 	}
+    inline JsXPath(ScriptMutex* mtx, const char* name, unsigned int line, const XPath& path)
+	: JsObject(mtx,name,line),
+	  m_path(path)
+	{}
     virtual void* getObject(const String& name) const;
     virtual JsObject* runConstructor(ObjList& stack, const ExpOperation& oper, GenObject* context);
     virtual void initConstructor(JsFunction* construct)
@@ -1756,11 +1796,7 @@ protected:
     inline JsXPath(ScriptMutex* mtx, unsigned int line, const char* path, unsigned int flags = 0)
 	: JsObject(mtx,path,line),
 	  m_path(path,flags)
-	{ }
-    inline JsXPath(ScriptMutex* mtx, const char* name, unsigned int line, const XPath& path)
-	: JsObject(mtx,name,line),
-	  m_path(path)
-	{ }
+	{}
     virtual JsObject* clone(const char* name, const ExpOperation& oper) const
 	{ return new JsXPath(mutex(),name,oper.lineNumber(),m_path); }
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
@@ -1835,7 +1871,16 @@ public:
 	{ return m_owner ? (JsXML*)m_owner : this; }
     inline const XmlElement* element() const
 	{ return m_xml; }
+    virtual JsObject* cloneForCopy(GenObject* context, ScriptMutex** mtx = 0,
+	unsigned int line = 0) const
+	{ return build(m_xml ? new XmlElement(*m_xml) : 0,context,mtx ? *mtx : mutex(),line); }
     static void initialize(ScriptContext* context);
+    static inline JsXML* build(XmlElement* xml, GenObject* context,
+	ScriptMutex* mtx, unsigned int line) {
+	    return static_cast<JsXML*>(setEngineConstructorPrototype(context,
+		new JsXML(mtx,line,xml),YSTRING("XML")));
+	}
+
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 private:
@@ -2100,6 +2145,16 @@ UNLOAD_PLUGIN(unloadNow)
 	return __plugin.unload();
     }
     return true;
+}
+
+static inline const NamedList* getObjParams(GenObject* op)
+{
+    JsObject* jso = YOBJECT(JsObject,op);
+    if (!jso)
+	return 0;
+    JsConfigSection* sect = YOBJECT(JsConfigSection,jso);
+    const NamedList* p = sect ? sect->section() : 0;
+    return p ? p : (jso->nativeParams() ? jso->nativeParams() : &jso->params());
 }
 
 // Load extensions in a script context
@@ -2591,6 +2646,23 @@ static void copyObjParams(NamedList& dest, const NamedList* src)
 	    dest.setParam(p->name(),*p);
     }
 }
+
+
+JsNamedListWrite::JsNamedListWrite(ExpOperation* oper)
+    : m_jso(JsParser::isFilled(oper) ? YOBJECT(JsObject,oper) : 0), m_params(0), m_jsoParams("")
+{
+    if (!m_jso)
+	return;
+    JsConfigSection* sect = YOBJECT(JsConfigSection,m_jso);
+    if (sect)
+	m_params = sect->section();
+    else if (!m_jso->frozen()) {
+	m_params = m_jso->nativeParams();
+	if (!m_params)
+	    m_params = &m_jsoParams;
+    }
+}
+
 
 bool JsEngAsync::run()
 {
@@ -4963,10 +5035,14 @@ void JsMessageHandle::prepare(GenObject* name, GenObject* value, const NamedList
 	if (!p.getBoolValue(YSTRING("engine.timer"),!!f)) {
 	    MatchingItemString* mi = new MatchingItemString("","engine.timer",false,true);
 	    if (f) {
+		ObjList tmp;
+		tmp.append(f);
+		tmp.append(mi);
 		MatchingItemList* l = new MatchingItemList("");
-		l->append(f);
-		l->append(mi);
-		f = l;
+		if (l->append(tmp))
+		    f = l;
+		else
+		    TelEngine::destruct(l);
 	    }
 	    else
 		f = mi;
@@ -6841,21 +6917,36 @@ bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObje
 {
     ExpOperVector args;
     if (oper.name() == YSTRING("matches")) {
-	// matches(val)
+	// matches(val[,params])
 	if (!extractStackArgs(1,0,args,this,stack,oper,context))
 	    return false;
 	bool ok = false;
 	if (m_match) {
-	    ExpOperation& val = *args[0];
+	    ExpOperation* val = args[0];
 	    JsObject* jso = JsParser::objPresent(val);
-	    if (jso) {
-		const NamedList* list = getObjParams(&val);
-		ok = m_match->matchListParam(list ? *list : NamedList::empty());
+	    const NamedList* list = jso ? getObjParams(jso) : 0;
+	    const String* str = (jso || JsParser::isMissing(val)) ? 0 : val;
+	    const NamedList* params = getObjParams(args[1]);
+	    if (params) {
+		MatchingParams mParams;
+		int lvl = params->getIntValue(YSTRING("track_level"));
+		if (lvl > 0) {
+		    DebugEnabler* dbg = JsEngine::get(context);
+		    if (dbg && dbg->debugAt(lvl)) {
+			mParams.m_dbg = dbg;
+			mParams.m_level = lvl;
+		    }
+		}
+		const MatchingItemBase* m = mParams.matches(*m_match,list,str);
+		ok = m;
+		if (m && m->id() && params->getParam(YSTRING("id"))) {
+		    jso = YOBJECT(JsObject,args[1]);
+		    if (jso)
+			jso->setStringField("id",m->id());
+		}
 	    }
-	    else if (JsParser::isEmpty(val))
-		ok = m_match->matchString(String::empty());
 	    else
-		ok = m_match->matchString(val);
+		ok = list ? m_match->matchListParam(*list) : m_match->matchStringOpt(str);
 	}
 	ExpEvaluator::pushOne(stack,new ExpOperation(ok));
     }
@@ -6863,116 +6954,270 @@ bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObje
 	// getDesc([params])
 	if (!extractStackArgs(0,0,args,this,stack,oper,context))
 	    return false;
+	unsigned int f = 0;
 	const NamedList* params = getObjParams(args[0]);
-	JsObject* jso = buildJsObj(m_match,context,oper.lineNumber(),mutex(),
-	    params && params->getBoolValue(YSTRING("force_bool_props")));
-	pushStackObjNull(stack,jso,"desc");
+	if (params) {
+	    f = (*params)[YSTRING("flags")].encodeFlags(MatchingItemDump::flagsDict());
+	    if (params->getBoolValue(YSTRING("force_bool_props")))
+		f |= BuildObjForceBoolProps;
+	    if (params->getBoolValue(YSTRING("force_empty_name")))
+		f |= BuildObjForceEmptyName;
+	}
+	pushStackObjNull(stack,buildJsObj(m_match,context,oper.lineNumber(),mutex(),f),"desc");
     }
     else if (oper.name() == YSTRING("dump")) {
-	// dump([params[,indent,origIndent]])
+	// dump([params[,indent,addIndent]])
+	//   Return: string
 	if (!extractStackArgs(0,0,args,this,stack,oper,context))
 	    return false;
-	String indent = "\r\n";
-	String origIndent = "  ";
-	ExpOperation* op = args[1];
-	if (op) {
-	    if (!JsParser::isUndefined(*op)) {
-		if (JsParser::isNull(*op))
-		    indent = "";
-		else
-		    indent = *op;
+	String indent("\r\n");
+	String addIndent("  ");
+	if (args[1]) {
+	    if (args[1]->isNumber()) {
+		int64_t n = args[1]->number();
+		if (n > 0)
+		    indent.append(' ',n < 100 ? n : 100);
+		addIndent.clear();
+		n = args[2] ? args[2]->number() : 2;
+		if (n > 0)
+		    addIndent.append(' ',n < 100 ? n : 100);
 	    }
-	    op = args[2];
-	    if (op && !JsParser::isUndefined(*op)) {
-		if (JsParser::isNull(*op))
-		    origIndent = "";
-		else
-		    origIndent = *op;
+	    else {
+		JsParser::setString(indent,args[1]);
+		JsParser::setString(addIndent,args[2]);
 	    }
 	}
 	ExpOperation* res = new ExpOperation("","dump");
-	MatchingItemDump::dumpItem(m_match,*res,indent,origIndent,getObjParams(args[0]));
+	MatchingItemDump::dumpItem(m_match,*res,indent,addIndent,getObjParams(args[0]));
 	ExpEvaluator::pushOne(stack,res);
+    }
+    else if (oper.name() == YSTRING("dumpList")) {
+	// dumpList([dest[,prefix[,params]])
+	//   Return:
+	//   Boolean false if we hold no matching item
+	//   undefined if 'dest' is boolean false and no item was dumped
+	//   Object with data if 'dest' is not false and not writable
+	//   Number of dumped items if 'dest' is writable
+	if (!extractStackArgs(0,0,args,this,stack,oper,context))
+	    return false;
+	JsNamedListWrite wr(args[0]);
+	if (!m_match)
+	    ExpEvaluator::pushOne(stack,new ExpOperation(false));
+	else if (wr.params()) {
+	    unsigned int n = MatchingItemDump::dumpItemList(m_match,*(wr.params()),
+		JsParser::getString(args[1]),getObjParams(args[2]));
+	    n = wr.setJsoParams(n);
+	    ExpEvaluator::pushOne(stack,new ExpOperation((int64_t)n,"count"));
+	}
+	else {
+	    NamedList tmp("");
+	    unsigned int n = MatchingItemDump::dumpItemList(m_match,tmp,
+		JsParser::getString(args[1]),getObjParams(args[2]));
+	    if (!n && args[0] && args[0]->isBoolean() && args[0]->valBoolean())
+		ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
+	    else {
+		JsObject* jso = new JsObject(context,oper.lineNumber(),mutex());
+		jso->setStringFields(tmp);
+		ExpEvaluator::pushOne(stack,new ExpWrapper(jso,"list"));
+	    }
+	}
+    }
+    else if (oper.name() == YSTRING("dumpXml")) {
+	// dumpXml([params])
+	//   Return: XML object, null if we hold no matching item
+	if (!extractStackArgs(0,0,args,this,stack,oper,context))
+	    return false;
+	XmlElement* xml = MatchingItemDump::dumpItemXml(m_match,getObjParams(args[0]));
+	JsXML* x = xml ? JsXML::build(xml,context,mutex(),oper.lineNumber()) : 0;
+	pushStackObjNull(stack,x,"xml");
     }
     else if (oper.name() == YSTRING("validate")) {
 	// validate(value[,name[,params]])
 	// Return: Object (success), null/undefined (empty optimized matching), string (error)
 	if (!extractStackArgs(1,0,args,this,stack,oper,context))
 	    return false;
-	const char* reason = 0;
-	MatchingItemBase* mi = buildItemFromArgs(args,&reason);
+	String error;
+	MatchingItemBase* mi = buildItemFromArgs(args,&error);
 	if (mi) {
 	    JsObject* jso = buildJsObj(mi,context,oper.lineNumber(),mutex());
 	    TelEngine::destruct(mi);
 	    pushStackObjNull(stack,jso,"match");
 	}
-	else if (TelEngine::null(reason))
-	    ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
+	else if (error)
+	    ExpEvaluator::pushOne(stack,new ExpOperation(error,"error"));
 	else
-	    ExpEvaluator::pushOne(stack,new ExpOperation(reason,"reason"));
+	    ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
+    }
+    else if (oper.name() == YSTRING("load")) {
+	// load(src[,params[,prefix]])
+	// Return: Object (success), null (no input), undefined (empty optimized matching), string (error)
+	if (!extractStackArgs(1,0,args,this,stack,oper,context))
+	    return false;
+	XmlElement* xml = YOBJECT(XmlElement,args[0]);
+	const NamedList* src = xml ? 0 : getObjParams(args[0]);
+	if (xml || src) {
+	    const NamedList* params = getObjParams(args[1]);
+	    ObjList ignoreName, allowName, ignoreType, allowType;
+	    MatchingItemLoad miLoad;
+	    if (params) {
+		for (ObjList* o = params->paramList()->skipNull(); o; o = o->skipNext()) {
+		    NamedString* ns = static_cast<NamedString*>(o->get());
+		    if (ns->name() == YSTRING("flags"))
+			miLoad.m_flags = ns->encodeFlags(MatchingItemLoad::loadFlags());
+		    else if (ns->name() == YSTRING("ignore_name"))
+			miLoad.m_ignoreName = ns->split(ignoreName,',',false);
+		    else if (ns->name() == YSTRING("allow_name"))
+			miLoad.m_allowName = ns->split(allowName,',',false);
+		    else if (ns->name() == YSTRING("ignore_type"))
+			miLoad.m_ignoreType = ns->split(ignoreType,',',false);
+		    else if (ns->name() == YSTRING("allow_type"))
+			miLoad.m_allowType = ns->split(allowType,',',false);
+		    else if (ns->name() == YSTRING("warn_level"))
+			miLoad.m_warnLevel = ns->toInteger();
+		}
+	    }
+	    if (!params || params->getBoolValue(YSTRING("debug"),true))
+		miLoad.m_dbg = JsEngine::get(context);
+	    String error;
+	    MatchingItemBase* mi = xml ? miLoad.loadXml(xml,&error) :
+		miLoad.loadItem(*src,&error,TelEngine::c_str(args[2]));
+	    if (mi)
+		ExpEvaluator::pushOne(stack,new ExpWrapper(
+		    build(mi,context,mutex(),oper.lineNumber()),"match"));
+	    else if (error)
+		ExpEvaluator::pushOne(stack,new ExpOperation(error,"error"));
+	    else
+		ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
+	}
+	else
+	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
     }
     else
 	return JsObject::runNative(stack,oper,context);
     return true;
 }
 
-JsObject* JsMatchingItem::cloneForCopy(GenObject* context, ScriptMutex** mtx,
-    unsigned int line) const
-{
-    JsMatchingItem* mi = new JsMatchingItem(copyMatching(),mtx ? *mtx : mutex(),line);
-    JsEngine::setConstructorPrototype(context,mi,YSTRING("MatchingItem"));
-    return mi;
-}
-
-MatchingItemBase* JsMatchingItem::buildItemFromArgs(ExpOperVector& args, const char** reason)
+MatchingItemBase* JsMatchingItem::buildItemFromArgs(ExpOperVector& args, String* error)
 {
     const NamedList* params = getObjParams(args[2]);
-    unsigned int flags = 0;
+    uint64_t flags = 0;
     if (params) {
-	if (params->getBoolValue(YSTRING("nooptimize")))
-	    flags |= 0x01;
-	if (params->getBoolValue(YSTRING("name_required_simple")))
-	    flags |= 0x02;
-	if (params->getBoolValue(YSTRING("name_required_list")))
-	    flags |= 0x04;
+	const String* f = params->getParam(YSTRING("flags"));
+	if (f)
+	    flags = f->encodeFlags(MatchingItemLoad::loadFlags());
     }
-    return buildItem(args[0],args[1],0,flags,reason);
+    return buildItem(args[0],args[1],0,flags,error);
+}
+
+MatchingItemBase* JsMatchingItem::buildItemFromObj(GenObject* gen, uint64_t flags,
+    String* error, bool allowObjValue)
+{
+    JsObject* jso = YOBJECT(JsObject,gen);
+    if (!jso)
+	return 0;
+    JsArray* jsa = YOBJECT(JsArray,gen);
+    if (jsa)
+	return buildItem(jsa,0,0,flags,error,allowObjValue);
+    const NamedList& jsp = jso->params();
+    const String& type = jsp[YSTRING("type")];
+    if (type)
+	return buildItem(jsp.getParam(YSTRING("value")),jsp.getParam(YSTRING("name")),
+	    &jsp,flags,error,false,type);
+    // Retrieve params from 'params' property or object itself
+    GenObject* params = jsp.getParam(YSTRING("params"));
+    return buildItem(jsp.getParam(YSTRING("value")),jsp.getParam(YSTRING("name")),
+	params ? getObjParams(params) : getObjParams(jso),flags,error,allowObjValue);
 }
 
 MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name,
-    const NamedList* params, unsigned int flags, const char** reason, bool allowObjValue)
+    const NamedList* params, uint64_t flags, String* error, bool allowObjValue,
+    const String& type)
 {
-    MatchingItemBase* ret = 0;
-    const char* itemName = TelEngine::c_safe(name);
+    const char* n = TelEngine::c_safe(name);
     bool negated = params && params->getBoolValue(YSTRING("negated"));
+    int missingMatch = params ? lookup((*params)[YSTRING("missing_match")],
+	MatchingItemBase::missingMatchDict()) : 0;
+    const char* id = params ? params->getValue(YSTRING("id")) : 0;
+    JsObject* jso = YOBJECT(JsObject,value);
+#if 0
+    String t;
+    if (jso) {
+	if (YOBJECT(JsArray,jso))
+	    t = " array";
+	else if (YOBJECT(JsRegExp,jso))
+	    t = " regexp";
+	else if (jso->params()[YSTRING("type")])
+	    t << " type:" << jso->params()[YSTRING("type")];
+	else
+	    t << " object";
+    }
+    Debugger dbg(DebugTest,"JsMatchingItem::buildItem"," value=(%p)%s"
+	" name=%s allowObjValue=%u type=%s",
+	value,t.safe(),n,allowObjValue,type.safe());
+#endif
+    MatchingItemBase* ret = 0;
     while (true) {
-	JsObject* jso = YOBJECT(JsObject,value);
-	// String
 	if (!jso) {
 	    ExpOperation* oper = YOBJECT(ExpOperation,value);
-	    const char* v = JsParser::isMissing(oper) ? "" : oper->safe();
-	    bool ic = params && params->getBoolValue(YSTRING("ignoreCase"));
-	    ret = new MatchingItemString(itemName,v,ic,negated);
+	    const String& val = JsParser::isMissing(oper) ? String::empty() : *oper;
+	    int t = type ? lookup(type,MatchingItemBase::typeDict()) : 0;
+	    if (!type || t == MatchingItemBase::TypeString) {
+		bool ci = params && params->getBoolValue(YSTRING("caseinsensitive"));
+		ret = new MatchingItemString(n,val,ci,negated,missingMatch,id);
+	    }
+	    else if (t == MatchingItemBase::TypeRegexp) {
+		bool ci = params && params->getBoolValue(YSTRING("caseinsensitive"));
+		bool extended = !(params && params->getBoolValue(YSTRING("basic")));
+		ret = MatchingItemRegexp::build(n,val,0,error ? true : false,
+		    negated ? 1 : 0,ci,extended,missingMatch,id);
+		if (!ret && error)
+		    error->printf("invalid regexp '%s'",val.safe());
+	    }
+	    else if (t == MatchingItemBase::TypeXPath) {
+		MatchingItemBase* match = 0;
+		if (params) {
+		    JsObject* m = YOBJECT(JsObject,params->getParam(YSTRING("match")));
+		    match = m ? buildItemFromObj(m,flags,error) : 0;
+		    if (!match && error && *error)
+			break;
+		}
+		ret = MatchingItemXPath::build(n,val,error,error ? true : false,
+		    match,negated,missingMatch,id);
+		if (error && *error)
+		    TelEngine::destruct(ret);
+	    }
+	    else if (t == MatchingItemBase::TypeRandom) {
+		ret = MatchingItemRandom::build(val,0,error ? true : false,
+		    negated,n,missingMatch,id);
+		if (!ret && error)
+		    error->printf("invalid random value '%s'",val.safe());
+	    }
+	    else if (error)
+		error->printf("unkown type '%s'",type.safe());
 	    break;
 	}
 	// Array of items
 	JsArray* jsa = YOBJECT(JsArray,jso);
 	if (jsa) {
-	    MatchingItemList* list = new MatchingItemList(itemName,
-		!(params && params->getBoolValue(YSTRING("any"))),negated);
+	    ObjList items;
+	    ObjList* add = &items;
 	    for (int32_t i = 0; i < jsa->length(); ++i) {
-		value = jsa->params().getParam(String(i));
-		if (!value)
-		    continue;
-		MatchingItemBase* it = buildItem(value,0,0,flags,reason);
+		MatchingItemBase* it = buildItemFromObj(jsa->at(i),flags,error);
 		if (it)
-		    list->append(it);
-		else if (reason && !TelEngine::null(*reason)) {
-		    TelEngine::destruct(list);
-		    return 0;
+		    add = add->append(it);
+		else if (error && *error) {
+		    items.clear();
+		    break;
 		}
 	    }
-	    ret = list;
+	    if (items.skipNull()) {
+		MatchingItemList* l = new MatchingItemList(n,
+		    !(params && params->getBoolValue(YSTRING("any"))),negated,missingMatch,id);
+		if (l->append(items))
+		    ret = l;
+		else
+		    TelEngine::destruct(l);
+	    }
 	    break;
 	}
 	// Regexp
@@ -6980,109 +7225,107 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 	if (rex) {
 	    const Regexp& r = rex->regexp();
 	    if (params) {
-		bool rBasic = !r.isExtended();
-		bool ic = params->getBoolValue(YSTRING("ignoreCase"),r.isCaseInsensitive());
-		bool basic = params->getBoolValue(YSTRING("basicPosix"),rBasic);
-		if (ic != r.isCaseInsensitive() || basic != rBasic) {
-		    Regexp tmp(r);
-		    tmp.setFlags(!basic,ic);
-		    ret = new MatchingItemRegexp(itemName,tmp,negated);
+		bool ci = params->getBoolValue(YSTRING("caseinsensitive"),r.isCaseInsensitive());
+		bool extended = !params->getBoolValue(YSTRING("basic"),!r.isExtended());
+		if (ci != r.isCaseInsensitive() || extended != r.isExtended()) {
+		    Regexp tmp(r,extended,ci);
+		    ret = new MatchingItemRegexp(n,tmp,negated,missingMatch,id);
 		    break;
 		}
 	    }
-	    ret = new MatchingItemRegexp(itemName,r,negated);
+	    ret = new MatchingItemRegexp(n,r,negated,missingMatch,id);
 	    break;
 	}
-	const NamedList& jsp = jso->params();
-	const String* type = jsp.getParam(YSTRING("type"));
-	if (type) {
-	    if (*type == YSTRING("random")) {
-		ret = new MatchingItemRandom(jsp.getUInt64Value(YSTRING("value")),
-		    jsp.getUInt64Value(YSTRING("maxvalue")),negated,itemName);
-		break;
-	    }
-	}
-	if (!allowObjValue || YOBJECT(JsMatchingItem,jso)) {
-	    if (reason)
-		*reason = "object-not-allowed";
-	    return 0;
-	}
-	// Build from object: {name:"", value:???, params:{}, type:""}
-	// 'value' is no longer allowed to be a non handled object
-	// Retrieve params from 'params' property or object itself
-	GenObject* gen = jsp.getParam(YSTRING("params"));
-	value = jsp.getParam(YSTRING("value"));
-	params = gen ? getObjParams(gen) : getObjParams(jso);
-	name = jsp.getParam(YSTRING("name"));
-	ret = buildItem(value,name,params,flags,reason,false);
+	if (allowObjValue && !YOBJECT(JsMatchingItem,jso))
+	    // 'value' is no longer allowed to be a non handled object
+	    ret = buildItemFromObj(jso,flags,error,false);
+	else if (error)
+	    *error = "object not allowed";
 	break; 
     }
     if (!ret)
 	return 0;
-    MatchingItemList* list = (MatchingItemList*)ret->itemList();
-    if (!ret->name()) {
-	if (0 != (flags & (list ? 0x04 : 0x02))) {
-	    if (reason)
-		*reason = list ? "empty-list-name" : "empty-item-name";
-	    TelEngine::destruct(ret);
-	    return 0;
-	}
+    bool empty = false;
+    if (ret->type() != MatchingItemBase::TypeList)
+	empty = !ret->name() && ret->type() != MatchingItemBase::TypeRandom &&
+	    0 != (flags & MatchingItemLoad::NameReqSimple);
+    else if (!ret->name() && 0 != (flags & MatchingItemLoad::NameReqList))
+	empty = true;
+    else if (0 == (flags & MatchingItemLoad::NoOptimize))
+	return MatchingItemList::optimize(static_cast<MatchingItemList*>(ret),flags);
+    else if (!static_cast<MatchingItemList*>(ret)->length())
+	TelEngine::destruct(ret);
+    if (empty) {
+	if (error)
+	    *error = "empty name";
+	TelEngine::destruct(ret);
     }
-    if (list && 0 == (flags & 0x01))
-	return MatchingItemList::optimize(list);
     return ret;
 }
 
 JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
-    GenObject* context, unsigned int line, ScriptMutex* mtx, bool forceBoolProps)
+    GenObject* context, unsigned int line, ScriptMutex* mtx, uint64_t flags)
 {
     if (!item)
 	return 0;
     JsObject* jso = new JsObject(context,line,mtx);
-    jso->setStringField("name",item->name());
-    if (item->itemString()) {
-	const MatchingItemString* tmp = item->itemString();
-	jso->setStringField("value",tmp->value());
-	if (forceBoolProps || tmp->caseInsensitive())
-	    jso->setBoolField("ignoreCase",tmp->caseInsensitive());
+    if (0 == (flags & MatchingItemDump::IgnoreName) &&
+	(item->name() || 0 != (flags & BuildObjForceEmptyName)))
+	jso->setStringField("name",item->name());
+    bool forceBoolProps = 0 != (flags & BuildObjForceBoolProps);
+    if (item->type() == MatchingItemBase::TypeString) {
+	const MatchingItemString* str = static_cast<const MatchingItemString*>(item);
+	jso->setStringField("value",str->value());
+	if (forceBoolProps || str->caseInsensitive())
+	    jso->setBoolField("caseinsensitive",str->caseInsensitive());
+    }
+    else if (item->type() == MatchingItemBase::TypeRegexp) {
+	const Regexp& r = static_cast<const MatchingItemRegexp*>(item)->value();
+	JsRegExp* rex = new JsRegExp(mtx,r,line,r,r.isCaseInsensitive(),r.isExtended());
+	rex->setPrototype(context,YSTRING("RegExp"));
+	jso->setObjField("value",rex);
+    }
+    else if (item->type() == MatchingItemBase::TypeXPath) {
+	const MatchingItemXPath* x = static_cast<const MatchingItemXPath*>(item);
+	jso->setStringField("value",x->value());
+	jso->setStringField("type",item->typeName());
+	if (x->match()) {
+	    JsObject* o = buildJsObj(x->match(),context,line,mtx,flags);
+	    if (o)
+		jso->setObjField("match",o);
+	}
+    }
+    else if (item->type() == MatchingItemBase::TypeRandom) {
+	ExpOperation* op = new ExpOperation("","value");
+	static_cast<const MatchingItemRandom*>(item)->dumpValue(*op);
+	jso->params().setParam(op);
+	jso->setStringField("type",item->typeName());
+    }
+    else if (item->type() == MatchingItemBase::TypeList) {
+	const MatchingItemList* list = static_cast<const MatchingItemList*>(item);
+	JsArray* jsa = new JsArray(context,line,mtx);
+	for (unsigned int i = 0; i < list->length(); ++i) {
+	    JsObject* o = buildJsObj(list->at(i),context,line,mtx,flags);
+	    if (o)
+		jsa->push(new ExpWrapper(o));
+	}
+	jso->setObjField("value",jsa);
+	if (forceBoolProps || !list->matchAll())
+	    jso->setBoolField("any",!list->matchAll());
     }
     else {
-	const MatchingItemList* list = 0;
-	JsObject* val = 0;
-	if (item->itemRegexp()) {
-	    const Regexp& rex = item->itemRegexp()->value();
-	    val = new JsRegExp(mtx,rex.safe(),line,rex.safe(),rex.isCaseInsensitive(),rex.isExtended());
-	    val->setPrototype(context,YSTRING("RegExp"));
-	}
-	else if (item->itemList()) {
-	    JsArray* jsa = new JsArray(context,line,mtx);
-	    list = static_cast<const MatchingItemList*>(item);
-	    for (unsigned int i = 0; i < list->length(); ++i) {
-		JsObject* jso = buildJsObj(list->at(i),context,line,mtx,forceBoolProps);
-		if (jso)
-		    jsa->push(new ExpWrapper(jso));
-	    }
-	    val = jsa;
-	}
-	else if (item->itemRandom()) {
-	    const MatchingItemRandom* tmp = item->itemRandom();
-	    val = new JsObject(context,line,mtx);
-	    val->setStringField("type","random");
-	    val->setIntField("value",tmp->value());
-	    val->setIntField("maxvalue",tmp->maxValue());
-	}
-	if (val) {
-	    jso->setObjField("value",val);
-	    if (list && (forceBoolProps || !list->matchAll()))
-		jso->setBoolField("any",!list->matchAll());
-	}
-	else {
-	    jso->params().setParam(JsParser::nullClone("value"));
-	    item = 0;
-	}
+	MatchingItemCustom* c = YOBJECT(MatchingItemCustom,item);
+	if (c && c->valueStr())
+	    jso->setStringField("value",*(c->valueStr()));
+	jso->setStringField("type",item->typeName());
     }
-    if (item && (forceBoolProps || item->negated()))
+    if (forceBoolProps || item->negated())
 	jso->setBoolField("negated",item->negated());
+    const char* s = lookup(item->missingMatch(),MatchingItemBase::missingMatchDict());
+    if (s)
+	jso->setStringField("missing_match",s);
+    if (item->id())
+	jso->setStringField("id",item->id());
     return jso;
 }
 
