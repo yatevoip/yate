@@ -285,7 +285,7 @@ AC_TRY_LINK([
 #include <time.h>
 ],[
 pthread_mutex_t mutex;
-struct timespec tout;
+struct timespec tout = { 0, 0};
 pthread_mutex_timedlock(&mutex,&tout);
 ],
 have_mutex_timedlock="yes",
@@ -302,7 +302,7 @@ AC_TRY_LINK([
 #include <time.h>
 ],[
 sem_t sem;
-struct timespec tout;
+struct timespec tout = { 0, 0};
 sem_timedwait(&sem,&tout);
 ],
 have_sem_timedwait="yes",
@@ -379,6 +379,7 @@ AC_TRY_COMPILE([
 #include <pthread.h>
 ],[
     cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
     pthread_setaffinity_np(pthread_self(),sizeof(cpuset),&cpuset);
 ],
     have_pthread_affinity="yes",
@@ -394,6 +395,7 @@ else
     #include <sched.h>
     ],[
 	cpu_set_t cpuset;
+	CPU_ZERO(&cpuset);
 	sched_setaffinity(0,sizeof(cpuset),&cpuset);
     ],
 	have_sched_affinity="yes",
