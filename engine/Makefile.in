@@ -126,6 +126,12 @@ ClientLogic.o: @srcdir@/ClientLogic.cpp $(MKDEPS) $(CLINC)
 String.o: @srcdir@/String.cpp $(MKDEPS) $(CINC)
 	$(COMPILE) $(REGEX_INC) -c $<
 
+XML.o: @srcdir@/XML.cpp $(MKDEPS) $(CINC) ../yatexml.h
+	$(COMPILE) $(REGEX_INC) -c $<
+
+MatchingItem.o: @srcdir@/MatchingItem.cpp $(MKDEPS) $(CINC) ../yatexml.h ../yatematchingitem.h
+	$(COMPILE) $(REGEX_INC) -c $<
+
 regex.o: @top_srcdir@/engine/regex/regex.c $(MKDEPS)
 	$(CCOMPILE) -DSTDC_HEADERS $(REGEX_INC) -c $<
 
