@@ -48,6 +48,16 @@ using namespace TelEngine;
 #define MI_RAND_C(item) (static_cast<const MatchingItemRandom*>(item))
 #define MI_CUSTOM_C(item) (static_cast<const MatchingItemCustom*>(item))
 
+static inline bool flagSet(uint64_t flags, uint64_t mask)
+{
+    return 0 != (flags & mask);
+}
+
+static inline bool flagSet(unsigned int flags, unsigned int mask)
+{
+    return 0 != (flags & mask);
+}
+
 static inline String& dumpItemInfo(const MatchingItemBase& mi, String& buf)
 {
     return buf.printf("(%p,%s,%s)",&mi,mi.typeName(),mi.name().safe());
@@ -178,6 +188,15 @@ public:
     int level;
 };
 
+bool MatchingParams::trackMatchDbg()
+{
+#ifdef TRACK_MI_MATCH
+    return true;
+#else
+    return 0 != m_dbg;
+#endif
+}
+
 const MatchingItemBase* MatchingParams::matches(const MatchingItemBase& mi,
     const NamedList* list, const String* str)
 {
@@ -199,14 +218,12 @@ const MatchingItemBase* MatchingParams::matches(const MatchingItemBase& mi,
     MiDebugger debugger(&dbg);
     if (dbg.debugAt(data->level)) {
 	String info, extra;
-	if (first) {
-	    if (list)
-		info.printf(" list='%s'",list->safe());
-	    else if (str)
-		info.printf(" str='%s'",str->safe());
-	    else
-		info << " str=<missing>";
-	}
+	if (list)
+	    info.printf(" list='%s'",list->safe());
+	else if (str)
+	    info.printf(" str='%s'",str->safe());
+	else
+	    info << " str=<missing>";
 	if (mi.type() == MatchingItemBase::TypeList) {
 	    const MatchingItemList* lst = MI_LIST_C(&mi);
 	    info.printfAppend(" count=%u match_all=%s",
@@ -381,9 +398,11 @@ bool MatchingItemXPath::runMatch(MatchingParams* params, const NamedList* list,
 #endif
     AutoGenObject autoDel;
     bool foundParam = false;
+    String pName;
     XmlElement* xml = 0;
     if (name() && params) {
-	ObjList* o = params->m_params.find(name());
+	pName << name() << "__xml__";
+	ObjList* o = params->m_params.find(pName);
 	if (o) {
 	    xml = YOBJECT(XmlElement,o->get());
 	    foundParam = true;
@@ -404,18 +423,29 @@ bool MatchingItemXPath::runMatch(MatchingParams* params, const NamedList* list,
 	    xml = XmlDomParser::getXml(*list,name(),&npOwner,&error,"MatchingItemXPath");
 	    foundParam = error != XmlDomParser::GetXmlMissing;
 	    // Store in params for later use. Set owned (autodelete)
-	    if (params)
-		params->m_params.insert(new AutoGenObject(xml,name(),!npOwner));
+	    if (pName)
+		params->m_params.insert(new AutoGenObject(xml,pName,!npOwner));
 	    else if (!npOwner)
 		autoDel.set(xml);
 	}
     }
+    if (params && params->trackMatchDbg()) {
+	MiDebugEnabler dbg(*this,params);
+	String info;
+	if (xml)
+	    info.printf("match=(%p)",m_match);
+	else
+	    info.printf("found=%s",String::boolText(foundParam));
+	Debug(&dbg,DebugAll,"[%p] %s xml=(%p) %s",params,dumpItemInfo(*this).safe(),xml,info.safe());
+    }
     bool ok = false;
     if (xml) {
-	if (m_match)
-	    ok = m_match->matchStringOpt(m_value.findText(*xml),params);
-	else
+	if (!m_match)
 	    ok = m_value.find(*xml,XPath::FindAny);
+	else if (params)
+	    ok = params->matches(*m_match,0,m_value.findText(*xml));
+	else
+	    ok = m_match->matchStringOpt(m_value.findText(*xml),params);
     }
     else if (!foundParam)
 	ok = missingMatch() == MissingParamMatch;
@@ -726,14 +756,14 @@ unsigned int MatchingItemCustom::dumpList(const MatchingItemDump& dump, NamedLis
     return 0;
 }
 
-bool MatchingItemCustom::loadItem(const MatchingItemLoad& load, const NamedList& params,
-    String* error, const char* prefix)
+bool MatchingItemCustom::loadItem(const MatchingItemLoad& load, uint64_t flags,
+    const NamedList& params, String* error, const char* prefix)
 {
     return false;
 }
 
-bool MatchingItemCustom::loadXml(const MatchingItemLoad& load, const XmlElement& xml,
-    String* error)
+bool MatchingItemCustom::loadXml(const MatchingItemLoad& load, uint64_t flags,
+    const XmlElement& xml, String* error)
 {
     return false;
 }
@@ -801,6 +831,7 @@ static const TokenDict64 s_miLoadFlags[] = {
     {"nooptimize", MatchingItemLoad::NoOptimize},
     {"name_required_simple", MatchingItemLoad::NameReqSimple},
     {"name_required_list", MatchingItemLoad::NameReqList},
+    {"name_required_xpath_match", MatchingItemLoad::NameReqXPathMatch},
     {"regexp_basic", MatchingItemLoad::RexBasic},
     {"regexp_detect", MatchingItemLoad::RexDetect},
     {"regexp_detect_negated", MatchingItemLoad::RexDetectNegated},
@@ -820,26 +851,26 @@ static const TokenDict s_miFlags[] = {
 
 static inline bool miNegated(unsigned int flags)
 {
-    return 0 != (flags & MatchingItemLoad::ItemNegated);
+    return flagSet(flags,MatchingItemLoad::ItemNegated);
 }
 
 static inline bool miMatchAll(unsigned int flags)
 {
-    return 0 == (flags & MatchingItemLoad::ItemAny);
+    return !flagSet(flags,MatchingItemLoad::ItemAny);
 }
 
 static inline int miMissingMatch(unsigned int flags)
 {
-    if (0 != (flags & MatchingItemLoad::ItemMissingMatch))
+    if (flagSet(flags,MatchingItemLoad::ItemMissingMatch))
 	return MatchingItemBase::MissingParamMatch;
-    if (0 != (flags & MatchingItemLoad::ItemMissingNoMatch))
+    if (flagSet(flags,MatchingItemLoad::ItemMissingNoMatch))
 	return MatchingItemBase::MissingParamNoMatch;
     return MatchingItemBase::MissingParamRunMatch;
 }
 
 static inline bool miCaseInsensitive(unsigned int flags)
 {
-    return 0 != (flags & MatchingItemLoad::ItemCaseInsensitive);
+    return flagSet(flags,MatchingItemLoad::ItemCaseInsensitive);
 }
 
 static inline unsigned int buildFlags(const MatchingItemBase* mi)
@@ -947,13 +978,14 @@ public:
 class MiLoadDebug : public MiDebugger
 {
 public:
-    inline MiLoadDebug(const MatchingItemLoad& mil, const char* loc = 0, const char* prefix = 0)
+    inline MiLoadDebug(const MatchingItemLoad& mil, uint64_t flags, const char* loc = 0,
+	const char* prefix = 0)
 #ifdef TRACK_MI_LOAD
 	: MiDebugger(mil.m_dbg ? mil.m_dbg : s_debug) {
 	    if (loc) {
 		String info;
-		info.decodeFlags(mil.m_flags,MatchingItemLoad::loadFlags());
-		info.printf(" [%s] flags 0x" FMT64x " (%s)",loc,mil.m_flags,info.safe());
+		info.decodeFlags(flags,MatchingItemLoad::loadFlags());
+		info.printf(" [%s] flags 0x" FMT64x " (%s)",loc,flags,info.safe());
 		if (!TelEngine::null(prefix))
 		    info.printfAppend(" prefix='%s'",prefix);
 		set(DebugCall,"MatchingItem LOAD",info);
@@ -1026,19 +1058,19 @@ static inline bool milIgnore(const MatchingItemLoad& mil, const String& val, boo
     return 0;
 }
 
-MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void* data,
+MatchingItemBase* MatchingItemLoad::miLoadItem(uint64_t flags, bool& fatal, String* error, void* data,
     const char* loc, const String& pName, const NamedList* params, const char* prefix,
     const XmlElement* xml, const String* xmlFrag, bool forceFail) const
 {
     if (!data)
 	return 0;
     MiLoad& d = *(MiLoad*)data;
-    MiLoadDebug dbg(*this);
+    MiLoadDebug dbg(*this,flags);
     const String& name = d.name();
     MatchingItemBase* ret = 0;
     String loadError;
     while (true) {
-	const String& id = flagSet(LoadItemId) ? d.id() : String::empty();
+	const String& id = flagSet(flags,LoadItemId) ? d.id() : String::empty();
 	bool negated = miNegated(d.flags());
 	int missingMatch = miMissingMatch(d.flags());
 	if (MatchingItemBase::TypeList == d.m_type) {
@@ -1059,13 +1091,14 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
 			String tmpPref;
 			tmpPref.printf("%s%s:",prefix,ns->name().c_str() + prefItem.length());
 			MiLoad tmpData(*params,tmpPref,ns);
-			mi = miLoadItem(fatal,error,&tmpData,loc,ns->name(),params,tmpPref,
+			mi = miLoadItem(flags,fatal,error,&tmpData,loc,ns->name(),params,tmpPref,
 			    0,0,forceFail);
 		    }
 		    else if (ns->name() == itemXml) {
 			dbg.setMiLoad(d,loc,pName,params,prefix,xml,xmlFrag);
 			MiLoad tmpData;
-			mi = miLoadItem(fatal,error,&tmpData,loc,ns->name(),0,0,0,ns,forceFail);
+			mi = miLoadItem(flags,fatal,error,&tmpData,loc,ns->name(),
+			    0,0,0,ns,forceFail);
 		    }
 		    if (!miLoadAdd(add,mi,fatal))
 			return 0;
@@ -1082,13 +1115,13 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
 		    parser.fragment()->getChildren().skipNull();
 		for (XmlElement* x = 0; 0 != (x = XmlFragment::getElement(children)); ) {
 		    MiLoad tmpData(*x);
-		    MatchingItemBase* mi = miLoadItem(fatal,error,&tmpData,loc,
+		    MatchingItemBase* mi = miLoadItem(flags,fatal,error,&tmpData,loc,
 			pName ? pName : x->getTag(),0,0,x,0,forceFail);
 		    if (!miLoadAdd(add,mi,fatal))
 			return 0;
 		}
 	    }
-	    ret = miLoadRetList(items,name,miMatchAll(d.flags()),negated,missingMatch,id);
+	    ret = miLoadRetList(flags,items,name,miMatchAll(d.flags()),negated,missingMatch,id);
 	    break;
 	}
 
@@ -1098,7 +1131,7 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
 	const String& val = d.value();
 	const String& tName = d.typeName();
 	if (!(d.m_type || tName)) {
-	    if (flagSet(RexDetect) && val[0] == '^')
+	    if (flagSet(flags,RexDetect) && val[0] == '^')
 		d.m_type = MatchingItemBase::TypeRegexp;
 	    else
 		d.m_type = MatchingItemBase::TypeString;
@@ -1115,24 +1148,24 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
 	else if (MatchingItemBase::TypeRegexp == d.m_type) {
 	    bool ok = true;
 	    unsigned int useF = xml || d.haveFlags();
-	    int neg = (useF || !flagSet(RexDetectNegated)) ? (negated ? 1 : 0) : -1;
+	    int neg = (useF || !flagSet(flags,RexDetectNegated)) ? (negated ? 1 : 0) : -1;
 	    bool ci = useF ? miCaseInsensitive(d.flags()) : false;
-	    bool extended = useF ? (0 == (d.flags() & ItemBasic)) : !flagSet(RexBasic);
-	    ret = MatchingItemRegexp::build(name,val,flagSet(LoadInvalid) ? &ok : 0,
-		flagSet(RexValidate),neg,ci,extended,missingMatch,id);
+	    bool extended = useF ? !flagSet(d.flags(),ItemBasic) : !flagSet(flags,RexBasic);
+	    ret = MatchingItemRegexp::build(name,val,flagSet(flags,LoadInvalid) ? &ok : 0,
+		flagSet(flags,RexValidate),neg,ci,extended,missingMatch,id);
 	    if (!ret)
 		loadError.printf("invalid regexp '%s'='%s'",pn,val.safe());
 	    else if (!ok && m_dbg)
 		warnLoadInvalid(m_dbg,"regexp",pn,val.safe(),loc);
 	}
 	else if (MatchingItemBase::TypeXPath == d.m_type) {
-	    MatchingItemBase* match = miLoadItemParam(s_match,fatal,error,loc,pName,
-		params,prefix,xml);
+	    MatchingItemBase* match = miLoadItemParam(flags | InternalInXPathMatch,s_match,fatal,
+		error,loc,pName,params,prefix,xml);
 	    if (!match && fatal)
 		return 0;
 	    String e;
-	    ret = MatchingItemXPath::build(name,val,flagSet(XPathValidate) ? &e : 0,
-		!flagSet(LoadInvalid),match,negated,missingMatch,id);
+	    ret = MatchingItemXPath::build(name,val,flagSet(flags,XPathValidate) ? &e : 0,
+		!flagSet(flags,LoadInvalid),match,negated,missingMatch,id);
 	    if (!ret)
 		loadError.printf("invalid xpath '%s'='%s' (%s)",pn,val.safe(),e.safe());
 	    else if (e && m_dbg)
@@ -1140,8 +1173,8 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
 	}
 	else if (MatchingItemBase::TypeRandom == d.m_type) {
 	    bool ok = true;
-	    ret = MatchingItemRandom::build(val,flagSet(LoadInvalid) ? &ok : 0,
-		flagSet(RandomValidate),negated,name,missingMatch,id);
+	    ret = MatchingItemRandom::build(val,flagSet(flags,LoadInvalid) ? &ok : 0,
+		flagSet(flags,RandomValidate),negated,name,missingMatch,id);
 	    if (!ret)
 		loadError.printf("invalid random '%s'='%s'",pn,val.safe());
 	    else if (!ok && m_dbg)
@@ -1156,8 +1189,8 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
 		    ret->m_missingMatch = missingMatch;
 		    ret->m_id = id;
 		    MatchingItemCustom* c = static_cast<MatchingItemCustom*>(ret);
-		    bool ok = params ? c->loadItem(*this,*params,error,prefix) :
-			c->loadXml(*this,*xml,error);
+		    bool ok = params ? c->loadItem(*this,flags,*params,error,prefix) :
+			c->loadXml(*this,flags,*xml,error);
 		    if (!ok)
 			TelEngine::destruct(ret);
 		    break;
@@ -1180,27 +1213,15 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
     }
 
     if (!loadError && ret) {
-	if (!ret->name()) {
-	    bool reject = false;
-	    switch (ret->type()) {
-		case MatchingItemBase::TypeList:
-		    reject = flagSet(NameReqList);
-		    break;
-		case MatchingItemBase::TypeRandom:
-		    break;
-		default:
-		    reject = flagSet(NameReqSimple);
-	    }
-	    if (reject) {
-		if (pName)
-		    loadError.printf("invalid '%s' name (empty)",pName.safe());
-		else
-		    loadError = "invalid name (empty)";
-	    }
+	if (!ret->name() && nameRequired(ret->type(),flags)) {
+	    if (pName)
+		loadError.printf("invalid '%s' name (empty)",pName.safe());
+	    else
+		loadError = "invalid name (empty)";
 	}
     }
     if (loadError) {
-	if (forceFail || !flagSet(IgnoreFailed)) {
+	if (forceFail || !flagSet(flags,IgnoreFailed)) {
 	    fatal = true;
 	    if (error)
 		*error = loadError;
@@ -1219,7 +1240,7 @@ MatchingItemBase* MatchingItemLoad::miLoadItem(bool& fatal, String* error, void*
     return ret;
 }
 
-MatchingItemBase* MatchingItemLoad::miLoadItemParam(const String& name, bool& fatal,
+MatchingItemBase* MatchingItemLoad::miLoadItemParam(uint64_t flags, const String& name, bool& fatal,
     String* error, const char* loc, const String& pName,
     const NamedList* params, const char* prefix, const XmlElement* xml) const
 {
@@ -1228,19 +1249,20 @@ MatchingItemBase* MatchingItemLoad::miLoadItemParam(const String& name, bool& fa
 	String pref;
 	pref << prefix << name << ":";
 	MiLoad data(*params,pref);
-	return miLoadItem(fatal,error,&data,loc,pName,params,pref,0,0,true);
+	return miLoadItem(flags,fatal,error,&data,loc,pName,params,pref,0,0,true);
     }
     if (xml) {
 	xml = xml->findFirstChild(name);
 	if (!xml)
 	    return 0;
 	MiLoad data(*xml);
-	return miLoadItem(fatal,error,&data,loc,pName ? pName : xml->getTag(),0,0,xml,0,true);
+	return miLoadItem(flags,fatal,error,&data,loc,pName ? pName : xml->getTag(),
+	    0,0,xml,0,true);
     }
     return 0;
 }
 
-MatchingItemBase* MatchingItemLoad::miLoadRetList(ObjList& items, const char* name,
+MatchingItemBase* MatchingItemLoad::miLoadRetList(uint64_t flags, ObjList& items, const char* name,
     bool matchAll, bool negated, int missingMatch, const char* id) const
 {
     ObjList* first = items.skipNull();
@@ -1255,43 +1277,49 @@ MatchingItemBase* MatchingItemLoad::miLoadRetList(ObjList& items, const char* na
     }
     MatchingItemList* l = new MatchingItemList(name,matchAll,negated,missingMatch,id);
     l->append(items);
-    return flagSet(NoOptimize) ? l : MatchingItemList::doOptimize(l,m_flags,0,this);
+    return flagSet(flags,NoOptimize) ? l : MatchingItemList::doOptimize(l,flags,0,this);
 }
 
 MatchingItemBase* MatchingItemLoad::loadItem(const NamedList& params, String* error,
-    const char* prefix) const
+    const char* prefix, uint64_t* flags) const
 {
-    MiLoadDebug dbg(*this,"loadItem",prefix);
+    uint64_t f = flags ? *flags : m_flags;
+    MiLoadDebug dbg(*this,f,"loadItem",prefix);
     bool fatal = false;
     MiLoad data(params,prefix);
-    return miLoadItem(fatal,error,&data,params,String::empty(),&params,prefix);
+    return miLoadItem(f,fatal,error,&data,params,String::empty(),&params,prefix);
 }
 
-MatchingItemBase* MatchingItemLoad::loadXml(const String& str, String* error) const
+MatchingItemBase* MatchingItemLoad::loadXml(const String& str, String* error,
+    uint64_t* flags) const
 {
     if (!str)
 	return 0;
-    MiLoadDebug dbg(*this,"loadXmlStr");
+    uint64_t f = flags ? *flags : m_flags;
+    MiLoadDebug dbg(*this,f,"loadXmlStr");
     bool fatal = false;
     MiLoad data;
-    return miLoadItem(fatal,error,&data,"loadXml",String::empty(),0,0,0,&str);
+    return miLoadItem(f,fatal,error,&data,"loadXml",String::empty(),0,0,0,&str);
 };
 
-MatchingItemBase* MatchingItemLoad::loadXml(const XmlElement* xml, String* error) const
+MatchingItemBase* MatchingItemLoad::loadXml(const XmlElement* xml, String* error,
+    uint64_t* flags) const
 {
     if (!xml)
 	return 0;
-    MiLoadDebug dbg(*this,"loadXml");
+    uint64_t f = flags ? *flags : m_flags;
+    MiLoadDebug dbg(*this,f,"loadXml");
     bool fatal = false;
     MiLoad data(*xml);
-    return miLoadItem(fatal,error,&data,"loadXml",String::empty(),0,0,xml);
+    return miLoadItem(f,fatal,error,&data,"loadXml",String::empty(),0,0,xml);
 }
 
 MatchingItemBase* MatchingItemLoad::load(const NamedList& params, String* error,
-    const char* prefix, const char* suffix) const
+    const char* prefix, const char* suffix, uint64_t* flags) const
 {
-    MiLoadDebug dbg(*this,"load");
-     String prefMatch(prefix), suff(suffix);
+    uint64_t f = flags ? *flags : m_flags;
+    MiLoadDebug dbg(*this,f,"load");
+    String prefMatch(prefix), suff(suffix);
     String prefXml(prefMatch + "xml:"), prefFlags(prefMatch + "flags:"),
 	prefType(prefMatch + "type:"), listFlags((prefMatch + "listflags"));
     if (prefMatch)
@@ -1317,7 +1345,7 @@ MatchingItemBase* MatchingItemLoad::load(const NamedList& params, String* error,
 	    if (!ns->name().startsWith(prefXml))
 		continue;
 	    MiLoad tmpData;
-	    mi = miLoadItem(fatal,error,&tmpData,"load",ns->name(),0,0,0,ns);
+	    mi = miLoadItem(f,fatal,error,&tmpData,"load",ns->name(),0,0,0,ns);
 	}
 	else {
 	    if (ns->name().length() == prefMatch.length())
@@ -1325,7 +1353,7 @@ MatchingItemBase* MatchingItemLoad::load(const NamedList& params, String* error,
 	    String name(ns->name().c_str() + prefMatch.length());
 	    const String& tName = params[prefType + name];
 	    MiLoad miLoad(&tName,&name,ns,params.getParam(prefFlags + name));
-	    mi = miLoadItem(fatal,error,&miLoad,"load",ns->name());
+	    mi = miLoadItem(f,fatal,error,&miLoad,"load",ns->name());
 	}
 	if (mi)
 	    add = add->append(mi);
@@ -1334,9 +1362,9 @@ MatchingItemBase* MatchingItemLoad::load(const NamedList& params, String* error,
     }
     const String* tmp = params.getParam(listFlags);
     if (!tmp)
-	return miLoadRetList(items,"",!flagSet(ListAny));
-    unsigned int flags = tmp->encodeFlags(s_miFlags);
-    return miLoadRetList(items,"",miMatchAll(flags),miNegated(flags));
+	return miLoadRetList(f,items,"",!flagSet(f,ListAny));
+    unsigned int mif = tmp->encodeFlags(s_miFlags);
+    return miLoadRetList(f,items,"",miMatchAll(mif),miNegated(mif));
 }
 
 const TokenDict64* MatchingItemLoad::loadFlags()

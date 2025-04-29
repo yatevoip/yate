@@ -7135,7 +7135,7 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 {
     const char* n = TelEngine::c_safe(name);
     bool negated = params && params->getBoolValue(YSTRING("negated"));
-    int missingMatch = params ? lookup((*params)[YSTRING("missing_match")],
+    int missingMatch = params ? lookup((*params)[YSTRING("missing")],
 	MatchingItemBase::missingMatchDict()) : 0;
     const char* id = params ? params->getValue(YSTRING("id")) : 0;
     JsObject* jso = YOBJECT(JsObject,value);
@@ -7177,7 +7177,7 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 		MatchingItemBase* match = 0;
 		if (params) {
 		    JsObject* m = YOBJECT(JsObject,params->getParam(YSTRING("match")));
-		    match = m ? buildItemFromObj(m,flags,error) : 0;
+		    match = m ? buildItemFromObj(m,flags | MatchingItemLoad::InternalInXPathMatch,error) : 0;
 		    if (!match && error && *error)
 			break;
 		}
@@ -7245,20 +7245,16 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
     }
     if (!ret)
 	return 0;
-    bool empty = false;
-    if (ret->type() != MatchingItemBase::TypeList)
-	empty = !ret->name() && ret->type() != MatchingItemBase::TypeRandom &&
-	    0 != (flags & MatchingItemLoad::NameReqSimple);
-    else if (!ret->name() && 0 != (flags & MatchingItemLoad::NameReqList))
-	empty = true;
-    else if (0 == (flags & MatchingItemLoad::NoOptimize))
-	return MatchingItemList::optimize(static_cast<MatchingItemList*>(ret),flags);
-    else if (!static_cast<MatchingItemList*>(ret)->length())
-	TelEngine::destruct(ret);
-    if (empty) {
+    if (!ret->name() && MatchingItemLoad::nameRequired(ret->type(),flags)) {
 	if (error)
 	    *error = "empty name";
 	TelEngine::destruct(ret);
+    }
+    else if (ret->type() == MatchingItemBase::TypeList) {
+	if (0 == (flags & MatchingItemLoad::NoOptimize))
+	    return MatchingItemList::optimize(static_cast<MatchingItemList*>(ret),flags);
+	if (!static_cast<MatchingItemList*>(ret)->length())
+	    TelEngine::destruct(ret);
     }
     return ret;
 }
@@ -7323,7 +7319,7 @@ JsObject* JsMatchingItem::buildJsObj(const MatchingItemBase* item,
 	jso->setBoolField("negated",item->negated());
     const char* s = lookup(item->missingMatch(),MatchingItemBase::missingMatchDict());
     if (s)
-	jso->setStringField("missing_match",s);
+	jso->setStringField("missing",s);
     if (item->id())
 	jso->setStringField("id",item->id());
     return jso;

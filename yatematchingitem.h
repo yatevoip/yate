@@ -51,7 +51,6 @@ class MatchingItemDump;
 class YATE_API MatchingParams : public String
 {
     YCLASS(MatchingParams,String)
-    friend class MatchingItemList;
 public:
     /**
      * Constructor
@@ -66,6 +65,12 @@ public:
      */
     inline ~MatchingParams()
 	{ TelEngine::destruct(m_private); }
+
+    /**
+     * Retrieve match track enabler
+     * @return True if tracking, false otherwise
+     */
+    bool trackMatchDbg();
 
     /**
      * Run match check on item
@@ -847,22 +852,25 @@ public:
     /**
      * Load matching item(s)
      * @param load Loader calling this method
+     * @param flags Load flags
      * @param params Parameters list
      * @param error Optional pointer to error string
      * @param prefix Optional parameters prefix
      * @return True on success, false on failure
      */
-    virtual bool loadItem(const MatchingItemLoad& load, const NamedList& params, String* error,
-	const char* prefix);
+    virtual bool loadItem(const MatchingItemLoad& load, uint64_t flags, const NamedList& params,
+	String* error, const char* prefix);
 
     /**
      * Load matching item(s) from XML description
      * @param load Loader calling this method
+     * @param flags Load flags
      * @param xml XmlElement object
      * @param error Optional pointer to error string
      * @return True on success, false on failure
      */
-    virtual bool loadXml(const MatchingItemLoad& load, const XmlElement& xml, String* error);
+    virtual bool loadXml(const MatchingItemLoad& load, uint64_t flags, const XmlElement& xml,
+	String* error);
 
 protected:
     /**
@@ -965,6 +973,7 @@ public:
 	NoOptimize             = 0x00000100, // Do not optmize lists
 	NameReqList            = 0x00010000, // Name is required for lists
 	NameReqSimple          = 0x00020000, // Request name of the parameter to match for simple items
+	NameReqXPathMatch      = 0x00040000, // Request name of the parameter to match for xpath match and descendants
 	ListAny                = 0x01000000, // Default 'any' (not match all) parameter value. Used in load()
 	RexBasic               = 0x02000000, // Load basic POSIX regular expressions
 	RexDetect              = 0x04000000, // Detect regular expression if value starts with ^
@@ -972,6 +981,8 @@ public:
 	RexDetectNegated       = 0x08000000, // Detect negated regular expression if value ends with ^
                                              // Used when loading from parameters list
 	PrivateFlag            = 0x100000000,// Private flag to be used for derived classes
+	InternalMask           = 0xff00000000000000, // Internal flags mask
+	InternalInXPathMatch   = 0x0100000000000000, // Loading XPath match data
 	Validate = RexValidate | XPathValidate | RandomValidate,
 	DefaultFlags = RexDetect | RexDetectNegated | NameReqSimple,
     };
@@ -1005,26 +1016,29 @@ public:
      * @param params Parameters list
      * @param error Optional pointer to error string
      * @param prefix Optional parameters prefix
+     * @param flags Optional flags to use. Use our flags if not given
      * @return MatchingItemBase pointer, NULL if none loaded
      */
     MatchingItemBase* loadItem(const NamedList& params, String* error = 0,
-	const char* prefix = 0) const;
+	const char* prefix = 0, uint64_t* flags = 0) const;
 
     /**
      * Load matching item(s) from XML description
      * @param str XML string
      * @param error Optional pointer to error string
+     * @param flags Optional flags to use. Use our flags if not given
      * @return MatchingItemBase pointer, NULL if none loaded
      */
-    MatchingItemBase* loadXml(const String& str, String* error = 0) const;
+    MatchingItemBase* loadXml(const String& str, String* error = 0, uint64_t* flags = 0) const;
 
     /**
      * Load matching item(s) from XML description
      * @param xml XmlElement object
      * @param error Optional pointer to error string
+     * @param flags Optional flags to use. Use our flags if not given
      * @return MatchingItemBase pointer, NULL if none loaded
      */
-    MatchingItemBase* loadXml(const XmlElement* xml, String* error = 0) const;
+    MatchingItemBase* loadXml(const XmlElement* xml, String* error = 0, uint64_t* flags = 0) const;
 
     /**
      * Load matching item(s)
@@ -1033,18 +1047,27 @@ public:
      * @param error Optional pointer to error string
      * @param prefix Optional parameters prefix
      * @param suffix Optional parameters suffix
+     * @param flags Optional flags to use. Use our flags if not given
      * @return MatchingItemBase pointer, NULL if none loaded
      */
     MatchingItemBase* load(const NamedList& params, String* error = 0,
-	const char* prefix = 0, const char* suffix = 0) const;
+	const char* prefix = 0, const char* suffix = 0, uint64_t* flags = 0) const;
 
     /**
-     * Check flag(s)
-     * @param mask Mask to check
-     * @return True if set, false otherwise
+     * Check if item name is required
+     * @param miType Item type
+     * @param flags Flags to check
+     * @return True if name is required, false otherwise
      */
-    inline bool flagSet(uint64_t mask) const
-	{ return 0 != (m_flags & mask); }
+    static inline bool nameRequired(int miType, uint64_t flags) {
+	    if (MatchingItemBase::TypeRandom == miType)
+		return false;
+	    if (MatchingItemBase::TypeList == miType)
+		return 0 != (flags & NameReqList) &&
+		    (0 == (flags &InternalInXPathMatch) || 0 != (flags & NameReqXPathMatch));
+	    return 0 != (flags & NameReqSimple) &&
+		(0 == (flags & InternalInXPathMatch) || 0 != (flags & NameReqXPathMatch));
+	}
 
     /**
      * Retrieve load flags dictionary
@@ -1067,12 +1090,12 @@ public:
     int m_warnLevel;                     // Warn debug level for ignore name/type or other errors
 
 private:
-    MatchingItemBase* miLoadRetList(ObjList& items, const char* name, bool matchAll,
+    MatchingItemBase* miLoadRetList(uint64_t flags, ObjList& items, const char* name, bool matchAll,
 	bool negated = false, int missingMatch = 0, const char* id = 0) const;
-    MatchingItemBase* miLoadItem(bool& fatal, String* error, void* data,
+    MatchingItemBase* miLoadItem(uint64_t flags, bool& fatal, String* error, void* data,
 	const char* loc, const String& pName, const NamedList* params = 0, const char* prefix = 0,
 	const XmlElement* xml = 0, const String* xmlFrag = 0, bool forceFail = false) const;
-    MatchingItemBase* miLoadItemParam(const String& name, bool& fatal, String* error,
+    MatchingItemBase* miLoadItemParam(uint64_t flags, const String& name, bool& fatal, String* error,
 	const char* loc, const String& pName, const NamedList* params, const char* prefix,
 	const XmlElement* xml) const;
 };
