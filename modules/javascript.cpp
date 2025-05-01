@@ -1829,6 +1829,7 @@ public:
 	    params().addParam(new ExpFunction("addText"));
 	    params().addParam(new ExpFunction("getText"));
 	    params().addParam(new ExpFunction("setText"));
+	    params().addParam(new ExpFunction("compactText"));
 	    params().addParam(new ExpFunction("getChildText"));
 	    params().addParam(new ExpFunction("getChildByPath"));
 	    params().addParam(new ExpFunction("getChildrenByPath"));
@@ -6415,6 +6416,13 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    m_xml->setText("");
 	else
 	    m_xml->setText(*text);
+    }
+    else if (oper.name() == YSTRING("compactText")) {
+	// compactText([recursive])
+	if (extractArgs(stack,oper,context,args) != 1 || !m_xml)
+	    return false;
+	ExpOperation* recursive = static_cast<ExpOperation*>(args[0]);
+	m_xml->compactText(recursive && recursive->valBoolean());
     }
     else if (oper.name() == YSTRING("getChildText")) {
 	if (extractArgs(stack,oper,context,args) > 2)
