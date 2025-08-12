@@ -24,7 +24,9 @@
 
 using namespace TelEngine;
 
-#define CONFIGURATION_DBG_IO
+#ifdef XDEBUG
+    #define CONFIGURATION_DBG_IO
+#endif
 #define CONFIGURATION_IO_BUF 1024
 
 class ConfigPrivFile;
