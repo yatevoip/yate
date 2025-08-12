@@ -47,6 +47,7 @@ namespace TelEngine {
 class ExpEvaluator;
 class ExpOperation;
 class ScriptMutex;
+class JsArray;
 
 /**
  * This class holds a JSON Pointer as specified in RFC 6901
@@ -2499,6 +2500,23 @@ public:
     };
 
     /**
+     * Keys/Values/Entries build flags
+     */
+    enum ArrayPropsFlags {
+	ArrayPropsForceBasicVal = 0x01,  // Force basic, non object, type for values (ignored if building keys)
+	ArrayPropsAutoNum = 0x02,        // Automatically convert to number/boolean if possible
+	                                 // Values/entries: ignored if ArrayPropsForceBasicVal is not set
+	ArrayPropsEmptyNull = 0x04,      // Return 'null' if result is empty
+	ArrayPropsSkipNull = 0x08,       // Do not process properties with 'null' value
+	ArrayPropsSkipUndefined = 0x10,  // Do not process properties with 'undefined' value
+	ArrayPropsSkipObject = 0x20,     // Do not process properties with object value (non null/undefined)
+	ArrayPropsSkipEmpty = 0x40,      // Do not process properties evaluating to empty strings
+	ArrayPropsNameValObj = 0x80,     // Build object array entries (name/value).
+	                                 // Not set: build map array entries (array with 2 values)
+	                                 // Ignored if building keys or values
+    };
+
+    /**
      * Constructor
      * @param name Name of the object
      * @param mtx Pointer to the mutex that serializes this object
@@ -2671,11 +2689,32 @@ public:
     virtual ExpOperation* popValue(ObjList& stack, GenObject* context = 0);
 
     /**
+     * Retrieve object parameters list (check native first)
+     * @return Object parameters list
+     */
+    virtual const NamedList* getObjParams() {
+	    const NamedList* p = nativeParams();
+	    return p ? p : &params();
+	}
+
+    /**
      * Delete a field of the object
      * @param name Name of field to remove
      */
     virtual void clearField(const String& name)
 	{ params().clearParam(name); }
+
+    /**
+     * Set a ExpOperation field in this object
+     * @param oper Data to set
+     * @return True if set was successful
+     */
+    inline bool setField(ExpOperation* oper) {
+	    if (!oper)
+		return false;
+	    params().setParam(oper);
+	    return true;
+	}
 
     /**
      * Set a integer field in this object
@@ -2684,12 +2723,7 @@ public:
      * @return True if set was successful
      */
     inline bool setIntField(const char* name, int64_t val)
-    {
-	if (!name)
-	    return false;
-	params().setParam(new ExpOperation(val,name));
-	return true;
-    }
+	{ return name && setField(new ExpOperation(val,name)); }
 
     /**
      * Set a boolean field in this object
@@ -2698,27 +2732,17 @@ public:
      * @return True if set was successful
      */
     inline bool setBoolField(const char* name, bool val)
-    {
-	if (!name)
-	    return false;
-	params().setParam(new ExpOperation(val,name));
-	return true;
-
-    }
+	{ return name && setField(new ExpOperation(val,name)); }
 
     /**
      * Set a string field in this object
      * @param name Name of field to set
      * @param val String value to set
+     * @param autoNum Automatically convert to number if possible
      * @return True if set was successful
      */
-    inline bool setStringField(const char* name, const char* val)
-    {
-	if (!name)
-	    return false;
-	params().setParam(new ExpOperation(val,name));
-	return true;
-    }
+    inline bool setStringField(const char* name, const char* val, bool autoNum = false)
+	{ return name && setField(new ExpOperation(val,name,autoNum)); }
 
     /**
      * Set string fields from parameters list
@@ -2743,12 +2767,7 @@ public:
      * @return True if set was successful
      */
     inline bool setObjField(const char* name, JsObject* obj)
-    {
-	if (!(name && obj))
-	    return false;
-	params().setParam(new ExpWrapper(obj,name));
-	return true;
-    }
+	{ return name && obj && setField(new ExpWrapper(obj,name)); }
 
     /**
      * Get the integer value of the field with the given name
@@ -2870,6 +2889,25 @@ public:
 	GenObject* context, ExpOperVector& arguments);
 
     /**
+     * Helper static method that pops arguments off a stack to a list in proper order
+     * @param obj Pointer to the object to use when popping each argument
+     * @param stack Evaluation stack in use, parameters are popped off this stack
+     * @param oper Function that is being evaluated
+     * @param context Pointer to arbitrary object passed from evaluation methods
+     * @param arguments List where the arguments are set in proper order
+     *   Will be reset to reflect the number of arguments
+     * @param minArgc Minimum number of arguments (required arguments)
+     * @param checkValid Check valid (not NULL) arguments. negative (check required argiments only: 0..minArgc-1),
+     *  0 (no check), positive (check 0..checkValid-1)
+     * @param maxArgc Maximum number of arguments to accept. Set it to negative to ignore checking
+     * @return True on success, false on failure (object not given, incorrect number of arguments
+     *  or missing arguments)
+     */
+    static bool extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& oper,
+	GenObject* context, ExpOperVector& arguments,
+	unsigned int minArgc, int checkValid = -1, int maxArgc = -1);
+
+    /**
      * Helper method that pops arguments off a stack to a list in proper order
      * @param stack Evaluation stack in use, parameters are popped off this stack
      * @param oper Function that is being evaluated
@@ -2882,7 +2920,7 @@ public:
 	{ return extractArgs(this,stack,oper,context,arguments); }
 
     /**
-     * Helper static method that pops arguments off a stack to a list in proper order
+     * Helper method that pops arguments off a stack to a list in proper order
      * @param stack Evaluation stack in use, parameters are popped off this stack
      * @param oper Function that is being evaluated
      * @param context Pointer to arbitrary object passed from evaluation methods
@@ -2893,6 +2931,24 @@ public:
     inline int extractArgs(ObjList& stack, const ExpOperation& oper, GenObject* context,
 	ExpOperVector& arguments)
 	{ return extractArgs(this,stack,oper,context,arguments); }
+
+    /**
+     * Helper static method that pops arguments off a stack to a list in proper order
+     * @param stack Evaluation stack in use, parameters are popped off this stack
+     * @param oper Function that is being evaluated
+     * @param context Pointer to arbitrary object passed from evaluation methods
+     * @param arguments List where the arguments are set in proper order
+     *   Will be reset to reflect the number of arguments
+     * @param minArgc Minimum number of arguments (required arguments)
+     * @param checkValid Check valid (not NULL) arguments. negative (check required argiments only: 0..minArgc-1),
+     *  0 (no check), positive (check 0..checkValid-1)
+     * @param maxArgc Maximum number of arguments to accept. Set it to negative to ignore checking
+     * @return True on success, false on failure (object not given, incorrect number of arguments
+     *  or missing arguments)
+     */
+    bool extractArgs(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	ExpOperVector& arguments, unsigned int minArgc, int checkValid = -1, int maxArgc = -1)
+	{ return extractArgs(this,stack,oper,context,arguments,minArgc,maxArgc,checkValid); }
 
     /**
      * Create an empty function call context
@@ -2984,6 +3040,38 @@ public:
      */
     static JsObject* copy(int& res, JsObject* src, unsigned int flags, GenObject* context = 0,
 	ScriptMutex** mtx = 0, unsigned int line = 0, GenObject* origContext = 0);
+
+    /**
+     * Build an array of data from object parameters (properties)
+     * @param proc 0: build entries, negative: build keys, positive: build values
+     * @param obj Source object
+     * @param context Script context from which Array prototype is obtained
+     * @param line Code line where this object was created
+     * @param mtx Pointer to the mutex that serializes this object
+     * @param flags Process properties flags
+     * @param filterName Optional parameter name filter (process only names matching it). RegExp or MatchingItem
+     * @param filterValue Optional parameter value filter (process only values matching it). RegExp or MatchingItem
+     * @param jsa Optional existing array to append to
+     * @return JsArray pointer, NULL if empty is not requested and no parameter found
+     *  Array item:
+     *  Entries: object with name/value properties or array with 2 entries (0:name, 1:value)
+     *  Keys: property names
+     *  Values: property values
+     */
+    static JsArray* arrayProps(int proc, const GenObject* obj, GenObject* context,
+	unsigned int line, ScriptMutex* mtx = 0, unsigned int flags = 0,
+	const GenObject* filterName = 0, const GenObject* filterValue = 0, JsArray* jsa = 0);
+
+    /**
+     * Retrieve object parameters list (check native first)
+     * @param obj Object to retrieve from
+     * @param emptyOk Set it to true to force returning a valid NamedList pointer
+     * @return Object parameters list, NULL if missing
+     */
+    static inline const NamedList* getObjParams(GenObject* obj, bool emptyOk = false) {
+	    JsObject* jso = YOBJECT(JsObject,obj);
+	    return jso ? jso->getObjParams() : (emptyOk ? &NamedList::empty() : 0);
+	}
 
 protected:
     /**
@@ -3235,12 +3323,21 @@ public:
     void push(ExpOperation* item);
 
     /**
+     * Push a string into array
+     * @param val String value to push
+     * @param autoNum Automatically convert to number if possible
+     * @param name Optional name of parameter
+     */
+    inline void push(const char* val, bool autoNum = false, const char* name = 0)
+	{ push(new ExpOperation(val,name,autoNum)); }
+
+    /**
      * Add string items at the end of the array
      * @param lst List with items to push
      */
     inline void push(const ObjList& lst) {
 	    for (const ObjList* o = lst.skipNull(); o; o = o->skipNext())
-		push(new ExpOperation(o->get()->toString()));
+		push(o->get()->toString());
 	}
 
     /**
@@ -3294,7 +3391,6 @@ public:
     unsigned int toStringList(ObjList& list, bool emptyOk = true);
 
 protected:
-
     /**
      * Clone and rename method
      * @param name Name of the cloned object
@@ -3737,6 +3833,14 @@ public:
     static ExpOperation* nullClone(const char* name = 0);
 
     /**
+     * Get an "undefined" object wrapper that will identity match another "undefined"
+     * @param name Name of the new wrapper
+     * @return ExpWrapper pointer
+     */
+    static inline ExpOperation* undefinedClone(const char* name = 0)
+	{ return new ExpWrapper((GenObject*)0,name); }
+
+    /**
      * Obtain the "null" object
      * @return Referenced "null" object (0 if ref() fails)
      */
@@ -3824,6 +3928,38 @@ public:
      */
     inline static JsObject* objPresent(const ExpOperation* oper)
 	{ return oper ? objPresent(*oper) : 0; }
+
+    /**
+     * Check an ExpOperation. Return it or 'null' or 'undefined'
+     * @param oper ExpOperation pointer to check
+     * @param name null/undefined ExpOperation name when given oper is NULL
+     * @param null True to build 'null', false to build 'undefined' when given oper is NULL
+     * @return ExpOperation pointer
+     */
+    static inline ExpOperation* validExp(ExpOperation* oper, const char* name = 0,
+	bool null = true) {
+	    if (oper)
+		return oper;
+	    if (null)
+		return nullClone(name);
+	    return undefinedClone(name);
+	}
+
+    /**
+     * Check a JsObject. Return it or 'null' or 'undefined'
+     * @param oper JsObject pointer to check
+     * @param name null/undefined ExpOperation name when given oper is NULL
+     * @param null True to build 'null', false to build 'undefined' when given oper is NULL
+     * @return ExpOperation pointer
+     */
+    static inline ExpOperation* validExp(JsObject* jso, const char* name = 0,
+	bool null = true) {
+	    if (jso)
+		return new ExpWrapper(jso,name);
+	    if (null)
+		return nullClone(name);
+	    return undefinedClone(name);
+	}
 
     /**
      * Retrieve a string from ExpOperation

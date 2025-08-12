@@ -19,6 +19,7 @@
  */
 
 #include "yatescript.h"
+#include <yatematchingitem.h>
 #include <string.h>
 
 using namespace TelEngine;
@@ -26,6 +27,7 @@ using namespace TelEngine;
 namespace { // anonymous
 
 #define MKASSIGN(typ) construct->params().addParam(new ExpOperation((int64_t)JsObject:: Assign ## typ,"Assign" # typ))
+#define MKARRAYPROP(typ) construct->params().addParam(new ExpOperation((int64_t)JsObject:: ArrayProps ## typ,"ArrayProps" # typ))
 // Object object
 class JsObjectObj : public JsObject
 {
@@ -38,6 +40,11 @@ public:
     virtual void initConstructor(JsFunction* construct)
 	{
 	    construct->params().addParam(new ExpFunction("keys"));
+	    construct->params().addParam(new ExpFunction("keysCustom"));
+	    construct->params().addParam(new ExpFunction("values"));
+	    construct->params().addParam(new ExpFunction("valuesCustom"));
+	    construct->params().addParam(new ExpFunction("entries"));
+	    construct->params().addParam(new ExpFunction("entriesCustom"));
 	    construct->params().addParam(new ExpFunction("global"));
 	    construct->params().addParam(new ExpFunction("assign"));
 	    construct->params().addParam(new ExpFunction("assignProps"));
@@ -55,9 +62,19 @@ public:
 	    MKASSIGN(SkipExist);
 	    MKASSIGN(Filled);
 	    MKASSIGN(FilledSkipObject);
+	    MKARRAYPROP(ForceBasicVal);
+	    MKARRAYPROP(AutoNum);
+	    MKARRAYPROP(EmptyNull);
+	    MKARRAYPROP(SkipNull);
+	    MKARRAYPROP(SkipUndefined);
+	    MKARRAYPROP(SkipObject);
+	    MKARRAYPROP(SkipEmpty);
+	    MKARRAYPROP(NameValObj);
 	}
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    bool runArrayProps(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	int proc, bool custom, const char* retName);
 };
 #undef MKASSIGN
 
@@ -164,6 +181,71 @@ public:
 protected:
     GenObject* m_traced;
     GenObject* m_jpath;
+};
+
+class PropertyHandleMatch
+{
+public:
+    inline PropertyHandleMatch(unsigned int flags, const GenObject* filterName,
+	const GenObject* filterValue)
+	: m_skipNull(false), m_skipUndef(false), m_skipObj(false), m_skipEmptyStr(false),
+	m_rexName(0), m_miName(0), m_rexVal(0), m_miVal(0) {
+	    m_skipNull = 0 != (flags & JsObject::ArrayPropsSkipNull);
+	    m_skipUndef = 0 != (flags & JsObject::ArrayPropsSkipUndefined);
+	    m_skipObj = 0 != (flags & JsObject::ArrayPropsSkipObject);
+	    m_skipEmptyStr = 0 != (flags & JsObject::ArrayPropsSkipEmpty);
+	    setMatching(filterName,m_rexName,m_miName);
+	    setMatching(filterValue,m_rexVal,m_miVal);
+	}
+
+    inline bool handle(const ExpOperation* oper, const NamedString* ns) const {
+	    if (oper) {
+		if ((m_skipNull && JsParser::isNull(*oper))
+		    || (m_skipUndef && JsParser::isUndefined(*oper))
+		    || (m_skipObj && JsParser::objPresent(*oper)))
+		    return false;
+		ns = static_cast<const NamedString*>(oper);
+	    }
+	    else if (!ns)
+		return false;
+	    if (m_skipEmptyStr && !*ns)
+		return false;
+	    if (m_rexName) {
+		if (!m_rexName->matches(ns->name()))
+		    return false;
+	    }
+	    else if (m_miName && !m_miName->matchString(ns->name()))
+		return false;
+	    if (m_rexVal) {
+		if (!m_rexVal->matches(*ns))
+		    return false;
+	    }
+	    else if (m_miVal && !m_miVal->matchString(*ns))
+		return false;
+	    return true;
+	}
+
+    static inline void setMatching(const GenObject* gen, Regexp*& rex, MatchingItemBase*& mi) {
+	    if (!gen)
+		return;
+	    JsRegExp* jsRex = YOBJECT(JsRegExp,gen);
+	    if (jsRex)
+		rex = &jsRex->regexp();
+	    else {
+		mi = YOBJECT(MatchingItemBase,gen);
+		if (!mi)
+		    rex = YOBJECT(Regexp,gen);
+	    }
+	}
+
+    bool m_skipNull;
+    bool m_skipUndef;
+    bool m_skipObj;
+    bool m_skipEmptyStr;
+    Regexp* m_rexName;
+    MatchingItemBase* m_miName;
+    Regexp* m_rexVal;
+    MatchingItemBase* m_miVal;
 };
 
 #ifdef XDEBUG
@@ -1181,6 +1263,26 @@ int JsObject::extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& ope
     return arguments.length();
 }
 
+bool JsObject::extractArgs(JsObject* obj, ObjList& stack, const ExpOperation& oper,
+    GenObject* context, ExpOperVector& arguments,
+    unsigned int minArgc, int checkValid, int maxArgc)
+{
+    if (!obj)
+	return false;
+    obj->extractArgs(stack,oper,context,arguments);
+    if (minArgc > arguments.length()
+	|| (maxArgc >= 0 && maxArgc > (int)minArgc && maxArgc > (int)arguments.length()))
+	return false;
+    if (checkValid) {
+	if (checkValid < 0)
+	    checkValid = minArgc;
+	for (int i = 0; i < checkValid; ++i)
+	    if (!arguments[i])
+		return false;
+    }
+    return true;
+}
+
 // Static helper method that deep copies all parameters
 void JsObject::deepCopyParams(NamedList& dst, const NamedList& src, ScriptMutex* mtx)
 {
@@ -1279,7 +1381,8 @@ bool JsObject::getObjField(const String& name, JsObject*& obj)
     return false;
 }
 
-static inline bool getObjParams(JsObject* obj, const NamedList*& params, const HashList** hash = 0)
+static inline bool assignGetObjParams(JsObject* obj, const NamedList*& params,
+    const HashList** hash = 0)
 {
     if (!obj)
 	return false;
@@ -1364,13 +1467,13 @@ int JsObject::internalAssignProps(JsObject* dest, JsObject* src, unsigned int fl
     const NamedList* paramsDest = 0;
     const NamedList* nativeDest = 0;
     if (skipExist) {
-	getObjParams(dest,paramsDest,&hashDest);
-	getObjParams(dest,nativeDest);
+	assignGetObjParams(dest,paramsDest,&hashDest);
+	assignGetObjParams(dest,nativeDest);
     }
     while (true) {
 	const HashList* hash = 0;
 	const NamedList* params = 0;
-	if (!getObjParams(src,params,native ? 0 : &hash))
+	if (!assignGetObjParams(src,params,native ? 0 : &hash))
 	    break;
 	unsigned int idx = 0;
 	ObjList* crt = hash ? hash->getList(0) : params->paramList()->skipNull();
@@ -1560,47 +1663,18 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 {
     if (oper.name() == YSTRING("constructor"))
 	ExpEvaluator::pushOne(stack,new ExpWrapper(new JsObject("Object",mutex())));
-    else if (oper.name() == YSTRING("keys")) {
-	ExpOperation* op = 0;
-	GenObject* obj = 0;
-	if (oper.number() == 0) {
-	    ScriptRun* run = YOBJECT(ScriptRun,context);
-	    if (run)
-		obj = run->context();
-	    else
-		obj = context;
-	}
-	else if (oper.number() == 1) {
-	    op = popValue(stack,context);
-	    if (!op)
-		return false;
-	    obj = op;
-	}
-	else
-	    return false;
-	ScriptContext* scr = YOBJECT(ScriptContext,obj);
-	if (scr) {
-	    ObjList names;
-	    scr->fillFieldNames(names);
-	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
-	    for (ObjList* o = names.skipNull(); o; o = o->skipNext()) {
-		String* name = static_cast<String*>(o->get());
-		jsa->push(new ExpOperation(*name,0,true));
-	    }
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"keys"));
-	}
-	else if (const NamedList* lst = YOBJECT(NamedList,obj)) {
-	    NamedIterator iter(*lst);
-	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
-	    while (const NamedString* ns = iter.get())
-		if (ns->name() != protoName())
-		    jsa->push(new ExpOperation(ns->name(),0,true));
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,"keys"));
-	}
-	else
-	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
-	TelEngine::destruct(op);
+#define CHECK_RUN_PROPS_ARRAY(what,proc,custom,retName) \
+    else if (oper.name() == YSTRING(what)) { \
+	if (!runArrayProps(stack,oper,context,proc,custom,retName)) \
+	    return false; \
     }
+    CHECK_RUN_PROPS_ARRAY("keys",-1,false,"keys")
+    CHECK_RUN_PROPS_ARRAY("keysCustom",-1,true,"keys")
+    CHECK_RUN_PROPS_ARRAY("values",1,false,"values")
+    CHECK_RUN_PROPS_ARRAY("valuesCustom",1,true,"values")
+    CHECK_RUN_PROPS_ARRAY("entries",0,false,"entries")
+    CHECK_RUN_PROPS_ARRAY("entriesCustom",0,true,"entries")
+#undef CHECK_RUN_PROPS_ARRAY
     else if (oper.name() == YSTRING("global")) {
 	if (oper.number() != 0)
 	    return false;
@@ -1636,7 +1710,7 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
 	ExpOperVector args;
 	bool assign = oper.name() == YSTRING("assignProps");
 	int optStart = assign ? 2 : 1;
-	int n = extractArgs(this,stack,oper,context,args);
+	int n = extractArgs(stack,oper,context,args);
 	if (n < optStart)
 	    return false;
 	JsObject* first = JsParser::objPresent(args[0]);
@@ -1696,6 +1770,38 @@ bool JsObjectObj::runNative(ObjList& stack, const ExpOperation& oper, GenObject*
     return true;
 }
 
+bool JsObjectObj::runArrayProps(ObjList& stack, const ExpOperation& oper, GenObject* context,
+    int proc, bool custom, const char* retName)
+{
+    // Object.keys(obj)
+    // Object.values(obj)
+    // Object.entries(obj)
+    // Object.keysCustom(obj[,flags[,filterName[,filterValue[,appendTo]]]])
+    // Object.valuesCustom(obj[,flags[,filterName[,filterValue[,appendTo]]]])
+    // Object.entriesCustom(obj[,flags[,filterName[,filterValue[,appendTo]]]])
+    ExpOperVector args;
+    if (!extractArgs(stack,oper,context,args,1))
+	return false;
+    unsigned int flags = 0;
+    GenObject* fN = 0;
+    GenObject* fV = 0;
+    JsArray* appendTo = 0;
+    if (custom) {
+	ExpOperation* op = args[1];
+	if (op)
+	    flags = op->valInteger();
+	fN = args[2];
+	fV = args[3];
+	appendTo = YOBJECT(JsArray,args[4]);
+    }
+    JsArray* jsa = arrayProps(proc,args[0],context,oper.lineNumber(),mutex(),flags,fN,fV,appendTo);
+    // Append: increase reference counter, we will build an ExpWrapper for it
+    if (jsa && jsa == appendTo && !jsa->ref())
+	jsa = 0;
+    ExpEvaluator::pushOne(stack,JsParser::validExp(jsa,jsa ? retName : 0));
+    return true;
+}
+
 JsObject* JsObject::copy(int& res, JsObject* src, unsigned int flags, GenObject* context,
     ScriptMutex** mtx, unsigned int line, GenObject* origContext)
 {
@@ -1703,6 +1809,102 @@ JsObject* JsObject::copy(int& res, JsObject* src, unsigned int flags, GenObject*
     if (jsCopyNeedRecursiveTrace(src,flags))
 	trace = new RecursiveTrace("copy",src,src,true);
     return jsCopy(res,src,flags,context,mtx,line,origContext,trace);
+}
+
+JsArray* JsObject::arrayProps(int proc, const GenObject* obj, GenObject* context,
+    unsigned int line, ScriptMutex* mtx, unsigned int flags, const GenObject* filterName,
+    const GenObject* filterValue, JsArray* jsa)
+{
+    const HashList* hash = 0;
+    const NamedList* nl = 0;
+    if (obj) {
+	JsObject* jsoIn = YOBJECT(JsObject,obj);
+	hash = jsoIn ? jsoIn->getHashListParams() : YOBJECT(HashList,obj);
+	if (!hash) {
+	    if (jsoIn)
+		nl = jsoIn->getObjParams();
+	    if (!nl)
+		nl = YOBJECT(NamedList,obj);
+	}
+    }
+    XDebug(DebugAll,"JsObject::arrayProps obj=(%p) nl=(%p) hash=(%p) flags=0x%x filter=(%p)/(%p)",
+	obj,nl,hash,flags,filterName,filterValue);
+    if (hash || nl) {
+	PropertyHandleMatch m(flags,filterName,filterValue);
+	bool basicVal = 0 != (flags & JsObject::ArrayPropsForceBasicVal);
+	bool autoNum = 0 != (flags & JsObject::ArrayPropsAutoNum);
+	bool entriesObj = 0 != (flags & JsObject::ArrayPropsNameValObj);
+	unsigned int hIndex = 0;
+	while (true) {
+	    ObjList* props = 0;
+	    if (nl)
+		props = nl->paramList()->skipNull();
+	    else
+		while (hIndex < hash->length() && !props) {
+		    props = hash->getList(hIndex++);
+		    if (props)
+			props = props->skipNull();
+		}
+	    if (!props)
+		break;
+	    for (; props; props = props->skipNext()) {
+		GenObject* prop = props->get();
+		const NamedString* ns = 0;
+		ExpOperation* oper = 0;
+		if (nl) {
+		    ns = static_cast<const NamedString*>(prop);
+		    if (ns->name() == JsObject::protoName())
+			continue;
+		    oper = YOBJECT(ExpOperation,prop);
+		}
+		else {
+		    oper = YOBJECT(ExpOperation,prop);
+		    if (oper)
+			ns = static_cast<const NamedString*>(oper);
+		    else {
+			ns = YOBJECT(NamedString,prop);
+			if (!ns)
+			    continue;
+		    }
+		}
+		if (!m.handle(oper,ns))
+		    continue;
+		ExpOperation* item = 0;
+		if (proc < 0)
+		    // Keys
+		    item = new ExpOperation(ns->name(),0,autoNum);
+		else if (proc > 0)
+		    // Values
+		    item = (!oper || basicVal) ? new ExpOperation(*ns,0,autoNum) : oper->clone(0);
+		else {
+		    // Entries
+		    const char* v = entriesObj ? "value" : "";
+		    ExpOperation* val = (!oper || basicVal) ? new ExpOperation(*ns,v,autoNum)
+			: oper->clone(v);
+		    JsObject* jso = entriesObj ? new JsObject(context,line,mtx)
+			: new JsArray(context,line,mtx);
+		    if (entriesObj) {
+			jso->setStringField("name",ns->name());
+			jso->setField(val);
+		    }
+		    else {
+			static_cast<JsArray*>(jso)->push(ns->name());
+			static_cast<JsArray*>(jso)->push(val);
+		    }
+		    item = new ExpWrapper(jso,ns->name());
+		}
+		if (!jsa)
+		    jsa  = new JsArray(context,line,mtx);
+		jsa->push(item);
+	    }
+	    // Done if we processed a NamedList
+	    if (nl)
+		break;
+	}
+    }
+    if (!jsa && 0 == (flags & JsObject::ArrayPropsEmptyNull))
+	jsa = new JsArray(context,line,mtx);
+    return jsa;
 }
 
 
