@@ -84,21 +84,6 @@ private:
 static JsObject* setEngineConstructorPrototype(GenObject* context, JsObject* jso,
     const String& name);
 
-static inline void pushStackResNull(ObjList& stack, ExpOperation* oper)
-{
-    if (oper)
-	ExpEvaluator::pushOne(stack,oper);
-    else
-	ExpEvaluator::pushOne(stack,JsParser::nullClone());
-}
-
-static inline void pushStackObjNull(ObjList& stack, JsObject* jso, const char* name = 0)
-{
-    if (jso)
-	ExpEvaluator::pushOne(stack,new ExpWrapper(jso,name));
-    else
-	ExpEvaluator::pushOne(stack,JsParser::nullClone(name));
-}
 
 static inline ScriptContext* getScriptContext(GenObject* gen)
 {
@@ -165,12 +150,6 @@ static inline void dumpTraceToMsg(Message* msg, ObjList* lst)
 	msg->setParam(s_tracePref + String(count++),*s);
     }
     msg->setParam(YSTRING("trace_msg_count"),String(count));
-}
-
-#define YCLASS_ENCLOSED(type,base,enclosed) \
-public: virtual void* getObject(const String& name) const { \
-    void* o = (name == YATOM(#type)) ? const_cast<type*>(this) : base::getObject(name); \
-    return o ? o : ((enclosed) ? (enclosed)->getObject(name) : 0); \
 }
 
 class ScriptInfo;
@@ -990,7 +969,7 @@ private:
 
 class JsMatchingItem : public JsObject
 {
-    YCLASS_ENCLOSED(JsMatchingItem,JsObject,m_match)
+    YCLASS_DATA(m_match,JsMatchingItem,JsObject)
 public:
     enum BuildObjFlags {
 	BuildObjForceBoolProps = MatchingItemDump::DumpPrivate,
@@ -1674,6 +1653,8 @@ protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 };
 
+class JsConfigSection;
+
 class JsConfigFile : public JsObject
 {
 public:
@@ -1711,6 +1692,9 @@ public:
 	{ return m_config; }
     inline const Configuration& config() const
 	{ return m_config; }
+    bool runFuncKeys(ObjList& stack, const ExpOperation& oper, GenObject* context,
+	JsConfigSection* jSect = 0);
+
 protected:
     bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 private:
@@ -1723,6 +1707,8 @@ class JsConfigSection : public JsObject
     YCLASS(JsConfigSection,JsObject)
 public:
     inline NamedList* section()
+	{ return m_owner->config().getSection(toString()); }
+    virtual NamedList* nativeParams() const
 	{ return m_owner->config().getSection(toString()); }
 
 protected:
@@ -1742,7 +1728,7 @@ protected:
 	    params().addParam(new ExpFunction("clearKey"));
 	    params().addParam(new ExpFunction("keys"));
 	}
-    bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
+    virtual bool runNative(ObjList& stack, const ExpOperation& oper, GenObject* context);
 private:
     RefPointer<JsConfigFile> m_owner;
 };
@@ -2146,16 +2132,6 @@ UNLOAD_PLUGIN(unloadNow)
 	return __plugin.unload();
     }
     return true;
-}
-
-static inline const NamedList* getObjParams(GenObject* op)
-{
-    JsObject* jso = YOBJECT(JsObject,op);
-    if (!jso)
-	return 0;
-    JsConfigSection* sect = YOBJECT(JsConfigSection,jso);
-    const NamedList* p = sect ? sect->section() : 0;
-    return p ? p : (jso->nativeParams() ? jso->nativeParams() : &jso->params());
 }
 
 // Load extensions in a script context
@@ -3774,7 +3750,7 @@ bool JsSharedObjects::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 	    return false;
 	ExpOperation* name = args[0];
 	JsObject* jso = JsGlobal::s_sharedObj.get(*name,context,oper.lineNumber());
-	pushStackResNull(stack,jso ? new ExpWrapper(jso,*name) : 0);
+	ExpEvaluator::pushOne(stack,JsParser::validExp(jso,*name));
     }
     else if (oper.name() == YSTRING("clear")) {
 	// clear(name)
@@ -3811,7 +3787,7 @@ bool JsSharedObjects::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 		jso->setBoolField("owned",m_owner && m_owner == jsh->owner());
 		jso->setBoolField("persistent",jsh->owner().null());
 	    }
-	    pushStackResNull(stack,jso ? new ExpWrapper(jso,*name) : 0);
+	    ExpEvaluator::pushOne(stack,JsParser::validExp(jso,*name));
 	}
     }
     else
@@ -4507,7 +4483,7 @@ bool JsMessage::listHandlers(ObjList& stack, const ExpOperation& oper, GenObject
 	}
 	jsa->push(new ExpWrapper(jso));
     }
-    pushStackResNull(stack,jsa ? new ExpWrapper(jsa,oper.name()) : 0);
+    ExpEvaluator::pushOne(stack,JsParser::validExp(jsa,oper.name()));
     return true;
 }
 
@@ -5519,6 +5495,21 @@ void* JsConfigFile::getObject(const String& name) const
     return obj;
 }
 
+bool JsConfigFile::runFuncKeys(ObjList& stack, const ExpOperation& oper, GenObject* context,
+    JsConfigSection* jSect)
+{
+    // Config:  keys(sect)
+    // Section: keys()
+    ExpOperVector args;
+    if (!extractArgs(stack,oper,context,args,jSect ? 0 : 1))
+	return false;
+    const String& sName = jSect ? jSect->toString() : *static_cast<const String*>(args[0]);
+    NamedList* sect = m_config.getSection(sName);
+    JsArray* jsa = sect ? JsObject::arrayProps(-1,sect,context,oper.lineNumber(),mutex()) : 0;
+    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,oper.name()));
+    return true;
+}
+
 static inline void handleCfgSetValues(bool set, Configuration& cfg, const String& sName,
     GenObject* params, const String* prefix)
 {
@@ -5735,21 +5726,8 @@ bool JsConfigFile::runNative(ObjList& stack, const ExpOperation& oper, GenObject
 	handleCfgClearKey(m_config,*sect,*key,matchValue);
     }
     else if (oper.name() == YSTRING("keys")) {
-	if (extractArgs(stack,oper,context,args) != 1)
+	if (!runFuncKeys(stack,oper,context))
 	    return false;
-	NamedList* sect = m_config.getSection(*static_cast<ExpOperation*>(args[0]));
-	if (sect) {
-	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
-	    int32_t len = 0;
-	    for (const ObjList* l = sect->paramList()->skipNull(); l; l = l->skipNext()) {
-		jsa->push(new ExpOperation(static_cast<const NamedString*>(l->get())->name()));
-		len++;
-	    }
-	    jsa->setLength(len);
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,oper.name()));
-	}
-	else
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(0,oper.name()));
     }
     else
 	return JsObject::runNative(stack,oper,context);
@@ -5908,21 +5886,8 @@ bool JsConfigSection::runNative(ObjList& stack, const ExpOperation& oper, GenObj
 	handleCfgClearKey(m_owner->config(),toString(),*key,matchValue);
     }
     else if (oper.name() == YSTRING("keys")) {
-	if (extractArgs(stack,oper,context,args) != 0)
+	if (!m_owner->runFuncKeys(stack,oper,context,this))
 	    return false;
-	NamedList* sect = m_owner->config().getSection(toString());
-	if (sect) {
-	    JsArray* jsa = new JsArray(context,oper.lineNumber(),mutex());
-	    int32_t len = 0;
-	    for (const ObjList* l = sect->paramList()->skipNull(); l; l = l->skipNext()) {
-		jsa->push(new ExpOperation(static_cast<const NamedString*>(l->get())->name()));
-		len++;
-	    }
-	    jsa->setLength(len);
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(jsa,oper.name()));
-	}
-	else
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(0,oper.name()));
     }
     else
 	return JsObject::runNative(stack,oper,context);
@@ -6469,7 +6434,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 		}
 	    }
 	}
-	pushStackResNull(stack,ret);
+	ExpEvaluator::pushOne(stack,JsParser::validExp(ret));
     }
     else if (oper.name() == YSTRING("getTextByPath")) {
 	// getTextByPath(op). op: JsXPath or string
@@ -6484,7 +6449,7 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	    if (txt)
 		ret = new ExpOperation(*txt,"text");
 	}
-	pushStackResNull(stack,ret);
+	ExpEvaluator::pushOne(stack,JsParser::validExp(ret));
     }
     else if (oper.name() == YSTRING("getAnyByPath")) {
 	// getAnyByPath(op[,array[,what]]). op: JsXPath or string
@@ -6507,11 +6472,12 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 		    jsa->push(buildAny(o->get(),oper,context));
 	    }
 	}
-	pushStackResNull(stack,ret);
+	ExpEvaluator::pushOne(stack,JsParser::validExp(ret));
     }
     else if (oper.name() == YSTRING("xmlText")) {
 	if (extractArgs(stack,oper,context,args) > 2)
 	    return false;
+	ExpOperation* op = 0;
 	if (m_xml) {
 	    int spaces = args[0] ? static_cast<ExpOperation*>(args[0])->number() : 0;
 	    const String* line = &String::empty();
@@ -6530,13 +6496,11 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 		    }
 		}
 	    }
-	    ExpOperation* op = new ExpOperation("",m_xml->unprefixedTag());
+	    op = new ExpOperation("",m_xml->unprefixedTag());
 	    m_xml->toString(*op,true,*line,indent);
 	    op->startSkip(*line,false);
-	    ExpEvaluator::pushOne(stack,op);
 	}
-	else
-	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
+	ExpEvaluator::pushOne(stack,JsParser::validExp(op));
     }
     else if (oper.name() == YSTRING("replaceParams")) {
 	if (!m_xml || extractArgs(stack,oper,context,args) != 1)
@@ -6596,10 +6560,11 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 	if (!extractStackArgs(1,this,stack,oper,context,args,&file,0))
 	    return false;
 	XmlDocument doc;
+	JsXML* xml = 0;
 	if (JsParser::isFilled(file) &&
 	    (doc.loadFile(*file) == XmlSaxParser::NoError) && doc.root(true) &&
 	    ref()) {
-	    JsXML* xml = new JsXML(mutex(),oper.lineNumber(),doc.takeRoot(true));
+	    xml = new JsXML(mutex(),oper.lineNumber(),doc.takeRoot(true));
 	    xml->params().addParam(new ExpWrapper(this,protoName()));
 	    const XmlFragment& before = doc.getFragment(true);
 	    for (const ObjList* b = before.getChildren().skipNull(); b; b = b->skipNext()) {
@@ -6614,10 +6579,8 @@ bool JsXML::runNative(ObjList& stack, const ExpOperation& oper, GenObject* conte
 		// TODO: Other children present before root (Comment(s), DOCTYPE, CDATA)
 	    }
 	    // TODO: Other children present after root (Comment(s))
-	    ExpEvaluator::pushOne(stack,new ExpWrapper(xml));
 	}
-	else
-	    ExpEvaluator::pushOne(stack,JsParser::nullClone());
+	ExpEvaluator::pushOne(stack,JsParser::validExp(xml));
     }
     else
 	return JsObject::runNative(stack,oper,context);
@@ -6971,7 +6934,8 @@ bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObje
 	    if (params->getBoolValue(YSTRING("force_empty_name")))
 		f |= BuildObjForceEmptyName;
 	}
-	pushStackObjNull(stack,buildJsObj(m_match,context,oper.lineNumber(),mutex(),f),"desc");
+	ExpEvaluator::pushOne(stack,
+	    JsParser::validExp(buildJsObj(m_match,context,oper.lineNumber(),mutex(),f),"desc"));
     }
     else if (oper.name() == YSTRING("dump")) {
 	// dump([params[,indent,addIndent]])
@@ -7037,7 +7001,7 @@ bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObje
 	    return false;
 	XmlElement* xml = MatchingItemDump::dumpItemXml(m_match,getObjParams(args[0]));
 	JsXML* x = xml ? JsXML::build(xml,context,mutex(),oper.lineNumber()) : 0;
-	pushStackObjNull(stack,x,"xml");
+	ExpEvaluator::pushOne(stack,JsParser::validExp(x,"xml"));
     }
     else if (oper.name() == YSTRING("validate")) {
 	// validate(value[,name[,params]])
@@ -7046,15 +7010,13 @@ bool JsMatchingItem::runNative(ObjList& stack, const ExpOperation& oper, GenObje
 	    return false;
 	String error;
 	MatchingItemBase* mi = buildItemFromArgs(args,&error);
-	if (mi) {
+	if (mi || !error) {
 	    JsObject* jso = buildJsObj(mi,context,oper.lineNumber(),mutex());
+	    ExpEvaluator::pushOne(stack,JsParser::validExp(jso,"match",0 != mi));
 	    TelEngine::destruct(mi);
-	    pushStackObjNull(stack,jso,"match");
 	}
-	else if (error)
-	    ExpEvaluator::pushOne(stack,new ExpOperation(error,"error"));
 	else
-	    ExpEvaluator::pushOne(stack,new ExpWrapper((GenObject*)0));
+	    ExpEvaluator::pushOne(stack,new ExpOperation(error,"error"));
     }
     else if (oper.name() == YSTRING("load")) {
 	// load(src[,params[,prefix]])
