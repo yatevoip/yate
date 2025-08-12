@@ -94,6 +94,7 @@
 [priorities]
 ; Set the priorities for the insertion of the regular expression module in the
 ;  handler chain; a priority of 0 disables the handler entirely
+; Configure other global parameters
 
 ; preroute: int: Priority of the prerouting message handler
 ;preroute=100
@@ -131,10 +132,15 @@
 ; This parameter is applied on reload
 ;rex_debug=true
 
+; add_once: boolean: Add missing global variables from '$once' section on reload
+;add_once=true
+
 
 [$once]
 ; First-time only global variables initialization.
 ; It is executed during first initialization before the [$init] section
+; Reload: handling of missing global variables from this section is controlled by 'add_once'
+;  parameter in 'priorities' section
 ; Each line must be of the form:
 ;  varname=value
 

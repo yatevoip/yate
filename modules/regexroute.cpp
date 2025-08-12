@@ -131,7 +131,7 @@ public:
     virtual ~RegexRoutePlugin()
 	{ TelEngine::destruct(s_cfg); }
     virtual void initialize();
-    void initVars(NamedList* sect);
+    void initVars(NamedList* sect, bool replace = true);
     virtual void statusParams(String& str);
 
 private:
@@ -153,7 +153,7 @@ private:
 INIT_PLUGIN(RegexRoutePlugin);
 static RegexRouteDebug __plugin_debug;
 
-static String& vars(String& s, String* vName = 0)
+static inline String& vars(String& s, String* vName = 0)
 {
     if (s.startSkip("$",false)) {
 	s.trimBlanks();
@@ -617,8 +617,9 @@ RegexConfig::RegexConfig(const String& confName)
 void RegexConfig::initialize(bool first)
 {
     m_cfg.load();
-    if (first)
-	__plugin.initVars(m_cfg.getSection("$once"));
+    NamedList* once = m_cfg.getSection("$once");
+    if (once && (first || m_cfg.getBoolValue("priorities","add_once",true)))
+	__plugin.initVars(once,first);
     __plugin.initVars(m_cfg.getSection("$init"));
     s_prerouteall = m_cfg.getBoolValue("priorities","prerouteall",false);
     m_extended = m_cfg.getBoolValue("priorities","extended",false);
@@ -1217,16 +1218,17 @@ RegexRoutePlugin::RegexRoutePlugin()
     Output("Loaded module RegexRoute");
 }
 
-void RegexRoutePlugin::initVars(NamedList* sect)
+void RegexRoutePlugin::initVars(NamedList* sect, bool replace)
 {
     if (!sect)
 	return;
-    unsigned int len = sect->length();
     Lock l(s_varsMtx); // we want all set at the same time
-    for (unsigned int i=0; i<len; i++) {
-	NamedString* n = sect->getParam(i);
-	if (n)
+    for (ObjList* o = sect->paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* n = static_cast<NamedString*>(o->get());
+	if (replace)
 	    s_vars.setParam(n->name(),*n);
+	else if (!s_vars.getParam(n->name()))
+	    s_vars.addParam(n->name(),*n);
     }
 }
 
