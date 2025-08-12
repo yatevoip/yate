@@ -574,6 +574,7 @@ Message* Channel::getDisconnect(const char* reason)
     s_paramMutex.lock();
     msg->copyParams(m_parameters);
     s_paramMutex.unlock();
+    msg->clearParam(YSTRING("handlers"));
     complete(*msg);
     if (reason)
 	msg->setParam("reason",reason);
