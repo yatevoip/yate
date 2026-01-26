@@ -4505,6 +4505,93 @@ private:
 };
 
 /**
+ * This class holds an automatic (owned) GenObject descendant pointer
+ * Ownership may be reset to avoid releasing the held pointer when destroyed
+ * @short GenObject descendant pointer holder
+ */
+template <class Obj> class AutoGenObjectPointer
+{
+    YNOCOPY(AutoGenObjectPointer); // no automatic copies please
+public:
+    /**
+     * Constructor
+     * @param obj Optional pointer to object
+     * @param owned True if held object is owned
+     */
+    inline AutoGenObjectPointer(Obj* obj = 0, bool owned = true)
+	: m_pointer(obj), m_owned(owned)
+	{}
+
+    /**
+     * Destructor
+     */
+    inline ~AutoGenObjectPointer()
+	{ set(); }
+
+    /**
+     * Retrieve the held data
+     * @return The stored pointer
+     */
+    inline Obj* data() const
+	{ return m_pointer; }
+
+    /**
+     * Take the pointer. Caller retains ownership
+     * @return Obj pointer, NULL if not set
+     */
+    inline Obj* take() {
+	    Obj* obj = m_pointer;
+	    m_pointer = 0;
+	    return obj;
+	}
+
+    /**
+     * Replace data
+     * @param obj Optional pointer to object
+     * @param owned True if held object is owned
+     */
+    inline void set(Obj* obj = 0, bool owned = true) {
+	    if (m_pointer == obj)
+		return;
+	    Obj* tmp = m_pointer;
+	    m_pointer = obj;
+	    if (m_owned)
+		TelEngine::destruct(tmp);
+	    m_owned = owned;
+	}
+
+    /**
+     * Assignment from pointer
+     * @param obj New pointer value
+     */
+    inline AutoGenObjectPointer& operator=(Obj* obj)
+	{ set(obj); return *this; }
+
+    /**
+     * Conversion to regular pointer operator
+     * @return The stored pointer
+     */
+    inline operator Obj*() const
+	{ return m_pointer; }
+
+    /**
+     * Member access operator
+     */
+    inline Obj* operator->() const
+	{ return m_pointer; }
+
+    /**
+     * Dereferencing operator
+     */
+    inline Obj& operator*() const
+	{ return *m_pointer; }
+
+private:
+    Obj* m_pointer;
+    bool m_owned;
+};
+
+/**
  * This class holds an automatic (owned) GenObject pointer
  * Ownership may be reset to avoid releasing the held pointer when destroyed
  * @short GenObject pointer holder
