@@ -242,6 +242,31 @@ void ScriptContext::fillFieldNames(ObjList& names, const HashList& list)
     }
 }
 
+void ScriptContext::cleanup(bool cbForce)
+{
+    changeState(Terminated,cbForce);
+}
+
+void ScriptContext::changeState(int st, bool cbForce)
+{
+    Lock lck(mutex());
+    bool chg = m_state != st && (st == Terminated || m_state != Terminated);
+    if (chg)
+	m_state = st;
+    if (m_data && (chg || cbForce)) {
+	RefPointer<ScriptContextData> d = m_data;
+	if (d) {
+	    lck.drop();
+	    d->contextStateChanged(*this);
+	}
+    }
+    if (st == Terminated) {
+	lck.acquire(mutex());
+	params().clearParams();
+    }
+}
+
+
 #define MAKE_NAME(x) { #x, ScriptRun::x }
 static const TokenDict s_states[] = {
     MAKE_NAME(Invalid),

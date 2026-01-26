@@ -46,7 +46,9 @@ namespace TelEngine {
 
 class ExpEvaluator;
 class ExpOperation;
+class ScriptContext;
 class ScriptMutex;
+class ScriptRun;
 class JsArray;
 
 /**
@@ -1150,7 +1152,7 @@ public:
     /**
      * Push String constructor
      * @param value String constant to push on stack on execution
-     * @param name Optional of the newly created constant
+     * @param name Optional name of the newly created constant
      * @param autoNum Automatically convert to number if possible
      */
     inline explicit ExpOperation(const String& value, const char* name = 0, bool autoNum = false)
@@ -1165,7 +1167,7 @@ public:
     /**
      * Push literal string constructor
      * @param value String constant to push on stack on execution
-     * @param name Optional of the newly created constant
+     * @param name Optional name of the newly created constant
      */
     inline explicit ExpOperation(const char* value, const char* name = 0)
 	: NamedString(name,value),
@@ -1176,18 +1178,51 @@ public:
     /**
      * Push 64 bit Number constructor
      * @param value Integer constant to push on stack on execution
-     * @param name Optional of the newly created constant
+     * @param name Optional name of the newly created constant
      */
     inline explicit ExpOperation(int64_t value, const char* name = 0)
 	: NamedString(name,"NaN"),
 	  m_opcode(ExpEvaluator::OpcPush),
 	  m_number(value), m_bool(false), m_isNumber(true), m_lineNo(0), m_barrier(false)
-	{ if (value != nonInteger()) String::operator=(value); }
+	{ setIntVal(value); }
+
+    /**
+     * Push 64 bit Number constructor
+     * @param value Integer constant to push on stack on execution
+     * @param name Optional name of the newly created constant
+     */
+    inline explicit ExpOperation(int32_t value, const char* name = 0)
+	: NamedString(name,"NaN"),
+	  m_opcode(ExpEvaluator::OpcPush),
+	  m_number(value), m_bool(false), m_isNumber(true), m_lineNo(0), m_barrier(false)
+	{ setIntVal(value); }
+
+    /**
+     * Push 64 bit Number constructor
+     * @param value Integer constant to push on stack on execution
+     * @param name Optional name of the newly created constant
+     */
+    inline explicit ExpOperation(uint64_t value, const char* name = 0)
+	: NamedString(name,"NaN"),
+	  m_opcode(ExpEvaluator::OpcPush),
+	  m_number(value), m_bool(false), m_isNumber(true), m_lineNo(0), m_barrier(false)
+	{ setIntVal(value); }
+
+    /**
+     * Push 64 bit Number constructor
+     * @param value Integer constant to push on stack on execution
+     * @param name Optional name of the newly created constant
+     */
+    inline explicit ExpOperation(uint32_t value, const char* name = 0)
+	: NamedString(name,"NaN"),
+	  m_opcode(ExpEvaluator::OpcPush),
+	  m_number(value), m_bool(false), m_isNumber(true), m_lineNo(0), m_barrier(false)
+	{ setIntVal(value); }
 
     /**
      * Push Boolean constructor
      * @param value Boolean constant to push on stack on execution
-     * @param name Optional of the newly created constant
+     * @param name Optional name of the newly created constant
      */
     inline explicit ExpOperation(bool value, const char* name = 0)
 	: NamedString(name,String::boolText(value)),
@@ -1348,7 +1383,89 @@ public:
     virtual ExpOperation* copy(ScriptMutex* mtx) const
 	{ return clone(); }
 
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @param autoNum Automatically convert to number if possible
+     * @return True
+     */
+    static inline bool pushStr(ObjList& stack, const String& value,
+	const char* name = 0, bool autoNum = false) {
+	    ExpEvaluator::pushOne(stack,new ExpOperation(value,name,autoNum));
+	    return true;
+	}
+
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @return True
+     */
+    static inline bool push(ObjList& stack, const char* value, const char* name = 0) {
+	    ExpEvaluator::pushOne(stack,new ExpOperation(value,name));
+	    return true;
+	}
+
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @return True
+     */
+    static inline bool push(ObjList& stack, int64_t value, const char* name = 0) {
+	    ExpEvaluator::pushOne(stack,new ExpOperation(value,name));
+	    return true;
+	}
+
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @return True
+     */
+    static inline bool push(ObjList& stack, uint64_t value, const char* name = 0)
+	{ return push(stack,(int64_t)value,name); }
+
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @return True
+     */
+    static inline bool push(ObjList& stack, int32_t value, const char* name = 0)
+	{ return push(stack,(int64_t)value,name); }
+
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @return True
+     */
+    static inline bool push(ObjList& stack, uint32_t value, const char* name = 0)
+	{ return push(stack,(int64_t)value,name); }
+
+    /**
+     * Push an operand on stack
+     * @param stack The stack to remove the operand from
+     * @param value Value to push
+     * @param name Variable name
+     * @return True
+     */
+    static inline bool push(ObjList& stack, bool value, const char* name = 0) {
+	    ExpEvaluator::pushOne(stack,new ExpOperation(value,name));
+	    return true;
+	}
+
 private:
+    inline void setIntVal(int64_t value)
+	{ if (value != nonInteger()) String::operator=(value); }
     ExpEvaluator::Opcode m_opcode;
     int64_t m_number;
     bool m_bool;
@@ -1379,7 +1496,7 @@ public:
      * Copy references from given vector
      * @param other Vector to copy
      */
-    inline ExpOperVector(ExpOperVector& other)
+    inline ExpOperVector(const ExpOperVector& other)
 	: m_data(other.length())
 	{
 	    for (unsigned int i = 0; i < length(); ++i) {
@@ -1479,6 +1596,14 @@ public:
 	}
 
     /**
+     * Fill ObjList from this vector
+     * @param move True to move, false to clone elements
+     * @param list Destination list
+     */
+    inline void fillTo(bool move, ObjList& list)
+	{ return move ? moveTo(list) : cloneTo(list); }
+
+    /**
      * Clone another vector into this one into this vector
      * @param other Vector to clone
      * @param offs Offset in input vector to start from
@@ -1524,6 +1649,19 @@ public:
 		set(other.take(offs++),start);
 	    return *this;
 	}
+
+    /**
+     * Fill data from another vector into this one into this vector
+     * @param take True to take, false to clone elements
+     * @param other Vector to fill from
+     * @param offs Offset in input vector to start from
+     * @param keepData Keep old data (append)
+     * @param count Optional number of elements to fill, negative for all available
+     * @return Reference of this vector
+     */
+    inline ExpOperVector& fillFrom(bool take, ExpOperVector& other, unsigned int offs = 0,
+	bool keepData = false, int count = -1)
+	{ return take ? takeFrom(other,offs,keepData,count) : cloneFrom(other,offs,keepData,count); }
 
 protected:
     inline void resize(unsigned int len, int count, unsigned int keepData = 0) {
@@ -1727,8 +1865,6 @@ protected:
     unsigned int m_limitVal;
 };
 
-class ScriptRun;
-
 /**
  * A mutex that serializes object access
  * @short Script context serialization mutex
@@ -1770,6 +1906,29 @@ protected:
 };
 
 /**
+ * A script context data to be set by upper layer
+ * @short Script context data
+ */
+class YSCRIPT_API ScriptContextData : public RefObject
+{
+    YCLASS(ScriptContextData,RefObject)
+    friend class ScriptContext;
+public:
+    /**
+     * Constructor
+     */
+    inline ScriptContextData()
+	{}
+
+protected:
+    /**
+     * Context state change notification
+     * @param ctx The context
+     */
+    virtual void contextStateChanged(ScriptContext& ctx) = 0;
+};
+
+/**
  * A script execution context, holds global variables and objects
  * @short Script execution context
  */
@@ -1777,11 +1936,20 @@ class YSCRIPT_API ScriptContext : public RefObject, public ExpExtender
 {
 public:
     /**
+     * Context state
+     */
+    enum State {
+	Terminated = 0,
+	Active,
+	Inactive
+    };
+
+    /**
      * Constructor
      * @param name Name of the context
      */
     inline explicit ScriptContext(const char* name = 0)
-	: m_params(name), m_instIdx(0), m_instCount(1), m_terminated(false)
+	: m_params(name), m_instIdx(0), m_instCount(1), m_state(Active)
 	{ }
 
     /**
@@ -1968,24 +2136,74 @@ public:
 
     /**
      * Cleanup the context. Remove variables
+     * @param cbForce Force context data callback call if state did not change
      */
-    virtual void cleanup() {
-	    Lock lck(mutex());
-	    m_terminated = true;
-	    params().clearParams();
-	}
+    virtual void cleanup(bool cbForce = false);
+
+    /**
+     * Retrieve context state
+     * @return Context state
+     */
+    inline int state() const
+	{ return m_state; }
+
+    /**
+     * Retrieve context state name
+     * @return Context state name
+     */
+    inline const char* stateName() const
+	{ return terminated() ? "terminated" : (ctxActive() ? "active" : "inactive"); }
 
     /**
      * Check if the context was terminated
+     * @return True if terminated (cleared), false if not
      */
     inline bool terminated() const
-	{ return m_terminated; }
+	{ return Terminated == state(); }
+
+    /**
+     * Check if the context is active
+     * @return True if active (in use), false if not
+     */
+    inline bool ctxActive() const
+	{ return Active == state(); }
+
+    /**
+     * Check if the context is active
+     * @param on True to set active, false to set inactive
+     * @param cbForce Force context data callback call if state did not change
+     */
+    inline void setCtxActive(bool on, bool cbForce = false)
+	{ changeState(on ? Active : Inactive,cbForce); }
+
+    /**
+     * Retrieve context private data
+     * @return ScriptContextData pointer, NULL if not set
+     */
+    inline ScriptContextData* userData()
+	{ return m_data; }
+
+    /**
+     * Set context private data if non NULL and not already set
+     * This method is thread safe
+     * @param data Pointer to data to be set
+     * @return True on success, false on failure
+     */
+    inline bool userData(ScriptContextData* data) {
+	    Lock lck(mutex());
+	    if (!data || m_data)
+		return false;
+	    m_data = data;
+	    return m_data == data;
+	}
 
 private:
+    void changeState(int st, bool cbForce);
     NamedList m_params;
-    unsigned int m_instIdx; // instance index
-    unsigned int m_instCount; // total number of instances
-    bool m_terminated;                   // Context was terminated. Variables were cleared
+    unsigned int m_instIdx;              // Instance index
+    unsigned int m_instCount;            // Total number of instances
+    int m_state;                         // Context state
+    RefPointer<ScriptContextData> m_data;// Context data
 };
 
 /**
@@ -2107,9 +2325,38 @@ class YSCRIPT_API ScriptRunData : public RefObject
 public:
     /**
      * Constructor
+     * @param name Runner name
+     * @param scriptPath Runner script path
      */
-    inline ScriptRunData()
+    inline ScriptRunData(const char* name = 0, const char* scriptPath = 0)
+	: m_name(name), m_scriptPath(scriptPath)
 	{}
+
+    /**
+     * Copy constructor
+     * @param other Data to copy
+     */
+    inline ScriptRunData(const ScriptRunData& other)
+	: m_name(other.name()), m_scriptPath(other.scriptPath())
+	{}
+
+    /**
+     * Retrieve runner name
+     * @return Runner name
+     */
+    inline const String& name() const
+	{ return m_name; }
+
+    /**
+     * Retrieve runner script path
+     * @return Runner script path
+     */
+    inline const String& scriptPath() const
+	{ return m_scriptPath; }
+
+private:
+    String m_name;
+    String m_scriptPath;
 };
 
 /**
@@ -2238,6 +2485,39 @@ public:
 	ExpOperation* thisObj = 0, ExpOperation* scopeObj = 0);
 
     /**
+     * Call a script function or method
+     * Clear arguments after call
+     * @param name Name of the function to call
+     * @param args Values to pass as actual function arguments
+     * @return Final status of the runtime after function call
+     */
+    inline int callFunc(const String& name, ObjList& args) {
+	    int ret = call(name,args);
+	    args.clear();
+	    return ret;
+	}
+
+    /**
+     * Call a script function or method
+     * Clear arguments after call
+     * @param name Name of the function to call
+     * @param args Values to pass as actual function arguments
+     * @param result Pop a value from stack. Convert it to boolean if present
+     * @return Final status of the runtime after function call
+     */
+    inline int callFuncRes(const String& name, ObjList& args, bool& result) {
+	    int ret = callFunc(name,args);
+	    if (Succeeded != ret)
+		return ret;
+	    ExpOperation* op = ExpEvaluator::popOne(stack());
+	    if (!op)
+		return Succeeded;
+	    result = op->valBoolean();
+	    TelEngine::destruct(op);
+	    return Succeeded;
+	}
+
+    /**
      * Check if a script has a certain function or method
      * @param name Name of the function to check
      * @return True if function exists in code
@@ -2319,6 +2599,40 @@ public:
 	    if (!m_data)
 		m_data = data;
 	    return data == m_data;
+	}
+
+    /**
+     * Retrieve runner data name
+     * @return Runner data name
+     */
+    inline const String& runDataName() const
+	{ return m_data ? m_data->name() : String::empty(); }
+
+    /**
+     * Retrieve runner data script path
+     * @return Runner data script path
+     */
+    inline const String& runDataScriptPath() const
+	{ return m_data ? m_data->scriptPath() : String::empty(); }
+
+    /**
+     * Retrieve runner data name
+     * @return Runner data name
+     */
+    inline const char* runDataDbgName() const
+	{ return m_data ? (m_data->scriptPath().safe(m_data->name().safe())) : ""; }
+
+    /**
+     * Release a runner
+     * @param runner Runner to release
+     * @param cleanupCtx Cleanup runner context
+     */
+    static inline void release(ScriptRun*& runner, bool cleanupCtx = false) {
+	    if (!runner)
+		return;
+	    if (cleanupCtx && runner->context())
+		runner->context()->cleanup();
+	    TelEngine::destruct(runner);
 	}
 
 protected:
@@ -2530,7 +2844,7 @@ public:
      * @param line Code line where this object was created
      * @param frozen True if the object is to be frozen from creation
      */
-    JsObject(ScriptMutex* mtx, const char* name, unsigned int line, bool frozen = 0);
+    JsObject(ScriptMutex* mtx, const char* name, unsigned int line, bool frozen = false);
 
     /**
      * Constructor for an empty object with prototype
@@ -2863,6 +3177,17 @@ public:
     static void addConstructor(NamedList& params, const char* name, JsObject* obj);
 
     /**
+     * Retrieve object prototype
+     * @param params List of parameters
+     * @param name Name of the parameter
+     * @return JsObject (prototype), NULL if not found or not a JsObject
+     */
+    static inline JsObject* getObjProto(NamedList& params, const String& name) {
+	    JsObject* obj = YOBJECT(JsObject,params.getParam(name));
+	    return obj ? YOBJECT(JsObject,obj->params().getParam(YSTRING("prototype"))) : 0;
+	}
+
+    /**
      * Helper static method that pops arguments off a stack to a list in proper order
      * @param obj Pointer to the object to use when popping each argument
      * @param stack Evaluation stack in use, parameters are popped off this stack
@@ -3027,7 +3352,7 @@ public:
 
     /**
      * Copy an object
-     * @param res Number of copied properties, negative on error (NULL pointr returned)
+     * @param res Number of copied properties, negative on error (NULL pointer returned)
      * @param src Object to copy, returns error if missing/null/undefined
      * @param flags Flags for properties assign
      * @param context Context owning the prototypes of the new object
@@ -3967,6 +4292,15 @@ public:
      */
     static inline const String& getString(const ExpOperation* oper)
 	{ return isMissing(oper) ? String::empty() : *oper; }
+
+    /**
+     * Retrieve a boolean value from ExpOperation
+     * @param oper Operation to check
+     * @param defVal Default value to return if operation is missing or not a boolean
+     * @return True/false
+     */
+    static inline bool getBoolean(ExpOperation* oper, bool defVal = false)
+	{ return isMissing(oper) ? defVal : oper->valBoolean(defVal); }
 
     /**
      * Set a string from ExpOperation if not 'undefined'. Clear if 'null'
