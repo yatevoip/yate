@@ -1142,6 +1142,7 @@ public:
 	    params().addParam(new ExpFunction("htoa"));
 	    params().addParam(new ExpFunction("btoh"));
 	    params().addParam(new ExpFunction("htob"));
+	    params().addParam(new ExpFunction("hexByte"));
 	    params().addParam(new ExpFunction("instanceIndex"));
 	    params().addParam(new ExpFunction("instanceCount"));
 	    addConstructor(params(),"Semaphore",new JsSemaphore(mtx));
@@ -2108,6 +2109,7 @@ static bool s_trackObj = false;
 static unsigned int s_trackCreation = 0;
 static bool s_autoExt = true;
 static unsigned int s_maxFile = 500000;
+static int s_exitOnParseFail = 0;
 
 const TokenDict ScriptInfo::s_type[] = {
     {"static",  Static},
@@ -2624,6 +2626,13 @@ static void copyObjParams(NamedList& dest, const NamedList* src)
     }
 }
 
+// Exit Yate if a script fails to be parsed
+static inline void exitOnParseFail()
+{
+    if (!s_exitOnParseFail)
+	return;
+    Engine::halt(s_exitOnParseFail);
+}
 
 JsNamedListWrite::JsNamedListWrite(ExpOperation* oper)
     : m_jso(JsParser::isFilled(oper) ? YOBJECT(JsObject,oper) : 0), m_params(0), m_jsoParams("")
@@ -3395,6 +3404,50 @@ bool JsEngine::runNative(ObjList& stack, const ExpOperation& oper, GenObject* co
 	}
 	else
 	    ExpEvaluator::pushOne(stack,new ExpOperation(false));
+    }
+    else if (oper.name() == YSTRING("hexByte")) {
+	// str = Engine.hexByte(str[,off]);
+	ObjList args;
+	int argc = extractArgs(stack,oper,context,args);
+	if (argc < 1)
+	    return false;
+	ExpOperation* op1 = static_cast<ExpOperation*>(args[0]);
+	int offset = 0;
+	ExpOperation* op2 = static_cast<ExpOperation*>(args[1]);
+	if (op2) {
+	    if (!op2->isInteger())
+		return false;
+	    offset = (int)op2->valInteger();
+	}
+	int len = (int) op1->length();
+	if (offset < 0) {
+	    offset += len;
+	    if (offset < 0)
+		offset = len;
+	}
+	if (offset >= len) {
+	    ExpEvaluator::pushOne(stack,new ExpOperation(ExpOperation::nonInteger()));
+	    return true;
+	}
+	const char* s = op1->c_str();
+	int64_t val = 0;
+	for (int i = offset; i < offset + 2 && i < len; i++) {
+	    char c = *(s + i);
+	    unsigned int cval = 0;
+	    if (c >= '0' && c <= '9')
+		cval = c - '0';
+	    else if (c >= 'a' && c <= 'f')
+		cval = c - 'a' + 10;
+	    else if (c >= 'A' && c <= 'F')
+		cval = c - 'A' + 10;
+	    else {
+		ExpEvaluator::pushOne(stack,new ExpOperation(ExpOperation::nonInteger()));
+		return true;
+	    }
+	    val = val * 16 + cval;
+	}
+	ExpEvaluator::pushOne(stack,new ExpOperation(val));
+	return true;
     }
     else if (oper.name() == YSTRING("instanceIndex")) {
 	ScriptRun* runner = YOBJECT(ScriptRun,context);
@@ -8480,6 +8533,7 @@ bool JsGlobal::load()
     }
     if (*this)
 	Debug(&__plugin,DebugWarn,"Failed to parse %s script '%s': %s",typeName(),name().c_str(),c_str());
+    exitOnParseFail();
     return false;
 }
 
@@ -9363,6 +9417,7 @@ void JsModule::initialize()
     s_allowAbort = cfg.getBoolValue("general","allow_abort");
     s_trackObj = cfg.getBoolValue("general","track_objects");
     s_trackCreation = cfg.getIntValue("general","track_obj_life",s_trackCreation,0);
+    s_exitOnParseFail = cfg.getIntValue("general","exit_on_parse_fail",0);
     JsGlobal::s_keepOldOnFail = cfg.getBoolValue("general","keep_old_on_fail");
     bool changed = false;
     if (cfg.getBoolValue("general","allow_trace") != s_allowTrace) {
@@ -9385,8 +9440,10 @@ void JsModule::initialize()
 	m_assistCode.adjustPath(tmp);
 	if (m_assistCode.parseFile(tmp))
 	    Debug(this,DebugInfo,"Parsed routing script: %s",tmp.c_str());
-	else if (tmp)
+	else if (tmp) {
 	    Debug(this,DebugWarn,"Failed to parse script: %s",tmp.c_str());
+	    exitOnParseFail();
+	}
     }
     JsGlobal::markUnused();
     lck.drop();

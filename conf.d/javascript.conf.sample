@@ -43,6 +43,10 @@
 ; keep_old_on_fail: boolean: Keep old scripts when replaced and failed to parse the new one
 ;keep_old_on_fail=no
 
+; exit_on_parse_fail: integer: Error exit code to use to stop Yate if a script fails to load
+; Defaults to 0. If set to 0, Yate is not stopped if a script fails to load
+;exit_on_parse_fail=0
+
 
 [instances]
 ; Build multiple instances of specified scripts.
