@@ -47,6 +47,50 @@
 ; Defaults to 0. If set to 0, Yate is not stopped if a script fails to load
 ;exit_on_parse_fail=0
 
+; context_reuse: boolean: Enable script context reuse when needed
+;context_reuse=yes
+
+; context_reuse_max_singleton: integer: Maximum number of script contexts to reuse
+;  for singleton handlers/posthooks
+; Allowed interval: 8..2048
+; Set it to 0 to disable context reuse
+; This parameter is ignored (handled with value 0) if 'context_reuse' is disabled
+;context_reuse_max_singleton=128
+
+; context_reuse_wait_busy: integer: Interval (in milliseconds) to wait for a reusable
+;  script context to become idle
+; Allowed interval: 0..10000
+; Set it to 0 to disable waiting
+; A new script context will always be created when this parameter is disabled or interval ellapses
+;context_reuse_wait_busy=50
+
+; context_reuse_warn_thres: integer: Script context reuse warn threshold (percent of max number of contexts)
+; This parameter is used to put warnings on reuse overrun (a script would need more than max number
+;  of reused contexts)
+; This parameter is handled only on script explicit script request
+; Allowed interval: 1..50
+;context_reuse_warn_thres=10
+
+; script_terminated_cleanup: boolean: Cleanup a context when terminated
+; Cleanup includes stopping of events worker, message uninstall, semaphore unlock
+;script_terminated_cleanup=yes
+
+; msg_handle_ctx_inactive: boolean: Run script callback for handler/posthook when context
+;  is already inactive or terminated
+;msg_handle_ctx_inactive=no
+
+; script_event_process_ctx_inactive: boolean: Run script callback for installed events when context
+;  is already inactive or terminated
+;script_event_process_ctx_inactive=no
+
+; track_message_handle: boolean: Track handling of messages. Put a debug message with consumed time
+;track_message_handle=no
+
+; track_message_handle_explicit: boolean: Track handling of messages containing a
+;  'report_js_duration' parameter evaluated to boolean true
+; This parameter is ignored if 'track_message_handle' is disabled
+;track_message_handle_explicit=yes
+
 
 [instances]
 ; Build multiple instances of specified scripts.
@@ -125,9 +169,15 @@ eliza=eliza.js
 ;   This parameter is applied on reload
 ;   Default: [general] 'auto_extensions'
 ;   NOTE: Extensions won't be loaded if handled message is script.init
+; context_reuse_max: integer: Override for 'general' section 'context_reuse_max_singleton' parameter
+; context_reuse_wait_busy: integer: Override for 'general' section 'context_reuse_wait_busy' parameter
+; context_reuse_name: string: Name of context reuse. Enables warnings for context overrun
+; context_reuse_warn_thres: integer: Override for 'general' section 'context_reuse_warn_thres' parameter
+; data: string: JSON object with data to be passed to callback
 ; keep_old_on_fail: boolean: Keep old code if failed to parse the new one
 ;   This parameter is used when handler is re-loaded and script changed
 ;   Default: [general] 'keep_old_on_fail'
+
 
 [posthooks]
 ; Install singleton message posthooks
@@ -170,3 +220,8 @@ eliza=eliza.js
 ;   Default: [general] 'keep_old_on_fail'
 ; engine.timer: boolean: Set it to true to force handling of engine.timer message
 ;   engine.timer is ignore by default if a message name filter was not set
+; context_reuse_max: integer: Override for 'general' section 'context_reuse_max_singleton' parameter
+; context_reuse_wait_busy: integer: Override for 'general' section 'context_reuse_wait_busy' parameter
+; context_reuse_name: string: Name of context reuse. Enables warnings for context overrun
+; context_reuse_warn_thres: integer: Override for 'general' section 'context_reuse_warn_thres' parameter
+; data: string: JSON object with data to be passed to callback
