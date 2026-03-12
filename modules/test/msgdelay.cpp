@@ -70,7 +70,7 @@ bool DelayHandler::received(Message &msg)
 	// delay maximum 10s
 	if (ms > 10000)
 	    ms = 10000;
-	Debug(DebugAll,"Delaying '%s' by %d ms in thread '%s'",msg.safe(),ms,Thread::currentName());
+	Debug(&__plugin,DebugAll,"Delaying '%s' by %d ms in thread '%s'",msg.safe(),ms,Thread::currentName());
 	unsigned int n = (ms + Thread::idleMsec() - 1) / Thread::idleMsec();
 	if (force)
 	    while (n-- && !Thread::check(false))
