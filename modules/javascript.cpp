@@ -887,7 +887,7 @@ class JsGlobalInstance : public RefObject, public ScriptInfoHolder
 public:
     JsGlobalInstance(JsGlobal* owner, unsigned int index);
     ~JsGlobalInstance();
-    unsigned int runMain();
+    unsigned int runMain(JsGlobalInstance* firstInstance = 0);
     inline ScriptContext* context()
 	{ return m_context; }
     inline void setInstanceCount(unsigned int n) {
@@ -9114,9 +9114,9 @@ JsGlobalInstance::~JsGlobalInstance()
 	m_context->cleanup();
 }
   
-unsigned int JsGlobalInstance::runMain()
+unsigned int JsGlobalInstance::runMain(JsGlobalInstance* firstInstance)
 {
-    DDebug(&__plugin,DebugInfo,"JsGlobalInstance::runMain() %s",m_name.c_str());
+    DDebug(&__plugin,DebugInfo,"JsGlobalInstance::runMain(%p) %s",firstInstance,m_name.c_str());
     m_instanceCount = m_owner->instances();
     ScriptRun* runner = m_owner->parser().createRunner(m_context,0,m_instance,m_instanceCount);
     if (!runner)
@@ -9128,6 +9128,17 @@ unsigned int JsGlobalInstance::runMain()
     contextInit(runner,toString());
     ScriptRun::Status st = runner->run();
     TelEngine::destruct(runner);
+    if (ScriptRun::Succeeded == st && firstInstance) {
+	RefPointer<JsEngine> fEng;
+	if (JsEngine::get(firstInstance->context(),&fEng)) {
+	    Lock lckCtx(m_context->mutex());
+	    JsEngine* eng = JsEngine::get(*m_context);
+	    if (eng) {
+		eng->debugLevel(fEng->debugLevel());
+		eng->debugEnabled(fEng->debugEnabled());
+	    }
+	}
+    }
     return st;
 }
 
@@ -9446,18 +9457,21 @@ bool JsGlobal::runMain()
     }
     else {
 	unsigned int lCount = m_instances.count();
+	RefPointer<JsGlobalInstance> first;
 	// add instances if m_instancesCount is increased
 	for (unsigned int i = 0; i < m_instanceCount; i++) {
 	    JsGlobalInstance* inst = getInstance(i + 1);
 	    // get instance returns a refcounted instance
 	    if (inst) {
+		if (!first)
+		    first = inst;
 		inst->setInstanceCount(m_instanceCount);
 		inst->scheduleInitEvent();
 		TelEngine::destruct(inst);
 		continue;
 	    }
 	    inst = new JsGlobalInstance(this,i + 1);
-	    if (ScriptRun::Succeeded != inst->runMain()) {
+	    if (ScriptRun::Succeeded != inst->runMain(first)) {
 		TelEngine::destruct(inst);
 		return false;
 	    }
