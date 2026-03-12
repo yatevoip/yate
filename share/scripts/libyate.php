@@ -130,6 +130,106 @@ class Yate
     }
 
     /**
+     * Static function used to retrieve a boolean value from string or already boolean
+     * @param $val Boolean value to convert
+     * @param $defVal Value to return if not matched
+     * @return True/false or value of $defVal
+     */
+    static function ToBoolean($val,$defVal = false)
+    {
+	switch ($val) {
+	    case "true":
+	    case "yes":
+	    case "on":
+	    case "enable":
+	    case "t":
+		return true;
+	    case "false":
+	    case "no":
+	    case "off":
+	    case "disable":
+	    case "f":
+		return false;
+	}
+	return (true === $val || false === $val) ? $val : $defVal;
+    }
+
+    /**
+     * Static function used to convert a string to integer value
+     * @param $str Boolean value to convert
+     * @param $defVal Value to return if not valid
+     * @param $minVal Optional minimum value to check.
+     *  If numeric value is less than $minVal returns $minVal if clamped, $defVal otherwise
+     * @param $maxVal Optional maximum value to check.
+     *  If numeric value is greater than $maxVal returns $maxVal if clamped, $defVal otherwise
+     * @param $clamp Clamp numeric value
+     * @param $base Optional base
+     * @return Numeric value or $defVal
+     */
+    static function ToInteger($str,$defVal = 0,$minVal = null,$maxVal = null,$clamp = true,$base = 0)
+    {
+	if (!($str && strlen($str)))
+	    return $defVal;
+	$str = intval($str,$base);
+	if (is_numeric($minVal)) {
+	    if ($str < $minVal)
+		return $clamp ? $minVal : $defVal;
+	}
+	if (is_numeric($maxVal)) {
+	    if ($str > $maxVal)
+		return $clamp ? $maxVal : $defVal;
+	}
+	return $str;
+    }
+
+    /**
+     * Static function used to retrieve a value from array/object
+     * @param $obj The array or object
+     * @param $name Parameter name
+     * @param $defVal Default value to return if parameter is not found in array
+     * @return Parameter value or $defVal
+     */
+    static function GetParam($obj,$name,$defVal = null)
+    {
+	if (is_array($obj))
+	    return isset($obj[$name]) ? $obj[$name] : $defVal;
+	if (is_object($obj))
+	    return property_exists($obj,$name) ? $obj[$name] : $defVal;
+	return $defVal;
+    }
+
+    /**
+     * Static function used to retrieve a boolean value from array/object parameter
+     * @param $obj The array or object
+     * @param $name Parameter name
+     * @param $defVal Value to return if not matched or not found
+     * @return Parameter value or $defVal
+     */
+    static function GetBoolParam($obj,$name,$defVal = false)
+    {
+	return Yate::ToBoolean(Yate::GetParam($obj,$name),$defVal);
+    }
+
+    /**
+     * Static function used to retrieve an integer value from array/object parameter
+     * @param $obj The array or object
+     * @param $name Parameter name
+     * @param $defVal Value to return if not valid
+     * @param $minVal Optional minimum value to check.
+     *  If numeric value is less than $minVal returns $minVal if clamped, $defVal otherwise
+     * @param $maxVal Optional maximum value to check.
+     *  If numeric value is greater than $maxVal returns $maxVal if clamped, $defVal otherwise
+     * @param $clamp Clamp numeric value
+     * @param $base Optional base
+     * @return Numeric value or $defVal
+     */
+    static function GetIntParam($obj,$name,$defVal = 0,$minVal = null,$maxVal = null,
+	$clamp = true,$base = 0)
+    {
+	return Yate::ToInteger(Yate::GetParam($obj,$name),$defVal,$minVal,$maxVal,$clamp,$base);
+    }
+
+    /**
      * Static function to convert a string to its Yate escaped format
      * @param $str String to escape
      * @param $extra (optional) Character to escape in addition to required ones
@@ -289,6 +389,45 @@ class Yate
 	if (($value === true) || ($value === false))
 	    $value = Yate::Bool2str($value);
 	$this->params[$key] = $value;
+    }
+
+    /**
+     * Clear a named parameter
+     * @param $key Name of the parameter to clear
+     */
+    function ClearParam($key)
+    {
+	if (isset($this->params[$key]))
+	    unset($this->params[$key]);
+    }
+
+    /**
+     * Retrieve a boolean value from parameter
+     * @param $name Parameter name
+     * @param $defVal Value to return if not matched or not found
+     * @return True/false or value of $defVal
+     */
+    function GetBoolValue($name,$defVal = false)
+    {
+	return Yate::GetBoolParam($this->params,$name,$defVal);
+    }
+
+    /**
+     * Retrieve an integer value from array parameter
+     * @param $name Parameter name
+     * @param $defVal Value to return if not valid
+     * @param $minVal Optional minimum value to check.
+     *  If numeric value is less than $minVal returns $minVal if clamped, $defVal otherwise
+     * @param $maxVal Optional maximum value to check.
+     *  If numeric value is greater than $maxVal returns $maxVal if clamped, $defVal otherwise
+     * @param $clamp Clamp numeric value
+     * @param $base Optional base
+     * @return Numeric value or $defVal
+     */
+    function GetIntValue($name,$defVal = 0,$minVal = null,$maxVal = null,
+	$clamp = true,$base = 0)
+    {
+	return Yate::GetIntParam($this->params,$name,$defVal,$minVal,$maxVal,$clamp,$base);
     }
 
     /**
@@ -571,11 +710,138 @@ class Yate
 	}
     }
 
+    /**
+     * Execute an application
+     * @param $cmd Command line
+     * @param $out Command output buffer
+     * @return NULL (success) or error description
+     */
+    static function Execute($cmd,&$out = null)
+    {
+	Yate::SetLastError();
+	try {
+	    $code = 0;
+	    $res = exec($cmd,$out,$code);
+	    if (false === $res)
+		return Yate::BuildError("exec");
+	    if ($code)
+		return Yate::BuildError("exec",$code);
+	}
+	catch (Exception $e) { return Yate::BuildError("exec",null,$e); }
+	return Yate::SetLastError(false);
+    }
+
+    /**
+     * Read file data
+     * @param $path File path
+     * @param $data Destination for read data
+     * @param $lines True to read data as lines, false to read data as string
+     * @return NULL (success) or error description
+     */
+    static function ReadFile($path,&$data,$lines = false)
+    {
+	Yate::SetLastError();
+	try {
+	    if ($lines)
+		$data = file($path);
+	    else
+		$data = file_get_contents($path);
+	    if (false === $data)
+		return Yate::BuildError("file-read",);
+	}
+	catch (Exception $e) { return Yate::BuildError("file-read",null,$e); }
+	return Yate::SetLastError(false);
+    }
+
+    /**
+     * Read file data
+     * @param $path File path
+     * @param $data Data to write
+     * @param $append Append data (default: no, replace file contents)
+     * @param $lck Safe write
+     * @return NULL (success) or error description
+     */
+    static function WriteFile($path,&$data,$append = false,$lck = true)
+    {
+	Yate::SetLastError();
+	try {
+	    $flags = 0;
+	    if ($append)
+		$flags |= FILE_APPEND;
+	    if ($lck)
+		$flags |= LOCK_EX;
+	    $res = file_put_contents($path,$data,$flags);
+	    if (false === $res)
+		return Yate::BuildError("file-write");
+	}
+	catch (Exception $e) { return Yate::BuildError("file-write",null,$e); }
+	return Yate::SetLastError(false);
+    }
+
+    /**
+     * Set or reset last error
+     * @param $prepare Prepare or retrieve
+     * @return Last error if not prepare
+     */
+    static function SetLastError($prepare = true)
+    {
+	global $yate_last_error;
+	if ($prepare) {
+	    $yate_last_error = true;
+	    return;
+	}
+	$e = null;
+	if (isset($yate_last_error) && is_array($yate_last_error))
+	    $e = $yate_last_error;
+	$yate_last_error = null;
+	return $e;
+    }
+
+    /**
+     * Build an error description
+     * @param $oper Failed operation
+     * @param $code Optional code (for failure)
+     * @param $err Error (exception)
+     * @return Error description
+     */
+    static function BuildError($oper,$code = null,&$err = null)
+    {
+	$e = Yate::SetLastError(false);
+	if ($err && method_exists($err,"getMessage")) {
+	    $code = $err->getCode();
+	    $e = $err->getMessage();
+	    $err = array();
+	    if ($e)
+		$err["error"] = $e;
+	    if ($code)
+		$err["failure_code"] = $code;
+	}
+	else if (is_array($e)) {
+	    if (isset($e["errstr"]))
+		$err["error"] = $e["errstr"];
+	    if (isset($e["errno"]))
+		$err["failure_code"] = $e["errno"];
+	}
+	else if ($code)
+	    $err["failure_code"] = $code;
+	else
+	    $err = array();
+	if (!isset($err["reason"]))
+	    $err["reason"] = "failure";
+	return $err;
+    }
+
 }
 
 /* Internal error handler callback - output plain text to stderr */
 function _yate_error_handler($errno, $errstr, $errfile, $errline)
 {
+    global $yate_last_error;
+    if (isset($yate_last_error) && $yate_last_error) {
+	$yate_last_error = array("errno" => $errno, "errstr" => $errstr,
+	    "errfile" => $errfile, "errline" => $errline);
+	return;
+    }
     if (0 === error_reporting())
 	return;
     $str = "[$errno] $errstr in $errfile line $errline\n";
