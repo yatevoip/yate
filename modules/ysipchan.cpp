@@ -1988,22 +1988,20 @@ static void copySipHeaders(NamedList& msg, const SIPMessage& sip, bool filter = 
 }
 
 // Copy headers from Yate message to SIP message
-static void copySipHeaders(SIPMessage& sip, const NamedList& msg, const char* prefix = "osip_")
+static void copySipHeaders(SIPMessage& sip, const NamedList& msg, const char* prefix = "osip_",
+    bool rsp = false)
 {
-    prefix = msg.getValue(YSTRING("osip-prefix"),prefix);
+    prefix = msg.getValue(rsp ? YSTRING("isip-prefix") : YSTRING("osip-prefix"),prefix);
     if (!prefix)
 	return;
-    unsigned int n = msg.length();
-    for (unsigned int i = 0; i < n; i++) {
-	NamedString* str = msg.getParam(i);
-	if (!str)
+    unsigned int n = ::strlen(prefix);
+    for (ObjList* o = msg.paramList()->skipNull(); o; o = o->skipNext()) {
+	NamedString* str = static_cast<NamedString*>(o->get());
+	if (!str->name().startsWith(prefix))
 	    continue;
-	String name(str->name());
-	if (!name.startSkip(prefix,false))
-	    continue;
-	if (name.trimBlanks().null())
-	    continue;
-	sip.addHeader(name,*str);
+	String name(str->name().c_str() + n);
+	if (name.trimBlanks())
+	    sip.addHeader(name,*str);
     }
 }
 
@@ -9128,7 +9126,7 @@ void YateSIPConnection::callRejected(const char* error, const char* reason, cons
 	}
 	else if (msg) {
 	    SIPMessage* m = new SIPMessage(m_tr->initialMessage(),code,reason);
-	    copySipHeaders(*m,*msg);
+	    copySipHeaders(*m,*msg,"isip_",true);
 	    m->setBody(buildSIPBody(const_cast<Message&>(*msg),0,"message-iprefix"));
 	    m_tr->setResponse(m);
 	    m->deref();
