@@ -614,35 +614,51 @@ RegexConfig::RegexConfig(const String& confName)
     m_cfg = confName;
 }
 
+static inline const String& buildTrackName(String& buf, bool track, bool ctx, const char* ctxName)
+{
+    static const Regexp s_ctxRex("^[[:alnum:]._-]+$",true);
+    if (!track)
+	return buf = String::empty();
+    if (ctx && s_ctxRex.matches(ctxName))
+	return buf = __plugin.name() + "/" + ctxName;
+    return buf = __plugin.name();
+}
+
 void RegexConfig::initialize(bool first)
 {
     m_cfg.load();
+    const NamedList* priorities = m_cfg.getSection(YSTRING("priorities"));
+    if (!priorities)
+	priorities = &NamedList::empty();
     NamedList* once = m_cfg.getSection("$once");
-    if (once && (first || m_cfg.getBoolValue("priorities","add_once",true)))
+    if (once && (first || priorities->getBoolValue(YSTRING("add_once"),true)))
 	__plugin.initVars(once,first);
     __plugin.initVars(m_cfg.getSection("$init"));
-    s_prerouteall = m_cfg.getBoolValue("priorities","prerouteall",false);
-    m_extended = m_cfg.getBoolValue("priorities","extended",false);
-    m_insensitive = m_cfg.getBoolValue("priorities","insensitive",false);
-    int depth = m_cfg.getIntValue("priorities","maxdepth",5);
+    s_prerouteall = priorities->getBoolValue(YSTRING("prerouteall"),false);
+    m_extended = priorities->getBoolValue(YSTRING("extended"),false);
+    m_insensitive = priorities->getBoolValue(YSTRING("insensitive"),false);
+    int depth = priorities->getIntValue(YSTRING("maxdepth"),5);
     if (depth < 5)
 	depth = 5;
     else if (depth > 100)
 	depth = 100;
     m_maxDepth = depth;
-    m_defRule = m_cfg.getValue("priorities","defaultrule",DEFAULT_RULE);
+    m_defRule = priorities->getValue(YSTRING("defaultrule"),DEFAULT_RULE);
 
-    const char* trackName = m_cfg.getBoolValue("priorities","trackparam",true) ?
-	__plugin.name().c_str() : (const char*)0;
-    unsigned priority = m_cfg.getIntValue("priorities","preroute",100);
+    String tName;
+    bool trackName = priorities->getBoolValue(YSTRING("trackparam"),true);
+    bool trackCtx = priorities->getBoolValue(YSTRING("trackparam_context"),true);
+    unsigned priority = priorities->getIntValue(YSTRING("preroute"),100);
     if (priority) {
-	CHECK_HANDLER(s_preroute,PrerouteHandler,"call.preroute",priority,trackName);
+	buildTrackName(tName,trackName,trackCtx,"contexts");
+	CHECK_HANDLER(s_preroute,PrerouteHandler,"call.preroute",priority,tName);
     }
     else
 	TelEngine::destruct(s_preroute);
-    priority = m_cfg.getIntValue("priorities","route",100);
+    priority = priorities->getIntValue(YSTRING("route"),100);
     if (priority) {
-	CHECK_HANDLER(s_route,RouteHandler,"call.route",priority,trackName);
+	buildTrackName(tName,trackName,trackCtx,"default");
+	CHECK_HANDLER(s_route,RouteHandler,"call.route",priority,tName);
     }
     else
 	TelEngine::destruct(s_route);
@@ -663,11 +679,12 @@ void RegexConfig::initialize(bool first)
 		    context = n->name().c_str();
 		const char* key = TelEngine::c_str(static_cast<const String*>(o->at(3)));
 		const char* val = TelEngine::c_str(static_cast<const String*>(o->at(4)));
+		buildTrackName(tName,trackName,trackCtx,context);
 		// check if we have the same handler already installed
-		GenericHandler* old = findHandler(GenericHandler::getHash(n->name(),prio,context,match,trackName,key,val));
+		GenericHandler* old = findHandler(GenericHandler::getHash(n->name(),prio,context,match,tName,key,val));
 		if (m_cfg.getSection(context)) {
 		    if (!old)
-			Engine::install(new GenericHandler(n->name(),prio,context,match,trackName,key,val));
+			Engine::install(new GenericHandler(n->name(),prio,context,match,tName,key,val));
 		    else
 			old->updateSerial();
 		}
