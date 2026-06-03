@@ -47,7 +47,7 @@ namespace { // anonymous
 // Default length of the incoming line buffer
 #define DEF_INCOMING_LINE 8192
 // Maximum length of the incoming line buffer
-#define MAX_INCOMING_LINE 65536
+#define MAX_INCOMING_LINE 1048576
 
 // Default maximum messages queued in a receiver
 #define DEF_MAXQUEUE 1000
