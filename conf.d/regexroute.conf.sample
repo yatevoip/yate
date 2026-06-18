@@ -158,17 +158,22 @@
 ; This section allows installing handlers for any message name.
 ; Each line must be of the form:
 ;  message.name=priority[,[paramname][,context][,filter_param][,filter_match]]]
-; For each handler create a corresponding [context] or [message.name] section
-;  in which implement handling for that specific message. If paramname is not
-;  set you will need to match parameters explicitely or set a new match string.
-;  For filters, filter_param is the name of the parameter you want to match.
-;  filter_match is the value that filter_param parameter has to match. It can be
-;  an exact value to match or a regular expression. For regular expressions,
-;  filter_match must start with the character '^'.
+; Parameters:
+;  priority: Handler priority
+;  paramname: Named of parametr for default match
+;  context: Section name. Use maessage name if not set
+;  filter_param: Name of the parameter to match in handled message
+;  filter_match: Value to match (ignored if 'filter_param' is not set)
+;    Handled as regular expression if starting with '^'. An extra '^' is handled at end
+;      to negate matching (handle message if regular expression don't match)
+;    Handled as string (exact match) if not starting with '^'
+; NOTE: filter_param and filter_value are used as handler filter.
+;       Message will not handled if not passing the filter
 ; Examples:
 ;  engine.command=90
 ;  call.execute=120,callto
 ;  call.route=200,called,reroute
+;  call.route=200,called,reroute,caller,^123
 
 
 [contexts]

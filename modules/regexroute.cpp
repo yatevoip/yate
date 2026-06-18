@@ -1175,8 +1175,13 @@ GenericHandler::GenericHandler(const char* name, int prio, const char* context, 
 	(match ? "${" : ""),(match ? match : toString().c_str()),(match ? "}" : ""),
 	TelEngine::c_safe(trackName),TelEngine::c_safe(filterKey),TelEngine::c_safe(filterVal),this);
     if (filterKey && filterVal) {
-	if (filterVal[0] == '^')
-	    setFilter(new NamedPointer(filterKey,new Regexp(filterVal)));
+	if (filterVal[0] == '^') {
+	    String tmp(filterVal);
+	    if (tmp.length() > 1 && tmp[tmp.length() - 1] == '^')
+		setFilter(new MatchingItemRegexp(filterKey,tmp.substr(0,tmp.length() - 1),true));
+	    else
+		setFilter(new NamedPointer(filterKey,new Regexp(filterVal)));
+	}
 	else
 	    setFilter(filterKey,filterVal);
     }
