@@ -1849,7 +1849,7 @@ H323Connection::AnswerCallResponse YateH323Connection::OnAnswerCall(const PStrin
 	m->setParam("context",s);
     s_cfgMutex.unlock();
 
-    m->setParam("callername",caller);
+    m->setParam("callername",(const char *)caller,false);
     s = GetRemotePartyNumber();
     Debug(this,DebugInfo,"GetRemotePartyNumber()='%s'",s);
     m->setParam("caller",s ? s : (const char *)("h323/"+caller));
@@ -2248,7 +2248,7 @@ H323Channel* YateH323Connection::CreateRealTimeLogicalChannel(const H323Capabili
 		Message m("chan.rtp");
 		m.userData(m_chan);
 		lock.drop();
-		m.addParam("localip",externalIpAddress.AsString());
+		m.addParam("localip",(const char*)externalIpAddress.AsString());
 		if (sdir)
 		    m.addParam("direction",sdir);
 		if (Engine::dispatch(m)) {
@@ -2658,9 +2658,9 @@ BOOL YateGatekeeperServer::GetUsersPassword(const PString& alias, PString& passw
 {
     Message m("user.auth");
     m.addParam("protocol","h323");
-    m.addParam("username",alias);
+    m.addParam("username",(const char*)alias);
     m.addParam("endpoint",m_endpoint);
-    m.addParam("gatekeeper",GetGatekeeperIdentifier());
+    m.addParam("gatekeeper",(const char*)GetGatekeeperIdentifier());
     if (!Engine::dispatch(m))
 	return FALSE;
     // as usual empty password means authenticated
@@ -2696,7 +2696,7 @@ H323GatekeeperRequest::Response YateGatekeeperServer::OnRegistration(H323Gatekee
 	    ips << ip.m_ip[0] << "." << ip.m_ip[1] << "." << ip.m_ip[2] << "." << ip.m_ip[3] << ":" << (int)ip.m_port;
 
 	    Message m("user.register");
-	    m.addParam("username",alias);
+	    m.addParam("username",(const char*)alias);
 	    m.addParam("driver","h323");
 	    m.addParam("data",ips);
 	    ips = GetTimeToLive();
@@ -2719,7 +2719,7 @@ H323GatekeeperRequest::Response YateGatekeeperServer::OnUnregistration(H323Gatek
 	    if (alias.IsEmpty())
 		return H323GatekeeperRequest::Reject;
 	    Message m("user.unregister");
-	    m.addParam("username",alias);
+	    m.addParam("username",(const char*)alias);
 	    if (Engine::dispatch(m))
 		return H323GatekeeperRequest::Confirm;
 	}
@@ -2731,7 +2731,7 @@ BOOL YateGatekeeperServer::TranslateAliasAddressToSignalAddress(const H225_Alias
 {
     PString aliasString = H323GetAliasAddressString(alias);
     Message m("call.route");
-    m.addParam("called",aliasString);
+    m.addParam("called",(const char*)aliasString);
     Engine::dispatch(m);
     String s = m.retValue();
     if (s) {
