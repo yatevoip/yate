@@ -459,9 +459,9 @@ bool ISDNQ931IEData::processCalledNo(ISDNQ931Message* msg, bool add,
     if (add) {
 	ISDNQ931IE* ie = new ISDNQ931IE(ISDNQ931IE::CalledNo);
 	ie->addParam("number",m_calledNo);
-	if (!m_callerType.null())
+	if (!m_calledType.null())
 	    ie->addParam("type",m_calledType);
-	if (!m_callerPlan.null())
+	if (!m_calledPlan.null())
 	    ie->addParam("plan",m_calledPlan);
 	msg->appendSafe(ie);
 	return true;
@@ -1297,6 +1297,7 @@ SignallingEvent* ISDNQ931Call::processMsgSetup(ISDNQ931Message* msg)
     msg->params().setParam("callednumtype",m_data.m_calledType);
     msg->params().setParam("callednumplan",m_data.m_calledPlan);
     msg->params().setParam("overlapped",String::boolText(m_overlap));
+    msg->params().setParam("transfer-cap",m_data.m_transferCapability);
     return new SignallingEvent(SignallingEvent::NewCall,msg,this);
 }
 
@@ -1470,6 +1471,8 @@ bool ISDNQ931Call::sendAlerting(SignallingMessage* sigMsg)
 		return sendReleaseComplete("congestion");
 	    }
 	}
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true,&q931()->parserData());
 	m_channelIDSent = true;
     }
@@ -1490,6 +1493,8 @@ bool ISDNQ931Call::sendCallProceeding(SignallingMessage* sigMsg)
 	m_rspBearerCaps = false;
     }
     if (!m_channelIDSent) {
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true);
 	m_channelIDSent = true;
     }
@@ -1518,6 +1523,8 @@ bool ISDNQ931Call::sendConnect(SignallingMessage* sigMsg)
 	    m_data.m_channelByNumber = true;
 	    m_data.m_channelSelect = lookup(m_circuit->code(),Q931Parser::s_dict_channelIDSelect_BRI);
 	}
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true,&q931()->parserData());
 	m_channelIDSent = true;
     }
@@ -1655,7 +1662,7 @@ bool ISDNQ931Call::sendSetup(SignallingMessage* sigMsg)
 	if (q931()->parserData().flag(ISDNQ931::ForceSendComplete))
 	    msg->appendSafe(new ISDNQ931IE(ISDNQ931IE::SendComplete));
 	// BearerCaps
-	m_data.m_transferCapability = "speech";
+	m_data.m_transferCapability = sigMsg->params().getValue(YSTRING("transfer-cap"), "speech");
 	m_data.m_transferMode = "circuit";
 	m_data.m_transferRate = "64kbit";
 	m_data.m_format = sigMsg->params().getValue(YSTRING("format"),q931()->format());
@@ -1741,13 +1748,15 @@ bool ISDNQ931Call::sendSetupAck()
     ISDNQ931Message* msg = new ISDNQ931Message(ISDNQ931Message::SetupAck,this);
     if (!m_channelIDSent) {
 	m_data.m_channelType = "B";
-	if (m_circuit)
+	if (m_data.m_bri && m_circuit)
 	    m_data.m_channelSelect = lookup(m_circuit->code(),Q931Parser::s_dict_channelIDSelect_BRI);
 	if (!m_data.m_channelSelect) {
 	    Debug(q931(),DebugNote,"Call(%u,%u). No voice channel available [%p]",
 		Q931_CALL_ID,this);
 	    return sendReleaseComplete("congestion");
 	}
+	if (q931()->network())
+	    m_data.m_channelMandatory = true;
 	m_data.processChannelID(msg,true,&q931()->parserData());
 	m_channelIDSent = true;
     }
