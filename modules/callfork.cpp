@@ -331,6 +331,8 @@ bool ForkMaster::forkSlave(String* dest)
 	    Debug(this,DebugAll,"Call '%s' target '%s' slave '%s' execute succeeded with no peer [%p]",
 		getPeerId().c_str(),dest->c_str(),tmp.c_str(),this);
 	ok = false;
+	// error propagation via lostMaster() does not work in this case. No channel was created, hence no messages are created
+	m_exec->setParam("error", error);
 	slave->lostMaster(error);
     }
     slave->deref();
@@ -417,6 +419,7 @@ bool ForkMaster::startCalling(Message& msg)
     if (m_mediaForce)
 	m_media = m_mediaParams;
     if (!callContinue()) {
+	Debug(&__plugin,DebugNote,"Fork '%s' startCalling() failed. No successful peers", id().c_str());
 	const char* err = m_exec->getValue("reason");
 	if (err)
 	    msg.setParam("reason",err);
@@ -483,8 +486,30 @@ bool ForkMaster::callContinue()
 			getPeerId().c_str(),dest->c_str(),this);
 	    }
 	    dest->destruct();
-	    if (forks)
-		break;
+	    if (forks) {
+		unsigned int regulars = 0;
+		unsigned int auxiliars = 0;
+		unsigned int persistents = 0;
+		for (ObjList* l = m_slaves.skipNull(); l; l = l->skipNext()) {
+		    switch (static_cast<const ForkSlave*>(l->get())->type()) {
+			case ForkSlave::Auxiliar:
+			    auxiliars++;
+			    break;
+			case ForkSlave::Persistent:
+			    persistents++;
+			    break;
+			default:
+			    regulars++;
+			    break;
+		    }
+		}
+		if (regulars > 0) {
+		    break;
+		} else {
+		    clear(true);
+		    forks = persistents;
+		}
+	    }
 	    m_timer = 0;
 	    m_timerDrop = false;
 	    continue;
