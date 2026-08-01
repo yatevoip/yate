@@ -6649,6 +6649,10 @@ YateSIPConnection::YateSIPConnection(SIPEvent* ev, SIPTransaction* tr)
 {
     m_ipv6 = s_ipv6;
     setSdpDebug(this,this,m_traceId);
+    // Incoming legs always accept/negotiate SRTP if the caller offers it,
+    // independent of the global [general] secure= default and of whichever
+    // transport (UDP/TCP/TLS) the caller's leg actually used.
+    m_secure = true;
     TraceDebug(m_traceId,this,DebugAll,"YateSIPConnection::YateSIPConnection(%p,%p) [%p]",ev,tr,this);
     setReason();
     m_tr->ref();
@@ -6889,7 +6893,6 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     }
     s_globalMutex.unlock();
     m_honorDtmfDetect = msg.getBoolValue(YSTRING("ohonor_dtmf_detect"),m_honorDtmfDetect);
-    m_secure = msg.getBoolValue(YSTRING("secure"),plugin.parser().secure());
     setRfc2833(msg,true);
     updateRtpForward(msg);
     m_gpmd = msg.getBoolValue(YSTRING("forward_gpmd"),m_gpmd);
@@ -6916,6 +6919,16 @@ YateSIPConnection::YateSIPConnection(Message& msg, const String& uri, const char
     m_uri = tmp;
     m_uri.parse();
     sips(m_uri.getProtocol() == YSTRING("sips"));
+    // SIPS destinations imply SRTP unless a call explicitly overrides it
+    m_secure = msg.getBoolValue(YSTRING("secure"),sips() || plugin.parser().secure());
+    if (m_secure)
+	// "transport"/"transport_*" may already be set here, carried over from
+	// the OTHER (unrelated) leg's already-negotiated media -- e.g. a plain
+	// incoming call whose media params get handed onto this same message.
+	// Clear them so SDPSession::updateSDP's own m_secure-based default
+	// (RTP/SAVP) actually applies to THIS leg, instead of silently reusing
+	// whatever transport the other leg happened to use.
+	msg.clearParam(YSTRING("transport"),'_');
     if (!setParty(msg,false,"o",m_uri.getHost(),m_uri.getPort(),true) && line) {
 	SIPParty* party = line->party();
 	setParty(party);
@@ -8637,7 +8650,7 @@ bool YateSIPConnection::msgAnswered(Message& msg)
 		String fmts;
 		plugin.parser().getAudioFormats(fmts);
 		ObjList* lst = new ObjList;
-		lst->append(new SDPMedia("audio","RTP/AVP",msg.getValue(YSTRING("formats"),fmts)));
+		lst->append(new SDPMedia("audio",m_secure ? "RTP/SAVP" : "RTP/AVP",msg.getValue(YSTRING("formats"),fmts)));
 		setMedia(lst);
 		m_rtpAddr = m_host;
 	    }

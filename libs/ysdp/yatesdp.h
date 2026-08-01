@@ -829,10 +829,12 @@ public:
      * @param oldList Optional existing media list (found media will be removed
      *  from it and added to the returned list
      * @param allowEmptyAddr Allow empty address in parameters (default: false)
+     * @param secure Default the media transport to RTP/SAVP instead of RTP/AVP
+     *  when no explicit "transport" parameter is present (default: false)
      * @return List of media or 0 if not found or rtpAddr is empty
      */
     static ObjList* updateRtpSDP(const NamedList& params, String& rtpAddr,
-	ObjList* oldList = 0, bool allowEmptyAddr = false);
+	ObjList* oldList = 0, bool allowEmptyAddr = false, bool secure = false);
 
 protected:
     /**
