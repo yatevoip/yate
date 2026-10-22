@@ -274,7 +274,7 @@ bool SDPSession::updateSDP(const NamedList& params, bool defaults)
 	    fmts = defFormats;
 	if (fmts.null())
 	    continue;
-	String trans = params.getValue("transport" + tmp,"RTP/AVP");
+	String trans = params.getValue("transport" + tmp,m_secure ? "RTP/SAVP" : "RTP/AVP");
 	String crypto;
 	if (m_secure)
 	    crypto = params.getValue("crypto" + tmp);
@@ -318,7 +318,7 @@ bool SDPSession::updateSDP(const NamedList& params, bool defaults)
     }
     if (defaults && !lst) {
 	lst = new ObjList;
-	lst->append(new SDPMedia("audio","RTP/AVP",params.getValue("formats",defFormats)));
+	lst->append(new SDPMedia("audio",m_secure ? "RTP/SAVP" : "RTP/AVP",params.getValue("formats",defFormats)));
     }
     return setMedia(lst);
 }
@@ -330,7 +330,7 @@ bool SDPSession::updateRtpSDP(const NamedList& params)
 {
     DDebug(m_enabler,DebugAll,"SDPSession::updateRtpSDP(%s) [%p]",params.c_str(),m_ptr);
     String addr;
-    ObjList* tmp = updateRtpSDP(params,addr,m_rtpMedia);
+    ObjList* tmp = updateRtpSDP(params,addr,m_rtpMedia,false,m_secure);
     if (tmp) {
 	updateSessionParams(params);
 	bool chg = (m_rtpLocalAddr != addr);
@@ -628,7 +628,7 @@ MimeSdpBody* SDPSession::createSDP(const char* addr, ObjList* mediaList)
 	}
 	if (addr && m->localCrypto()) {
 	    sdp->addLine("a","crypto:" + m->localCrypto());
-	    if (!enc)
+	    if (!enc && m->transport() != YSTRING("RTP/SAVP"))
 		sdp->addLine("a","encryption:optional");
 	}
 	if (!addedDir) {
@@ -710,7 +710,7 @@ MimeSdpBody* SDPSession::createPasstroughSDP(int loc, NamedList& msg, bool updat
 	}
 	updateSessionParams(msg);
 	String addr;
-	ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr);
+	ObjList* lst = updateRtpSDP(msg,addr,update ? m_rtpMedia : 0,allowEmptyAddr,m_secure);
 	if (!lst)
 	    break;
 	if (create)
@@ -987,10 +987,10 @@ void SDPSession::setLocalRtpChanged(bool chg)
 
 // Update RTP/SDP data from parameters
 ObjList* SDPSession::updateRtpSDP(const NamedList& params, String& rtpAddr, ObjList* oldList,
-    bool allowEmptyAddr)
+    bool allowEmptyAddr, bool secure)
 {
-    XDebug(DebugAll,"SDPSession::updateRtpSDP(%s,%s,%p,%u)",
-	params.c_str(),rtpAddr.c_str(),oldList,allowEmptyAddr);
+    XDebug(DebugAll,"SDPSession::updateRtpSDP(%s,%s,%p,%u,%u)",
+	params.c_str(),rtpAddr.c_str(),oldList,allowEmptyAddr,secure);
     rtpAddr = params.getValue("rtp_addr");
     if (!(rtpAddr || allowEmptyAddr))
 	return 0;
@@ -1018,7 +1018,7 @@ ObjList* SDPSession::updateRtpSDP(const NamedList& params, String& rtpAddr, ObjL
 	const char* fmts = params.getValue("formats" + tmp);
 	if (!fmts)
 	    continue;
-	String trans = params.getValue("transport" + tmp,"RTP/AVP");
+	String trans = params.getValue("transport" + tmp,secure ? "RTP/SAVP" : "RTP/AVP");
 	if (audio)
 	    tmp = "audio";
 	else
