@@ -68,6 +68,25 @@ static inline ObjList* listAddSubParams(ObjList& list, const NamedList& src,
     return dest;
 }
 
+static inline void nlCreateParam(NamedList& list, const String& name,
+    const char* value, int vLen = -1, const char* addPrefix = 0)
+{
+    ObjList* o = list.paramList()->skipNull();
+    while (o) {
+	if (name == static_cast<NamedString*>(o->get())->name())
+	    return;
+	ObjList* next = o->skipNext();
+	if (!next)
+	    break;
+	o = next;
+    }
+    NamedString* ns = new NamedString(name,value,vLen,addPrefix);
+    if (o)
+	o->append(ns);
+    else
+	list.addParam(ns);
+}
+
 
 static const NamedList s_empty("");
 
@@ -266,6 +285,13 @@ NamedString& NamedList::setParamRet(const String& name, const char* value, bool 
     return *ns;
 }
 
+NamedList& NamedList::createParam(const String& name, const char* value)
+{
+    XDebug(DebugAll,"NamedList::createParam(%s,%s) [%p]",name.safe(),TelEngine::c_safe(value),this);
+    nlCreateParam(*this,name,value);
+    return *this;
+}
+
 NamedList& NamedList::clearParam(const String& name, char childSep, const String* value)
 {
     XDebug(DebugInfo,"NamedList::clearParam(\"%s\",'%.1s',(%p)'%s')",
@@ -461,6 +487,19 @@ NamedList& NamedList::copySubParams(const NamedList& original, const String& pre
     }
     return *this;
 }
+
+NamedList& NamedList::copyParamsMissing(const NamedList& original, const char* addPrefix)
+{
+    XDebug(DebugInfo,"NamedList::copyMissingParams(%p,%s) [%p]",
+	&original,TelEngine::c_safe(addPrefix),this);
+    if (addPrefix && !*addPrefix)
+	addPrefix = 0;
+    for (const ObjList* l = original.m_params.skipNull(); l; l = l->skipNext()) {
+	const NamedString* p = static_cast<const NamedString*>(l->get());
+	nlCreateParam(*this,p->name(),*p,p->length(),addPrefix);
+    }
+    return *this;
+};
 
 bool NamedList::hasSubParams(const char* prefix) const
 {

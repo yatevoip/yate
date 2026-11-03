@@ -8945,6 +8945,14 @@ public:
     NamedString& setParamRet(const String& name, const char* value = 0, bool clearOther = false);
 
     /**
+     * Create parameter. Add if missing, do nothing if present
+     * @param name Parameter name
+     * @param value Parameter value
+     * @return Reference to this NamedList
+     */
+    NamedList& createParam(const String& name, const char* value = 0);
+
+    /**
      * Clears all instances of a named string in the parameter list.
      * @param name Name of the string to remove
      * @param childSep If set clears all child parameters in format name+childSep+anything
@@ -9032,6 +9040,14 @@ public:
      */
     NamedList& copySubParams(const NamedList& original, const String& prefix,
 	bool skipPrefix = true, bool replace = false);
+
+    /**
+     * Copy all parameters from another NamedList not found in our list
+     * @param original NamedList to copy the parameters from
+     * @param addPrefix Optional prefix to be added to parameter name
+     * @return Reference to this NamedList
+     */
+    NamedList& copyParamsMissing(const NamedList& original, const char* addPrefix = 0);
 
     /**
      * Check if we have a parameter that starts with prefix
