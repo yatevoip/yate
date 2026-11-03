@@ -285,6 +285,8 @@ static void evalFunc(String& str, Message& msg)
 	    str = vars(par).toLower();
 	else if (str == YSTRING("chr"))
 	    str = static_cast<char>(0xff & vars(par).toInteger());
+	else if (str == YSTRING("hash"))
+	    str = vars(par).hash();
 	else if ((sep >= 0) && ((str == YSTRING("streq")) || (str == YSTRING("strne")))) {
 	    bool ret = (str == YSTRING("strne"));
 	    str = par.substr(sep+1);
@@ -1245,13 +1247,10 @@ void RegexRoutePlugin::initVars(NamedList* sect, bool replace)
     if (!sect)
 	return;
     Lock l(s_varsMtx); // we want all set at the same time
-    for (ObjList* o = sect->paramList()->skipNull(); o; o = o->skipNext()) {
-	NamedString* n = static_cast<NamedString*>(o->get());
-	if (replace)
-	    s_vars.setParam(n->name(),*n);
-	else if (!s_vars.getParam(n->name()))
-	    s_vars.addParam(n->name(),*n);
-    }
+    if (replace)
+	s_vars.copyParams(true,*sect);
+    else
+	s_vars.copyParamsMissing(*sect);
 }
 
 void RegexRoutePlugin::initialize()

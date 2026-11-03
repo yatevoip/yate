@@ -30,6 +30,7 @@
 ;  $(lower,STRING) = STRING converted to lower case
 ;  $(chr,N) = character with numeric code N
 ;  $(hex,N[,LEN[,SEP]]) = little endian hexadecimal value of N with space or SEP between octets
+;  $(hash,STRING) = STRING hash value
 ;  $(add,VAL1,VAL2[,LEN]) = VAL1+VAL2 left filled to LEN or length of VAL1
 ;  $(sub,VAL1,VAL2[,LEN]) = VAL1-VAL2 left filled to LEN or length of VAL1
 ;  $(mul,VAL1,VAL2[,LEN]) = VAL1*VAL2 left filled to LEN or length of VAL1
