@@ -4041,10 +4041,12 @@ bool JsEngine::setEvent(ObjList& stack, const ExpOperation& oper, GenObject* con
 	}
 	if (!type || type == JsEvent::EvTime)
 	    return false;
-	// We can notify reinit to tracked scripts only
-	ScriptInfo* si = ScriptInfo::get(context);
-	if (!(si && (si->type() == ScriptInfo::Static || si->type() == ScriptInfo::Dynamic)))
-	    return ExpOperation::push(stack,false);
+	if (type == JsEvent::EvReInit) {
+	    // We can notify reinit to tracked scripts only
+	    ScriptInfo* si = ScriptInfo::get(context);
+	    if (!(si && (si->type() == ScriptInfo::Static || si->type() == ScriptInfo::Dynamic)))
+		return ExpOperation::push(stack,false);
+	}
     }
     if (!contextActive(context))
 	return ExpOperation::push(stack,false);
@@ -7781,6 +7783,11 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
     const NamedList* params, uint64_t flags, String* error, bool allowObjValue,
     const String& type)
 {
+    if (name) {
+	ExpOperation* op = YOBJECT(ExpOperation,name);
+	if (op && JsParser::isMissing(*op))
+	    name = 0;
+    }
     const char* n = TelEngine::c_safe(name);
     bool negated = params && params->getBoolValue(YSTRING("negated"));
     int missingMatch = params ? lookup((*params)[YSTRING("missing")],
@@ -7788,7 +7795,7 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
     const char* id = params ? params->getValue(YSTRING("id")) : 0;
     JsObject* jso = YOBJECT(JsObject,value);
 #if 0
-    String t;
+    String t, extra;
     if (jso) {
 	if (YOBJECT(JsArray,jso))
 	    t = " array";
@@ -7799,9 +7806,16 @@ MatchingItemBase* JsMatchingItem::buildItem(GenObject* value, const String* name
 	else
 	    t << " object";
     }
+    extra.printf(" type=%s",type.safe());
+    extra.printfAppend(" flags=0x" FMT64x,flags);
+    if (flags) {
+	String tmpFlags;
+	if (tmpFlags.decodeFlags(flags,MatchingItemLoad::loadFlags()))
+	    extra.printfAppend("(%s)",tmpFlags.safe());
+    }
+    //if (params) { extra << " PARAMS: "; params->dump(extra," ",'\''); }
     Debugger dbg(DebugTest,"JsMatchingItem::buildItem"," value=(%p)%s"
-	" name=%s allowObjValue=%u type=%s",
-	value,t.safe(),n,allowObjValue,type.safe());
+	" name=%s allowObjValue=%u%s",value,t.safe(),n,allowObjValue,extra.safe());
 #endif
     MatchingItemBase* ret = 0;
     while (true) {
