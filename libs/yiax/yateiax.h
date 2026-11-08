@@ -158,6 +158,7 @@ public:
         CALLTOKEN = 0x36,        // BIN
         CAPABILITY2 = 0x37,      // BIN		1 byte version + array
         FORMAT2 = 0x38,          // BIN		1 byte version + array
+        CALLINGANI2 = 0x39,      // DW
     };
 
     /**
