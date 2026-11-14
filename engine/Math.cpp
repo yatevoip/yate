@@ -29,11 +29,7 @@ using namespace TelEngine;
 	Debug(DebugFail,"BitVector::%s contains non 0/1 value [%p]",meth,this); \
 }
 #else
-#ifdef _WINDOWS
-#define YBITVECTOR_VALID do { break; } while
-#else
 #define YBITVECTOR_VALID(meth,offs,len)
-#endif
 #endif
 
 

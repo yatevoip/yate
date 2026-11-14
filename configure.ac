@@ -20,11 +20,9 @@ PACKAGE_VERSION_MAJOR="${PACKAGE_VERSION%%.*}"
 PACKAGE_VERSION_MINOR="${PACKAGE_VERSION#*.}"
 PACKAGE_VERSION_MINOR="${PACKAGE_VERSION_MINOR%.*}"
 PACKAGE_VERSION_BUILD="${PACKAGE_VERSION##*.}"
-PACKAGE_VERSION_RELEASE="$((0+${PACKAGE_RELEASE}))"
 AC_SUBST(PACKAGE_VERSION_MAJOR)
 AC_SUBST(PACKAGE_VERSION_MINOR)
 AC_SUBST(PACKAGE_VERSION_BUILD)
-AC_SUBST(PACKAGE_VERSION_RELEASE)
 AC_SUBST(PACKAGE_RELEASE)
 AC_SUBST(PACKAGE_STATUS)
 AC_SUBST(PACKAGE_REVISION)
@@ -75,16 +73,6 @@ AC_SUBST(ARCHLIB)
 AC_PROG_CXX
 AC_PROG_CC
 AC_PROG_AWK
-
-AC_MSG_CHECKING([for sed command to use])
-# sed expression to convert version into something comparable lexicographically
-csed='sed'
-vsed='s/\(^\|\.\)\([[0-9]]\)\($\|\.\)/\10\2\3/g'
-if [[ -n "`echo a | sed 's/a\|b//'`" ]]; then
-    csed='sed -E'
-    vsed='s/(^|\.)([[0-9]])($|\.)/\10\2\3/g'
-fi
-AC_MSG_RESULT([$csed])
 
 AC_C_BIGENDIAN([CFLAGS="$CFLAGS -DBIGENDIAN"])
 
@@ -1346,144 +1334,6 @@ AC_SUBST(SPANDSP_INC)
 AC_SUBST(SPANDSP_LIB)
 
 
-HAVE_PWLIB=no
-PWLIB_RTTI=none
-PWLIB_INC=""
-PWLIB_LIB=""
-PWLIB_RUN=""
-AC_ARG_WITH(pwlib,AC_HELP_STRING([--with-pwlib=DIR],[use Pwlib from DIR (default /usr)]),[ac_cv_use_pwlib=$withval],[ac_cv_use_pwlib=/usr])
-
-if [[ "x$ac_cv_use_pwlib" != "xno" ]]; then
-if [[ "x$ac_cv_use_pwlib" = "x/usr" -a ! -f "$ac_cv_use_pwlib/include/ptlib.h" ]]; then
-    ac_cv_use_pwlib="$ac_cv_use_pwlib/local"
-fi
-AC_MSG_CHECKING([for Pwlib in $ac_cv_use_pwlib])
-local_lib="$ARCHLIB"
-ptconfig="$ac_cv_use_pwlib/bin/ptlib-config"
-test -x "$ptconfig" || ptconfig="$ac_cv_use_pwlib/make/ptlib-config"
-test -x "$ptconfig" || ptconfig="$ac_cv_use_pwlib/share/ptlib/make/ptlib-config"
-verpw=`$ptconfig --version 2>/dev/null`
-prtti=`$ptconfig --ccflags 2>/dev/null | sed -n 's/^.*\(-f[[^ ]]*rtti\).*$/\1/p'`
-# try first installed directory
-incpw="$ac_cv_use_pwlib/include/ptlib.h"
-libpw="$ac_cv_use_pwlib/$local_lib/libpt.so"
-if [[ "x$local_lib" != "xlib" -a ! -f "$libpw" ]]; then
-    local_lib="lib"
-    libpw="$ac_cv_use_pwlib/$local_lib/libpt.so"
-fi
-if [[ "x$verpw" = "x" ]]; then
-    verpw=`cat "$ac_cv_use_pwlib/include/ptbuildopts.h" 2>/dev/null | sed -n 's/^.*PWLIB_VERSION "\([[^"]]*\)".*$/\1/p'`
-fi
-vpw=`echo "$verpw" | $csed "$vsed" | $csed "$vsed"`
-flgpw=""
-PWLIB_INC="-I$ac_cv_use_pwlib/include" # Base dir, ok for ptlib
-if [[ "$vpw" '<' "02.00.00" ]]; then
-    # Pwlib-1.xm no ptlib (2.x) install into ptlib
-    PWLIB_INC="$PWLIB_INC/ptlib"
-    if [[ "$vpw" '<' "01.06.00" ]]; then
-        # Very old pwlib needs more includes.
-        PWLIB_INC="$PWLIB_INC/unix/ptlib $PWLIB_INC/unix $PWLIB_INC"
-        flgpw="-DPHAS_TEMPLATES -D_REENTRANT -DP_HAS_SEMAPHORES"
-    fi
-fi
-if [[ "x$flgpw" = "x" ]]; then
-    flgpw="`$ptconfig --ccflags 2>/dev/null`"
-    if [[ "x$flgpw" = "x" ]]; then
-	# Last resort, minimal guess
-	flgpw="-D_REENTRANT"
-    fi
-fi
-PWLIB_INC="$PWLIB_INC $flgpw"
-
-if [[ -f "$incpw" -a -f "$libpw" ]]; then
-    HAVE_PWLIB=installed
-    PWLIB_LIB="-L$ac_cv_use_pwlib/$local_lib -lpt"
-    case "x$prtti" in
-	x-frtti)
-	    PWLIB_RTTI=yes
-	    ;;
-	x-fno-rtti)
-	    PWLIB_RTTI=no
-	    ;;
-    esac
-else
-# try source directory style
-    libpw=`echo "$ac_cv_use_pwlib/lib/"libpt*r.so`
-    test -f "$libpw" || libpw=`echo "$ac_cv_use_pwlib/"lib*/libpt.so`
-    if [[ -f "$incpw" -a -f "$libpw" ]]; then
-	prtti=`"$ptconfig" --ccflags 2>/dev/null | sed -n 's/^.*\(-f[[^ ]]*rtti\).*$/\1/p'`
-        HAVE_PWLIB=sources
-	if [[ "$vpw" '<' "02.00.00" ]]; then
-	    PWLIB_INC="-I$ac_cv_use_pwlib/include $PWLIB_INC"
-	fi
-        PWLIB_LIB=`echo "$libpw"|sed 's,^\(.*\)/lib,-L\1 -l,; s,\.so$,,'`
-        PWLIB_RUN=":"`echo "$libpw"|sed 's,/[[^/]]*$,,'`
-	case "x$prtti" in
-	    x-frtti)
-		PWLIB_RTTI=yes
-		;;
-	    x-fno-rtti)
-		PWLIB_RTTI=no
-		;;
-	esac
-    fi
-fi
-AC_MSG_RESULT([$HAVE_PWLIB $verpw RTTI: $PWLIB_RTTI])
-fi
-
-
-HAVE_H323=no
-H323_INC=""
-H323_LIB=""
-H323_RUN=""
-AC_ARG_WITH(openh323,AC_HELP_STRING([--with-openh323=DIR],[use OpenH323 from DIR (default /usr)]),[ac_cv_use_openh323=$withval],[ac_cv_use_openh323=/usr])
-
-if [[ "x$HAVE_PWLIB" != "xno" -a "x$ac_cv_use_openh323" != "xno" ]]; then
-if [[ "x$ac_cv_use_openh323" = "x/usr" -a ! -f "$ac_cv_use_openh323/include/openh323/h323.h" ]]; then
-    ac_cv_use_openh323="$ac_cv_use_openh323/local"
-fi
-AC_MSG_CHECKING([for OpenH323 in $ac_cv_use_openh323])
-local_lib="$ARCHLIB"
-# try first installed directory
-ver323=""
-inc323="$ac_cv_use_openh323/include/openh323/h323.h"
-lib323="$ac_cv_use_openh323/$local_lib/libopenh323.so"
-if [[ "x$local_lib" != "xlib" -a ! -f "$lib323" ]]; then
-    local_lib="lib"
-    lib323="$ac_cv_use_openh323/$local_lib/libopenh323.so"
-fi
-if [[ -f "$inc323" -a -f "$lib323" ]]; then
-    ver323=`sed -n 's/^.*OPENH323_VERSION.*"\([[^"]]\+\)".*$/\1/p' "$ac_cv_use_openh323/include/openh323/openh323buildopts.h" 2>/dev/null`
-    HAVE_H323=installed
-    H323_INC="-I$ac_cv_use_openh323/include/openh323"
-    H323_LIB="-L$ac_cv_use_openh323/$local_lib -lopenh323"
-else
-# try source directory style
-    inc323="$ac_cv_use_openh323/include/h323.h"
-    lib323=`echo "$ac_cv_use_openh323/lib/"libh323*r.so`
-    test -f "$lib323" || lib323=`echo "$ac_cv_use_openh323/lib/"libh323*_.so`
-    if [[ -f "$inc323" -a -f "$lib323" ]]; then
-	ver323=`sed -n 's/^.*OPENH323_VERSION.*"\([[^"]]\+\)".*$/\1/p' "$ac_cv_use_openh323/include/openh323buildopts.h" 2>/dev/null`
-        HAVE_H323=sources
-        H323_INC="-I$ac_cv_use_openh323/include"
-        H323_LIB="-L$ac_cv_use_openh323/lib -l`echo "$lib323"|sed 's,^.*/lib,,; s,\.so$,,'`"
-        H323_RUN=":$ac_cv_use_openh323/lib"
-    fi
-fi
-AC_MSG_RESULT([$HAVE_H323 $ver323])
-fi
-
-if [[ "x$HAVE_H323" != "xno" ]]; then
-    H323_INC="$PWLIB_INC $H323_INC"
-    H323_LIB="$H323_LIB $PWLIB_LIB"
-    H323_RUN="$PWLIB_RUN$H323_RUN"
-fi
-AC_SUBST(HAVE_H323)
-AC_SUBST(H323_INC)
-AC_SUBST(H323_LIB)
-AC_SUBST(H323_RUN)
-
-
 HAVE_OPENSSL=no
 OPENSSL_INC=""
 OPENSSL_LIB=""
@@ -1623,107 +1473,6 @@ AC_SUBST(LIBUSB_INC)
 AC_SUBST(LIBUSB_LIB)
 
 
-HAVE_QT4=no
-QT4_INC=""
-QT4_LIB=""
-QT4_INC_NET=""
-QT4_LIB_NET=""
-QT4_MOC=""
-QT4_VER=""
-QT4_STATIC_MODULES=""
-AC_ARG_WITH(libqt4,AC_HELP_STRING([--with-libqt4],[use Qt for graphical clients (default)]),[ac_cv_use_libqt4=$withval],[ac_cv_use_libqt4=yes])
-AC_ARG_WITH(qtstatic,AC_HELP_STRING([--with-qtstatic=MODULES],[link specific modules with static Qt]),[ac_cv_use_qtstatic=$withval],[ac_cv_use_qtstatic=no])
-qtstatic=""
-if [[ "x$ac_cv_use_qtstatic" != "xno" ]]; then
-    qtstatic="--static"
-fi
-QT4_STATIC_MODULES=`echo "$ac_cv_use_qtstatic" | sed 's/,/ /g'`
-if [[ "x$ac_cv_use_libqt4" = "xyes" ]]; then
-    AC_MSG_CHECKING([for Qt4 >= 4.3.0 using pkg-config])
-    pkgd="/usr/lib/qt4/$ARCHLIB/pkgconfig"
-    verqt=`(pkg-config --modversion QtCore) 2>/dev/null`
-    if [[ -z "$verqt" -a -d "$pkgd" ]]; then
-	export PKG_CONFIG_LIBDIR="$pkgd"
-	verqt=`(pkg-config --modversion QtCore) 2>/dev/null`
-    fi
-    incqt=`(pkg-config --cflags QtNetwork QtGui QtXml QtCore) 2>/dev/null | sed 's/QtNetwork/QtUiTools/'`
-    libqt=`(pkg-config --libs $qtstatic QtNetwork QtGui QtXml QtCore) 2>/dev/null | sed 's/QtNetwork/QtUiTools/'`
-    if [[ "x$incqt" != "x" -a "x$libqt" != "x" ]]; then
-	HAVE_QT4=yes
-	QT4_INC="$incqt"
-	QT4_LIB="$libqt"
-	QT4_INC_NET=`(pkg-config --cflags QtNetwork) 2>/dev/null | grep -o '[[^ ]]*QtNetwork[[^ ]]*'`
-	QT4_LIB_NET=`(pkg-config --libs QtNetwork) 2>/dev/null | grep -o '[[^ ]]*QtNetwork[[^ ]]*'`
-	QT4_MOC=`echo "$incqt" | sed -n 's,^.*-I\([[^ ]]\+\)/include .*$,\1/bin/moc,p'`
-	test -z "$QT4_MOC" && QT4_MOC=`(which moc-qt4) 2>/dev/null`
-	test -z "$QT4_MOC" && QT4_MOC="moc"
-	QT4_VER=`echo "$verqt" | $csed "$vsed" | $csed "$vsed" | sed 's/\(..\)\.\(..\)\.\(..\)/\1\2\3/'`
-	ac_cv_use_libqt="no"
-	if [[ 1$QT4_VER -lt 1040300 ]]; then
-	    HAVE_QT4=no
-	    verqt="too old ($verqt)"
-	fi
-    else
-	verqt="no"
-    fi
-    unset PKG_CONFIG_LIBDIR
-    AC_MSG_RESULT([$verqt])
-
-    if [[ "x$HAVE_QT4" = "xno" ]]; then
-	AC_MSG_CHECKING([for Qt4 >= 4.3.0 using qmake])
-	incqt=`(qmake -query QT_INSTALL_HEADERS) 2>/dev/null`
-	libqt=`(qmake -query QT_INSTALL_LIBS) 2>/dev/null`
-	if [[ "x$incqt" = "x**Unknown**" -o "x$libqt" = "x**Unknown**" ]]; then
-	    incqt=""
-	    libqt=""
-	fi
-	if [[ "x$incqt" != "x" -a "x$libqt" != "x" ]]; then
-	    HAVE_QT4=yes
-	    QT4_INC="-I$incqt -I$incqt/QtUiTools -I$incqt/QtGui -I$incqt/QtXml -I$incqt/QtCore"
-	    case "$uname_os" in
-		*Darwin)
-		    QT4_INC="-D__USE_WS_X11__ $QT4_INC"
-		    ;;
-	    esac
-	    QT4_LIB="-L$libqt -lQtUiTools -lQtGui -lQtXml -lQtCore"
-	    QT4_INC_NET="-I$incqt/QtNetwork"
-	    QT4_LIB_NET="-L$libqt -lQtNetwork"
-	    case "$uname_os" in
-		*Darwin)
-		    framework=`(ls "$libqt" | grep QtGui.framework) 2>/dev/null`
-		    if [[ "x$framework" != "x" ]]; then
-			QT4_INC="-I$incqt  -I$incqt/QtUiTools -I$libqt/QtGui.framework/Headers -I$libqt/QtXml.framework/Headers -I$libqt/QtCore.framework/Headers"
-			QT4_LIB="-L$libqt -F$libqt -lQtUiTools -framework QtGui -framework QtXml -framework QtCore"
-			QT4_INC_NET="-I$libqt/QtNetwork.framework/Headers"
-			QT4_LIB_NET="-framework QtNetwork"
-		    fi
-		    ;;
-	    esac
-	    QT4_MOC=`(qmake -query QT_INSTALL_BINS) 2>/dev/null`
-	    QT4_MOC="$QT4_MOC/moc"
-	    verqt=`(qmake -query QT_VERSION) 2>/dev/null`
-	    QT4_VER=`echo "$verqt" | $csed "$vsed" | $csed "$vsed" | sed 's/\(..\)\.\(..\)\.\(..\)/\1\2\3/'`
-	    if [[ 1$QT4_VER -lt 1040300 ]]; then
-	    	HAVE_QT4=no
-	    	verqt="too old ($verqt)"
-	   fi
-	else
-	    verqt="no"
-	fi
-	AC_MSG_RESULT([$verqt])
-    fi
-fi
-
-AC_SUBST(HAVE_QT4)
-AC_SUBST(QT4_INC)
-AC_SUBST(QT4_LIB)
-AC_SUBST(QT4_INC_NET)
-AC_SUBST(QT4_LIB_NET)
-AC_SUBST(QT4_MOC)
-AC_SUBST(QT4_VER)
-AC_SUBST(QT4_STATIC_MODULES)
-
-
 HAVE_MALLINFO=no
 AC_ARG_ENABLE(mallinfo,AC_HELP_STRING([--enable-mallinfo],[Enable malloc info if available (default: yes)]),[ac_cv_use_mallinfo=$withval],[ac_cv_use_mallinfo=yes])
 if [[ "x$ac_cv_use_mallinfo" != "xno" ]]; then
@@ -1767,14 +1516,14 @@ AC_SUBST(COREDUMPER_LIB)
 
 
 RTTI_OPT=""
-AC_ARG_ENABLE(rtti,AC_HELP_STRING([--enable-rtti],[Enable RTTI support (default: like pwlib)]),want_rtti=$enableval,want_rtti=auto)
+AC_ARG_ENABLE(rtti,AC_HELP_STRING([--enable-rtti],[Enable RTTI support (default: compiler default)]),want_rtti=$enableval,want_rtti=auto)
 AC_MSG_CHECKING([whether to enable RTTI support])
 USE_RTTI="$want_rtti"
 case "x$want_rtti" in
     xyes|xno|xnone)
 	;;
     xauto)
-	USE_RTTI="$PWLIB_RTTI"
+	USE_RTTI="none"
 	;;
     *)
 	AC_ERROR([Invalid argument passed to --enable-rtti])
@@ -1791,13 +1540,6 @@ esac
 AC_MSG_RESULT([$USE_RTTI])
 AC_SUBST(USE_RTTI)
 AC_SUBST(RTTI_OPT)
-
-if [[ "x$HAVE_H323" != "xno" ]]; then
-if [[ "x$USE_RTTI" != "x$PWLIB_RTTI" ]]; then
-AC_MSG_WARN([Mismatched RTTI setting between Yate ($USE_RTTI) and pwlib ($PWLIB_RTTI)])
-fi
-fi
-
 
 INSTALL_L=""
 AC_ARG_ENABLE(lib-exec,AC_HELP_STRING([--enable-lib-exec],[Executable libraries and modules (default: auto)]),want_lib_exec=$enableval,want_lib_exec=auto)
@@ -1891,13 +1633,10 @@ AC_CONFIG_FILES([packing/rpm/yate.spec
                  packing/portage/yate.ebuild
                  yate.pc
 		 yateversn.h
-		 yateiss.inc
                  Makefile
                  engine/Makefile
                  modules/Makefile
                  modules/test/Makefile
-                 clients/Makefile
-                 clients/qt4/Makefile
                  libs/ilbc/Makefile
                  libs/ysip/Makefile
                  libs/yrtp/Makefile
@@ -1915,7 +1654,6 @@ AC_CONFIG_FILES([packing/rpm/yate.spec
 	         libs/yradio/Makefile
                  share/Makefile
                  share/scripts/Makefile
-                 share/skins/Makefile
                  share/sounds/Makefile
                  share/help/Makefile
                  share/data/Makefile

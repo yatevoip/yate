@@ -8,7 +8,7 @@
 ; If enabled=yes the accounts are logged in even without an username.
 ;
 ; Parameter description:
-;   protocol: The protocol to register on (sip, iax, h323, jabber ...)
+;   protocol: The protocol to register on (sip, iax, jabber ...)
 ;   username: Account username
 ;   password: Account password
 ;   interval: Registration interval (in seconds) to request from server (ignored for jabber)
@@ -86,11 +86,6 @@
 ;     current timestamp and first timestamp of incoming trunked audio data without
 ;     miniframe timestamps at which to restart timestamps build data
 ;
-; H323:
-;   server: Registrar IP address
-;   addr: Local address for H323 listener (leave it empty to listen on all interfaces)
-;   port: Local port for H323 listener
-
 ;[general]
 ; Only in [general] if auto_oper is not empty on initialize the file is reloaded and each operation executed
 ;auto_oper=logout,login
@@ -107,14 +102,6 @@ description=Test SIP account
 ;registrar=10.0.0.1:5060
 ;outbound=10.0.0.1:5061
 ;localaddress=192.168.0.1:5062
-
-[test_h323]
-enabled=no
-protocol=h323
-;username=me
-description=Test H.323 account
-;interval=600
-;password=1234
 
 [test_iax]
 enabled=no

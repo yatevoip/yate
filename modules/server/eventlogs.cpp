@@ -43,11 +43,7 @@ private:
 };
 
 
-#ifdef _WINDOWS
-const char eoln[] = { '\r', '\n' };
-#else
 const char eoln[] = { '\n' };
-#endif
 
 static String s_baseDir;
 static bool s_pubRead = false;

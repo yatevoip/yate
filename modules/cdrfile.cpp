@@ -27,11 +27,7 @@
 #include <errno.h>
 #include <string.h>
 
-#ifdef _WINDOWS
-#define EOLN "\r\n"
-#else
 #define EOLN "\n"
-#endif
 
 using namespace TelEngine;
 namespace { // anonymous

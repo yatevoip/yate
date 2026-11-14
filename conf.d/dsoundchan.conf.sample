@@ -1,8 +1,0 @@
-[general]
-; Settings for the DirectSound audio channel
-
-; primary: boolean: Use the primary playback sound buffer instead of a secondary
-;primary=yes
-
-; rate: int: Default sampling rate used, can be 8000, 16000, 32000
-;rate=8000

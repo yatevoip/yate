@@ -1,4 +1,13 @@
 *.cache
+/build*/
+/CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Testing/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
 Makefile
 YateLocal*
 configure
@@ -6,7 +15,6 @@ config.*
 *-stamp
 yatepaths.h
 yateversn.h
-yateiss.inc
 run
 yate.spec
 yate
@@ -27,3 +35,5 @@ yate.core*
 *.out
 *.csv
 *.tsv
+!tests/core.cpp
+!cmake/yate-config.in

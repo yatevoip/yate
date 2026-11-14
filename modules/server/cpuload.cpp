@@ -910,9 +910,7 @@ int CpuStat::getSystemLoad()
 
 int CpuPlatform::getSystemLoad()
 {
-#if defined(_WINDOWS)
-    // Windows implementation
-#elif defined(__FreeBSD__)
+#if defined(__FreeBSD__)
     // FreeBSD implementation
 #elif defined(_MAC)
     // MAC OS implementation

@@ -119,10 +119,6 @@ private:
     inline void setShortName()
     {
         int pos = rfind('/');
-#ifdef _WINDOWS
-	    int backPos = rfind('\\');
-	    pos = pos > backPos ? pos : backPos;
-#endif
         if (pos >= 0 && (pos < (int)length() - 1))
             m_shortName = substr(pos + 1);
     }

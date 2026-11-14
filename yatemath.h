@@ -29,23 +29,12 @@
 namespace TelEngine {
 
 #ifdef DEBUG
-#ifdef _WINDOWS
-#define YMATH_FAIL(cond,...) { \
-    if (!(cond)) \
-	Debug(DebugFail,__VA_ARGS__); \
-}
-#else
 #define YMATH_FAIL(cond,args...) { \
     if (!(cond)) \
 	Debug(DebugFail,args); \
 }
-#endif
-#else
-#ifdef _WINDOWS
-#define YMATH_FAIL do { break; } while
 #else
 #define YMATH_FAIL(arg...)
-#endif
 #endif
 
 /**

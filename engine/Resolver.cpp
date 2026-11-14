@@ -19,23 +19,16 @@
 
 /*
  Preprocessor definitions:
- WINDOWS:
-   HAVE_DNS_NAPTR_DATA: Define it if DNS_NAPTR_DATA is defined in windns.h
-     If defined, NAPTR query will work at runtime on all supported versions
-     If not defined NAPTR query will work only if Windows major version is less then 6
- Non Windows
    NO_RESOLV: Defined if the resolver is not available at compile time
    NO_DN_SKIPNAME: Define it if __dn_skipname() is not available at link time
 */
 
 #include "yateclass.h"
 
-#ifdef _WINDOWS
-#include <windns.h>
-#elif !defined(NO_RESOLV)
+#if !defined(NO_RESOLV)
 #include <resolv.h>
 #include <arpa/nameser.h>
-#endif // _WINDOWS
+#endif // !NO_RESOLV
 
 using namespace TelEngine;
 
@@ -49,33 +42,6 @@ const TokenDict Resolver::s_types[] = {
     { 0, 0 },
 };
 
-#ifdef _WINDOWS
-
-class WindowsVersion
-{
-public:
-    WindowsVersion();
-    inline unsigned int major() const
-	{ return m_major; }
-private:
-    unsigned int m_major;
-};
-
-WindowsVersion::WindowsVersion()
-    : m_major(0)
-{
-    OSVERSIONINFOA ver;
-    ::ZeroMemory(&ver,sizeof(OSVERSIONINFOA));
-    ver.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-    if (::GetVersionEx(&ver))
-	m_major = ver.dwMajorVersion;
-    if (!m_major)
-	Debug(DebugWarn,"Resolver failed to detect Windows version");
-}
-
-static WindowsVersion s_winVer;
-
-#endif
 
 // Utility: print the result of dns query
 // Return the code
@@ -101,9 +67,7 @@ static int printResult(int type, int code, const char* dname, ObjList& result, S
 	String dummy;
 	if (!error) {
 	    error = &dummy;
-#ifdef _WINDOWS
-	    Thread::errorString(dummy,code);
-#elif defined(__RES)
+#if defined(__RES)
 	    dummy = hstrerror(code);
 #endif
 	}
@@ -365,18 +329,7 @@ bool Resolver::available(Type t)
 {
     if (t == A6)
 	return SocketAddr::IPv6 < SocketAddr::AfUnsupported;
-#ifdef _WINDOWS
-    if (t == Naptr) {
-	if (!s_winVer.major())
-	    return false;
-#ifdef HAVE_DNS_NAPTR_DATA
-	return true;
-#else
-	return s_winVer.major() < 6;
-#endif
-    }
-    return true;
-#elif defined(__RES)
+#if defined(__RES)
     return true;
 #endif
     return false;
@@ -387,9 +340,7 @@ bool Resolver::init(int timeout, int retries)
 {
     if (!available())
 	return false;
-#ifdef _WINDOWS
-    return true;
-#elif defined(__RES)
+#if defined(__RES)
     if ((_res.options & RES_INIT) == 0) {
 	// need to initialize in current thread
 	if (res_init())
@@ -430,23 +381,7 @@ int Resolver::srvQuery(const char* dname, ObjList& result, String* error)
 {
     int code = 0;
     XDebug(DebugAll,"Starting %s query for '%s'",lookup(Srv,s_types),dname);
-#ifdef _WINDOWS
-    DNS_RECORD* srv = 0;
-    code = (int)::DnsQuery_UTF8(dname,DNS_TYPE_SRV,DNS_QUERY_STANDARD,NULL,&srv,NULL);
-    if (code == ERROR_SUCCESS) {
-    	for (DNS_RECORD* dr = srv; dr; dr = dr->pNext) {
-	    if (dr->wType != DNS_TYPE_SRV || dr->wDataLength != sizeof(DNS_SRV_DATA))
-		continue;
-	    DNS_SRV_DATA& d = dr->Data.SRV;
-	    insertRecord(result,new SrvRecord(dr->dwTtl,d.wPriority,d.wWeight,
-		d.pNameTarget,d.wPort),false,"srvQuery");
-	}
-    }
-    else if (error)
-	Thread::errorString(*error,code);
-    if (srv)
-	::DnsRecordListFree(srv,DnsFreeRecordList);
-#elif defined(__RES)
+#if defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_srv,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {
@@ -511,53 +446,7 @@ int Resolver::naptrQuery(const char* dname, ObjList& result, String* error)
 {
     int code = 0;
     XDebug(DebugAll,"Starting %s query for '%s'",lookup(Naptr,s_types),dname);
-#ifdef _WINDOWS
-    DNS_RECORD* naptr = 0;
-    if (available(Naptr))
-	code = (int)::DnsQuery_UTF8(dname,DNS_TYPE_NAPTR,DNS_QUERY_STANDARD,NULL,&naptr,NULL);
-    if (code == ERROR_SUCCESS) {
-    	for (DNS_RECORD* dr = naptr; dr; dr = dr->pNext) {
-	    if (dr->wType != DNS_TYPE_NAPTR)
-		continue;
-	    // version >= 6: DnsQuery will set the fields in DNS_NAPTR_DATA
-	    // else: DnsQuery puts the raw response
-	    if (s_winVer.major() >= 6) {
-#ifdef HAVE_DNS_NAPTR_DATA
-		if (dr->wDataLength != sizeof(DNS_NAPTR_DATA))
-		    continue;
-		DNS_NAPTR_DATA& d = dr->Data.NAPTR;
-		insertRecord(result,new NaptrRecord(dr->dwTtl,d.wOrder,d.wPreference,d.pFlags,
-		    d.pService,d.pRegularExpression,d.pReplacement),true,"naptrQuery");
-#endif
-		continue;
-	    }
-	    int len = dr->wDataLength - 4;
-	    if (len <= 0)
-		continue;
-	    unsigned char* b = (unsigned char*)&dr->Data;
-	    int ord = (b[0] << 8) | b[1];
-	    int pr = (b[2] << 8) | b[3];
-	    unsigned char* tmp = new unsigned char[len + 1];
-	    ::memcpy(tmp,b + 4,len);
-	    tmp[len] = 0;
-	    unsigned char* buf = tmp;
-	    unsigned char* end = buf + len;
-	    if (!buf)
-		continue;
-	    char fla[DNS_MAX_NAME_BUFFER_LENGTH];
-	    char ser[DNS_MAX_NAME_BUFFER_LENGTH];
-	    char reg[DNS_MAX_NAME_BUFFER_LENGTH];
-	    buf += dn_string(end,buf,fla,sizeof(fla));;
-	    buf += dn_string(end,buf,ser,sizeof(ser));
-	    buf += dn_string(end,buf,reg,sizeof(reg));
-	    insertRecord(result,new NaptrRecord(dr->dwTtl,ord,pr,fla,ser,reg,0),true,"naptrQuery");
-	}
-    }
-    else if (error)
-	Thread::errorString(*error,code);
-    if (naptr)
-	::DnsRecordListFree(naptr,DnsFreeRecordList);
-#elif defined(__RES)
+#if defined(__RES)
     unsigned char buf[2048];
     int r,q,a;
     unsigned char *p, *e;
@@ -627,22 +516,7 @@ int Resolver::a4Query(const char* dname, ObjList& result, String* error)
 {
     int code = 0;
     XDebug(DebugAll,"Starting %s query for '%s'",lookup(A4,s_types),dname);
-#ifdef _WINDOWS
-    DNS_RECORD* adr = 0;
-    code = (int)::DnsQuery_UTF8(dname,DNS_TYPE_A,DNS_QUERY_STANDARD,NULL,&adr,NULL);
-    if (code == ERROR_SUCCESS) {
-    	for (DNS_RECORD* dr = adr; dr; dr = dr->pNext) {
-	    if (dr->wType != DNS_TYPE_A || dr->wDataLength != sizeof(DNS_A_DATA))
-		continue;
-	    SocketAddr addr(SocketAddr::IPv4,&dr->Data.A.IpAddress);
-	    result.append(new TxtRecord(dr->dwTtl,addr.host()));
-	}
-    }
-    else if (error)
-	Thread::errorString(*error,code);
-    if (adr)
-	::DnsRecordListFree(adr,DnsFreeRecordList);
-#elif defined(__RES)
+#if defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_a,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {
@@ -703,22 +577,7 @@ int Resolver::a6Query(const char* dname, ObjList& result, String* error)
     XDebug(DebugAll,"Starting %s query for '%s'",lookup(A6,s_types),dname);
     if (!available(A6))
 	return printResult(A6,code,dname,result,error);
-#ifdef _WINDOWS
-    DNS_RECORD* adr = 0;
-    code = (int)::DnsQuery_UTF8(dname,DNS_TYPE_AAAA,DNS_QUERY_STANDARD,NULL,&adr,NULL);
-    if (code == ERROR_SUCCESS) {
-    	for (DNS_RECORD* dr = adr; dr; dr = dr->pNext) {
-	    if (dr->wType != DNS_TYPE_AAAA || dr->wDataLength != sizeof(DNS_AAAA_DATA))
-		continue;
-	    SocketAddr addr(SocketAddr::IPv6,&dr->Data.AAAA.Ip6Address);
-	    result.append(new TxtRecord(dr->dwTtl,addr.host()));
-	}
-    }
-    else if (error)
-	Thread::errorString(*error,code);
-    if (adr)
-	::DnsRecordListFree(adr,DnsFreeRecordList);
-#elif defined(__RES)
+#if defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_aaaa,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {
@@ -777,23 +636,7 @@ int Resolver::txtQuery(const char* dname, ObjList& result, String* error)
 {
     int code = 0;
     XDebug(DebugAll,"Starting %s query for '%s'",lookup(Txt,s_types),dname);
-#ifdef _WINDOWS
-    DNS_RECORD* adr = 0;
-    code = (int)::DnsQuery_UTF8(dname,DNS_TYPE_TEXT,DNS_QUERY_STANDARD,NULL,&adr,NULL);
-    if (code == ERROR_SUCCESS) {
-    	for (DNS_RECORD* dr = adr; dr; dr = dr->pNext) {
-	    if (dr->wType != DNS_TYPE_TEXT || dr->wDataLength < sizeof(DNS_TXT_DATA))
-		continue;
-	    DNS_TXT_DATA& d = dr->Data.TXT;
-	    for (DWORD i = 0; i < d.dwStringCount; i++)
-		result.append(new TxtRecord(dr->dwTtl,d.pStringArray[i]));
-	}
-    }
-    else if (error)
-	Thread::errorString(*error,code);
-    if (adr)
-	::DnsRecordListFree(adr,DnsFreeRecordList);
-#elif defined(__RES)
+#if defined(__RES)
     unsigned char buf[512];
     int r = res_query(dname,ns_c_in,ns_t_txt,buf,sizeof(buf));
     if (r <= 0 || r > (int)sizeof(buf)) {

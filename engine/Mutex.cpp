@@ -19,12 +19,6 @@
 
 #include "yateclass.h"
 
-#ifdef _WINDOWS
-
-typedef HANDLE HMUTEX;
-typedef HANDLE HSEMAPHORE;
-
-#else
 
 #include <pthread.h>
 #include <semaphore.h>
@@ -45,7 +39,6 @@ typedef pthread_mutex_t HMUTEX;
 typedef sem_t HSEMAPHORE;
 typedef pthread_rwlock_t rwlock_t;
 
-#endif /* ! _WINDOWS */
 
 #ifdef MUTEX_STATIC_UNSAFE
 #undef MUTEX_STATIC_UNSAFE
@@ -150,11 +143,7 @@ public:
     static volatile int s_count;
     static volatile int s_locks;
 private:
-#ifdef _WINDOWS
-    // we use m_nonRWLck
-#else
     rwlock_t m_lock;
-#endif
     MutexPrivate* m_nonRWLck;
     int m_refcount;
     unsigned int m_locked;
@@ -183,11 +172,7 @@ static GlobalMutex s_global;
 static unsigned long s_maxwait = 0;
 static bool s_unsafe = MUTEX_STATIC_UNSAFE;
 static bool s_safety = false;
-#ifdef _WINDOWS
-static bool s_rwLockDisabled = true;
-#else
 static bool s_rwLockDisabled = false;
-#endif
 
 volatile int MutexPrivate::s_count = 0;
 volatile int MutexPrivate::s_locks = 0;
@@ -205,15 +190,11 @@ void GlobalMutex::init()
 {
     if (s_init) {
 	s_init = false;
-#ifdef _WINDOWS
-	s_mutex = ::CreateMutex(NULL,FALSE,NULL);
-#else
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
 	::pthread_mutexattr_settype(&attr,PTHREAD_MUTEX_RECURSIVE_NP);
 	::pthread_mutex_init(&s_mutex,&attr);
 	::pthread_mutexattr_destroy(&attr);
-#endif
     }
 }
 
@@ -227,22 +208,14 @@ void GlobalMutex::lock()
     init();
     if (s_unsafe)
 	return;
-#ifdef _WINDOWS
-    ::WaitForSingleObject(s_mutex,INFINITE);
-#else
     ::pthread_mutex_lock(&s_mutex);
-#endif
 }
 
 void GlobalMutex::unlock()
 {
     if (s_unsafe)
 	return;
-#ifdef _WINDOWS
-    ::ReleaseMutex(s_mutex);
-#else
     ::pthread_mutex_unlock(&s_mutex);
-#endif
 }
 
 
@@ -252,10 +225,6 @@ MutexPrivate::MutexPrivate(bool recursive, const char* name)
 {
     GlobalMutex::lock();
     s_count++;
-#ifdef _WINDOWS
-    // All mutexes are recursive in Windows
-    m_mutex = ::CreateMutex(NULL,FALSE,NULL);
-#else
     if (recursive) {
 	pthread_mutexattr_t attr;
 	::pthread_mutexattr_init(&attr);
@@ -265,7 +234,6 @@ MutexPrivate::MutexPrivate(bool recursive, const char* name)
     }
     else
 	::pthread_mutex_init(&m_mutex,0);
-#endif
     GlobalMutex::unlock();
 }
 
@@ -278,19 +246,10 @@ MutexPrivate::~MutexPrivate()
 	m_locked--;
 	if (s_safety)
 	    s_locks--;
-#ifdef _WINDOWS
-	::ReleaseMutex(m_mutex);
-#else
 	::pthread_mutex_unlock(&m_mutex);
-#endif
     }
     s_count--;
-#ifdef _WINDOWS
-    ::CloseHandle(m_mutex);
-    m_mutex = 0;
-#else
     ::pthread_mutex_destroy(&m_mutex);
-#endif
     GlobalMutex::unlock();
     if (m_locked || m_waiting)
 	Debug(DebugFail,"MutexPrivate '%s' owned by '%s' (%p) destroyed with %u locks, %u waiting [%p]",
@@ -318,14 +277,6 @@ bool MutexPrivate::lock(long maxwait)
 	m_waiting++;
 	GlobalMutex::unlock();
     }
-#ifdef _WINDOWS
-    DWORD ms = 0;
-    if (maxwait < 0)
-	ms = INFINITE;
-    else if (maxwait > 0)
-	ms = (DWORD)(maxwait / 1000);
-    rval = s_unsafe || (::WaitForSingleObject(m_mutex,ms) == WAIT_OBJECT_0);
-#else
     if (s_unsafe)
 	rval = true;
     else if (maxwait < 0)
@@ -357,7 +308,6 @@ bool MutexPrivate::lock(long maxwait)
 	} while (t > Time::now());
 #endif // HAVE_TIMEDLOCK
     }
-#endif // _WINDOWS
     if (safety) {
 	GlobalMutex::lock();
 	m_waiting--;
@@ -407,11 +357,7 @@ bool MutexPrivate::unlock()
 		Debug(DebugFail,"MutexPrivate::locks() is %d [%p]",locks,this);
 	    }
 	}
-#ifdef _WINDOWS
-	ok = s_unsafe || ::ReleaseMutex(m_mutex);
-#else
 	ok = s_unsafe || !::pthread_mutex_unlock(&m_mutex);
-#endif
 	if (!ok)
 	    Debug(DebugFail,"Failed to unlock mutex '%s' [%p]",name(),this);
     }
@@ -432,11 +378,7 @@ SemaphorePrivate::SemaphorePrivate(unsigned int maxcount, const char* name,
 	initialCount = m_maxcount;
     GlobalMutex::lock();
     s_count++;
-#ifdef _WINDOWS
-    m_semaphore = ::CreateSemaphore(NULL,initialCount,maxcount,NULL);
-#else
     ::sem_init(&m_semaphore,0,initialCount);
-#endif
     GlobalMutex::unlock();
 }
 
@@ -444,12 +386,7 @@ SemaphorePrivate::~SemaphorePrivate()
 {
     GlobalMutex::lock();
     s_count--;
-#ifdef _WINDOWS
-    ::CloseHandle(m_semaphore);
-    m_semaphore = 0;
-#else
     ::sem_destroy(&m_semaphore);
-#endif
     GlobalMutex::unlock();
     if (m_waiting)
 	Debug(DebugFail,"SemaphorePrivate '%s' destroyed with %u locks [%p]",
@@ -475,14 +412,6 @@ bool SemaphorePrivate::lock(long maxwait)
 	m_waiting++;
 	GlobalMutex::unlock();
     }
-#ifdef _WINDOWS
-    DWORD ms = 0;
-    if (maxwait < 0)
-	ms = INFINITE;
-    else if (maxwait > 0)
-	ms = (DWORD)(maxwait / 1000);
-    rval = s_unsafe || (::WaitForSingleObject(m_semaphore,ms) == WAIT_OBJECT_0);
-#else
     if (s_unsafe)
 	rval = true;
     else if (maxwait < 0)
@@ -514,7 +443,6 @@ bool SemaphorePrivate::lock(long maxwait)
 	} while (t > Time::now());
 #endif // HAVE_TIMEDWAIT
     }
-#endif // _WINDOWS
     if (safety) {
 	GlobalMutex::lock();
 	int locks = --s_locks;
@@ -542,13 +470,9 @@ bool SemaphorePrivate::unlock()
 	bool safety = s_safety;
 	if (safety)
 	    GlobalMutex::lock();
-#ifdef _WINDOWS
-	::ReleaseSemaphore(m_semaphore,1,NULL);
-#else
 	int val = 0;
 	if (!::sem_getvalue(&m_semaphore,&val) && (val < (int)m_maxcount))
 	    ::sem_post(&m_semaphore);
-#endif
 	if (safety)
 	    GlobalMutex::unlock();
     }
@@ -679,7 +603,7 @@ int Mutex::locks()
 
 bool Mutex::efficientTimedLock()
 {
-#if defined(_WINDOWS) || defined(HAVE_TIMEDLOCK)
+#if defined(HAVE_TIMEDLOCK)
     return true;
 #else
     return false;
@@ -778,7 +702,7 @@ int Semaphore::locks()
 
 bool Semaphore::efficientTimedLock()
 {
-#if defined(_WINDOWS) || defined(HAVE_TIMEDWAIT)
+#if defined(HAVE_TIMEDWAIT)
     return true;
 #else
     return false;
@@ -841,11 +765,7 @@ RWLockPrivate::RWLockPrivate(const char* name)
 
     GlobalMutex::lock();
     s_count++;
-#ifdef _WINDOWS
-    // not implemented, uses m_nonRWLck
-#else
     ::pthread_rwlock_init(&m_lock,0);
-#endif
     GlobalMutex::unlock();
 }
 
@@ -864,18 +784,10 @@ RWLockPrivate::~RWLockPrivate()
 	--m_locked;
 	if (s_safety)
 	    --s_locks;
-#ifdef _WINDOWS
-	// not implemented, uses m_nonRWLck
-#else
         ::pthread_rwlock_unlock(&m_lock);
-#endif
     }
     s_count--;
-#ifdef _WINDOWS
-    // not implemented, uses m_nonRWLck
-#else
     ::pthread_rwlock_destroy(&m_lock);
-#endif
     GlobalMutex::unlock();
     if (m_locked)
 	Debug(DebugFail,"RWLockPrivate '%s' owned by '%s' (%p) destroyed with %u locks [%p]",
@@ -905,9 +817,6 @@ bool RWLockPrivate::readLock(long maxwait)
     if (safety)
 	GlobalMutex::unlock();
 
-#ifdef _WINDOWS
-    // not implemented, uses m_nonRWLck
-#else
     if (s_unsafe)
 	ret = 0;
     if (maxwait < 0)
@@ -939,7 +848,6 @@ bool RWLockPrivate::readLock(long maxwait)
 	} while (t > Time::now());
 #endif
     }
-#endif // _WINDOWS
     if (safety)
 	GlobalMutex::lock();
     if (thr)
@@ -948,11 +856,7 @@ bool RWLockPrivate::readLock(long maxwait)
 	if (safety)
 	    ++s_locks;
 #ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-	InterlockedIncrement((LONG*)&m_locked);
-#else
 	__sync_add_and_fetch(&m_locked,1);
-#endif
 #else
 	m_mutex.lock();
 	++m_locked;
@@ -989,9 +893,6 @@ bool RWLockPrivate::writeLock(long maxwait)
 	thr->m_locking = true;
     if (safety)
 	GlobalMutex::unlock();
-#ifdef _WINDOWS
-    // not implemented, uses m_nonRWLck
-#else
     if (s_unsafe)
 	ret = 0;
     if (maxwait < 0)
@@ -1023,7 +924,6 @@ bool RWLockPrivate::writeLock(long maxwait)
 	} while (t > Time::now());
 #endif
     }
-#endif
     if (safety)
 	GlobalMutex::lock();
     if (thr)
@@ -1032,11 +932,7 @@ bool RWLockPrivate::writeLock(long maxwait)
 	if (safety)
 	    ++s_locks;
 #ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-	InterlockedIncrement((LONG*)&m_locked);
-#else
 	__sync_add_and_fetch(&m_locked,1);
-#endif
 #else
 	m_mutex.lock();
 	++m_locked;
@@ -1070,11 +966,7 @@ bool RWLockPrivate::unlock()
 	if (thr)
 	    --thr->m_locks;
 #ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-	int l = InterlockedDecrement((LONG*)&m_locked);
-#else
 	int l = __sync_sub_and_fetch(&m_locked,1);
-#endif
 #else
 	m_mutex.lock();
 	int l = --m_locked;
@@ -1096,11 +988,7 @@ bool RWLockPrivate::unlock()
 		Debug(DebugFail,"RWLockPrivate::locks() is %d [%p]",locks,this);
 	    }
 	}
-#ifdef _WINDOWS
-	// not implemented, uses m_nonRWLck
-#else
 	ok = s_unsafe ? 0 : ::pthread_rwlock_unlock(&m_lock);
-#endif
 	if (ok)
 	    Debug(DebugFail,"Thread '%s' failed to unlock RW lock '%s' owned by '%s' (%p) [%p]",
 		Thread::currentName(),name(),ownerName(),owner(),this);
@@ -1159,12 +1047,7 @@ bool RWLock::locked() const
 
 void RWLock::disableRWLock(bool disable)
 {
-#ifdef _WINDOWS
-    // we disable RWLock usage as it is not implemented
-    s_rwLockDisabled = true;
-#else
     s_rwLockDisabled = disable;
-#endif
 }
 
 RWLockPrivate* RWLock::privDataCopy() const

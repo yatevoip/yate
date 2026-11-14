@@ -889,7 +889,6 @@ static const String s_googleMucDomain = "groupchat.google.com";
 // Miscellaneous
 static const String s_jabber = "jabber";
 static const String s_sip = "sip";
-static const String s_h323 = "h323";
 static const String s_gmailDomain = "gmail.com";
 static const String s_googleDomain = "google.com";
 static const String s_fileOpenSendPrefix = "send_fileopen:";
@@ -1559,8 +1558,6 @@ static const String& getProtoPage(const String& proto)
 	return s_jabber;
     if (proto == s_sip)
 	return s_sip;
-    if (proto == s_h323)
-	return s_h323;
     if (proto)
 	return s_default;
     return s_none;
@@ -2148,11 +2145,6 @@ static void updateProtocolSpec(NamedList& p, const String& proto, bool edit,
 	    String tmp = prefix + "resource";
 	    if (!p.getValue(tmp))
 		p.setParam(tmp,Engine::config().getValue("client","resource","Yate"));
-	}
-	else if (proto == s_h323) {
-	    String tmp = prefix + "authmethods";
-	    if (!p.getValue(tmp))
-		p.setParam(tmp,Engine::config().getValue("client","authmethods","MD5"));
 	}
     }
     // Options
@@ -6619,7 +6611,6 @@ void ClientLogic::initStaticData()
     if (!s_protocols.skipNull()) {
 	s_protocols.append(new String("sip"));
 	s_protocols.append(new String("jabber"));
-	s_protocols.append(new String("h323"));
 	s_protocols.append(new String("iax"));
     }
     s_protocolsMutex.unlock();
@@ -7342,7 +7333,6 @@ bool DefaultLogic::toggle(Window* wnd, const String& name, bool active)
 	    p.addParam("check:debug_sniffer",String::boolText(false));
 	    p.addParam("check:debug_jingle",String::boolText(false));
 	    p.addParam("check:debug_sip",String::boolText(false));
-	    p.addParam("check:debug_h323",String::boolText(false));
 	    p.addParam("check:debug_iax",String::boolText(false));
 	    Client::self()->setParams(&p,wnd);
 	}

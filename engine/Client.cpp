@@ -3324,7 +3324,7 @@ ClientChannel::ClientChannel(const Message& msg, const String& peerid)
     if (TelEngine::null(proto)) {
 	const String& module = msg[YSTRING("module")];
 	if (module == YSTRING("sip") || module == YSTRING("jingle") ||
-	    module == YSTRING("iax") || module == YSTRING("h323"))
+	    module == YSTRING("iax"))
 	    proto = module;
     }
     m_clientParams.addParam("protocol",proto,false);

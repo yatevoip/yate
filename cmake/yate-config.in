@@ -1,0 +1,34 @@
+#!/bin/sh
+# Совместимость с внешними модулями. Для CMake доступна цель Yate::yate.
+usage='Usage: yate-config [--version] [--release] [--revision] [--cflags] [--includes] [--c-all]
+                   [--libs] [--ldflags] [--ld-all] [--ld-nostrip] [--ld-strip]
+                   [--config] [--libdir] [--modules] [--share] [--scripts] [--helpdir] [--archlib]'
+if [ "$#" = 0 ]; then
+    printf '%s\n' "$usage"
+    exit 0
+fi
+while [ "$#" != 0 ]; do
+    case "$1" in
+        --version) printf '%s\n' '@PROJECT_VERSION@' ;;
+        --release) printf '%s\n' '@YATE_STATUS@@YATE_RELEASE@' ;;
+        --revision) printf '%s\n' '@PACKAGE_REVISION@' ;;
+        --cflags) printf '%s\n' '@MODULE_CPPFLAGS@' ;;
+        --includes) printf '%s\n' '-I"@YATE_FULL_INCLUDEDIR@/yate"' ;;
+        --c-all) printf '%s\n' '@MODULE_CPPFLAGS@ -I"@YATE_FULL_INCLUDEDIR@/yate"' ;;
+        --libs) printf '%s\n' '-L"@YATE_FULL_LIBDIR@" -lyate' ;;
+        --ldflags) printf '%s\n' '@MODULE_LDFLAGS@' ;;
+        --ld-all|--ld-nostrip) printf '%s\n' '@MODULE_LDFLAGS@ -L"@YATE_FULL_LIBDIR@" -lyate' ;;
+        --ld-strip) printf '\n' ;;
+        --config) printf '%s\n' '@YATE_FULL_CONFIGDIR@' ;;
+        --libdir) printf '%s\n' '@YATE_FULL_LIBDIR@' ;;
+        --modules) printf '%s\n' '@YATE_FULL_MODULEDIR@' ;;
+        --share) printf '%s\n' '@YATE_FULL_SHAREDIR@' ;;
+        --scripts) printf '%s\n' '@YATE_FULL_SHAREDIR@/scripts' ;;
+        --helpdir) printf '%s\n' '@YATE_FULL_SHAREDIR@/help' ;;
+        --archlib) printf '%s\n' '@ARCHLIB@' ;;
+@YATE_CONFIG_PARAMETERS@
+        --help|-h) printf '%s\n' "$usage" ;;
+        *) printf '%s\n' "Unknown option: $1" >&2; exit 1 ;;
+    esac
+    shift
+done

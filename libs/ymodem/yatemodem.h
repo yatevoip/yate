@@ -24,17 +24,6 @@
 
 #include <yateclass.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYMODEM_EXPORTS
-#define YMODEM_API __declspec(dllexport)
-#else
-#ifndef LIBYMODEM_STATIC
-#define YMODEM_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YMODEM_API
 #define YMODEM_API

@@ -20,29 +20,6 @@
 #include "yatengine.h"
 #include "yateversn.h"
 
-#ifdef _WINDOWS
-
-#include <process.h>
-#include <shlobj.h>
-typedef void (*sig_func_t)(int);
-#define RTLD_NOW 0
-#define dlopen(name,flags) LoadLibrary(name)
-#define dlclose !FreeLibrary
-#define dlsym GetProcAddress
-#define dlerror() "LoadLibrary error"
-#define YSERV_RUN 1
-#define YSERV_INS 2
-#define YSERV_DEL 4
-#define PATH_SEP "\\"
-#ifndef CFG_DIR
-#define CFG_DIR "Yate"
-#endif
-
-#ifndef SHGetSpecialFolderPath
-__declspec(dllimport) BOOL WINAPI SHGetSpecialFolderPathA(HWND,LPSTR,INT,BOOL);
-#endif
-
-#else // _WINDOWS
 
 #include "yatepaths.h"
 #include <dirent.h>
@@ -62,7 +39,6 @@ typedef void* HMODULE;
 
 static int s_childsig = 0;
 
-#endif // _WINDOWS
 
 #ifdef HAVE_MACOSX_SUPPORT
 #include "MacOSXUtils.h"
@@ -212,7 +188,6 @@ static sig_func_t s_abrt_handler = SIG_DFL;
 static void sighandler(int signal)
 {
     switch (signal) {
-#ifndef _WINDOWS
 	case SIGCHLD:
 	    ::waitpid(-1,0,WNOHANG);
 	    break;
@@ -236,7 +211,6 @@ static void sighandler(int signal)
 		Engine::init();
 	    s_nextinit = Time::now() + 2000000;
 	    break;
-#endif
 	case SIGINT:
 	case SIGTERM:
 	    Engine::halt(0);
@@ -456,12 +430,7 @@ static void initUsrPath(String& path, const char* newPath = 0)
     if (path)
 	return;
     if (TelEngine::null(newPath)) {
-#ifdef _WINDOWS
-	// we force using the ANSI version
-	char szPath[MAX_PATH];
-	if (SHGetSpecialFolderPathA(NULL,szPath,CSIDL_APPDATA,TRUE))
-	    path = szPath;
-#elif defined(HAVE_MACOSX_SUPPORT)
+#if defined(HAVE_MACOSX_SUPPORT)
 	MacOSXUtils::applicationSupportPath(path);
 	if (path.null()) {
 	    Debug(DebugMild,"Could not get system user path on MacOS X, setting it to $(HOME)");
@@ -605,9 +574,7 @@ bool EngineStatusHandler::received(Message &msg)
     msg.retValue() << ",enqueued=" << enq << ",dequeued=" << deq << ",dispatched=" << disp ;
     msg.retValue() << ",supervised=" << (s_super_handle >= 0);
     msg.retValue() << ",runattempt=" << s_run_attempt;
-#ifndef _WINDOWS
     msg.retValue() << ",lastsignal=" << s_childsig;
-#endif
     msg.retValue() << ",threads=" << Thread::count();
     msg.retValue() << ",workers=" << EnginePrivate::count;
     msg.retValue() << ",mutexes=" << Mutex::count();
@@ -758,27 +725,6 @@ void completeModule(String& ret, const String& part, ObjList& mods, bool reload,
 	path = path.substr(0,path.length()-1);
 
     DDebug(DebugInfo,"completeModule path='%s' rdir='%s'",path.c_str(),rdir.c_str());
-#ifdef _WINDOWS
-    WIN32_FIND_DATA entry;
-    HANDLE hf = ::FindFirstFile(path + PATH_SEP "*",&entry);
-    if (hf == INVALID_HANDLE_VALUE)
-	return;
-    do {
-	XDebug(DebugInfo,"Found dir entry %s",entry.cFileName);
-	if (entry.cFileName[0] == '.')
-	    continue;
-	if ((entry.dwFileAttributes & FILE_ATTRIBUTE_HIDDEN) != 0)
-	    continue;
-	if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-	    completeModule(ret,part,mods,reload,rdir + entry.cFileName + PATH_SEP);
-	    continue;
-	}
-	int n = ::strlen(entry.cFileName) - Engine::moduleSuffix().length();
-	if ((n > 0) && !::strcmp(entry.cFileName+n,Engine::moduleSuffix()))
-	    completeOneModule(ret,rdir + entry.cFileName,part,mods,reload);
-    } while (::FindNextFile(hf,&entry));
-    ::FindClose(hf);
-#else
     DIR *dir = ::opendir(path);
     if (!dir)
 	return;
@@ -799,7 +745,6 @@ void completeModule(String& ret, const String& part, ObjList& mods, bool reload,
 	    completeOneModule(ret,rdir + entry->d_name,part,mods,reload);
     }
     ::closedir(dir);
-#endif
 }
 
 // perform command line completion
@@ -1171,80 +1116,6 @@ static int engineRun(EngineLoop loop = 0)
     return retcode;
 }
 
-#ifdef _WINDOWS
-
-static SERVICE_STATUS_HANDLE s_handler = 0;
-static SERVICE_STATUS s_status;
-
-static void setStatus(DWORD state)
-{
-    if (!s_handler)
-	return;
-    switch (state) {
-	case SERVICE_START_PENDING:
-	case SERVICE_STOP_PENDING:
-	    break;
-	default:
-	    s_status.dwCheckPoint = 0;
-    }
-    s_status.dwCurrentState = state;
-    ::SetServiceStatus(s_handler,&s_status);
-}
-
-static void checkPoint()
-{
-    if (!s_handler)
-	return;
-    s_status.dwCheckPoint++;
-    ::SetServiceStatus(s_handler,&s_status);
-}
-
-static void WINAPI serviceHandler(DWORD code)
-{
-    switch (code) {
-	case SERVICE_CONTROL_STOP:
-	case SERVICE_CONTROL_SHUTDOWN:
-	    Engine::halt(0);
-	    setStatus(SERVICE_STOP_PENDING);
-	    break;
-	case SERVICE_CONTROL_PARAMCHANGE:
-	    Engine::init();
-	    break;
-	case SERVICE_CONTROL_INTERROGATE:
-	    break;
-	default:
-	    Debug(DebugWarn,"Got unexpected service control code %u",code);
-    }
-    if (s_handler)
-	::SetServiceStatus(s_handler,&s_status);
-}
-
-static void serviceMain(DWORD argc, LPTSTR* argv)
-{
-    logFileOpen();
-    s_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
-    s_status.dwCurrentState = SERVICE_START_PENDING;
-    s_status.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN | SERVICE_ACCEPT_PARAMCHANGE;
-    s_status.dwWin32ExitCode = NO_ERROR;
-    s_status.dwServiceSpecificExitCode = 0;
-    s_status.dwCheckPoint = 0;
-    s_status.dwWaitHint = 0;
-    s_handler = ::RegisterServiceCtrlHandler("yate",serviceHandler);
-    if (!s_handler) {
-	Debug(DebugFail,"Could not register service control handler \"yate\", code %u",::GetLastError());
-	return;
-    }
-    setStatus(SERVICE_START_PENDING);
-    engineRun();
-}
-
-static SERVICE_TABLE_ENTRY dispatchTable[] =
-{
-    { TEXT("yate"), (LPSERVICE_MAIN_FUNCTION)serviceMain },
-    { NULL, NULL }
-};
-
-#else /* _WINDOWS */
 
 #define setStatus(s)
 #define checkPoint()
@@ -1472,7 +1343,6 @@ static int supervise(int initDelay)
 
 #undef SUPER_MSG
 
-#endif /* _WINDOWS */
 
 
 SLib::SLib(HMODULE handle, const char* file, bool nounload, unsigned int count)
@@ -1491,19 +1361,10 @@ SLib::~SLib()
 #endif
     unsigned int count = plugins.count();
     if (s_nounload || m_nounload) {
-#ifdef _WINDOWS
-	typedef void (WINAPI *pFini)(HINSTANCE,DWORD,LPVOID);
-	pFini fini = (pFini)GetProcAddress(m_handle,"_DllMainCRTStartup");
-	if (!fini)
-	    fini = (pFini)GetProcAddress(m_handle,"_CRT_INIT");
-	if (fini)
-	    fini(m_handle,DLL_PROCESS_DETACH,NULL);
-#else
 	typedef void (*pFini)();
 	pFini fini = (pFini)dlsym(m_handle,"_fini");
 	if (fini)
 	    fini();
-#endif
 	if (fini || m_nounload) {
 	    count -= plugins.count();
 	    if (count != m_count)
@@ -1545,11 +1406,7 @@ SLib* SLib::load(const char* file, bool local, bool nounload)
     HMODULE handle = ::dlopen(file,flags);
     if (handle)
 	return new SLib(handle,file,nounload,plugins.count() - count);
-#ifdef _WINDOWS
-    Debug(DebugWarn,"LoadLibrary error %u in '%s'",::GetLastError(),file);
-#else
     Debug(DebugWarn,"%s",dlerror());
-#endif
     return 0;
 }
 
@@ -1697,19 +1554,8 @@ Engine::~Engine()
 
 int Engine::engineInit()
 {
-#ifdef _WINDOWS
-    // In Windows we must initialize the socket library very early because even trivial
-    //  functions like endianess swapping - ntohl and family - need it to be initialized
-    WSADATA wsaData;
-    int errc = ::WSAStartup(MAKEWORD(2,2), &wsaData);
-    if (errc) {
-	Debug(DebugCrit,"Failed to initialize the Windows Sockets library, error code %d",errc);
-	return errc & 127;
-    }
-#else
     ::signal(SIGPIPE,SIG_IGN);
     ::signal(SIGALRM,SIG_IGN);
-#endif
     CapturedEvent::capturing(s_capture);
     s_cfg = configFile(s_cfgfile);
     s_cfg.loadMain();
@@ -1725,29 +1571,6 @@ int Engine::engineInit()
 	track.clear();
     if (track)
 	m_dispatcher.trackParam(track);
-#ifdef _WINDOWS
-    int winTimerRes = s_cfg.getIntValue("general","wintimer");
-    if ((winTimerRes > 0) && (winTimerRes < 100)) {
-	typedef ULONG (__stdcall *NTSTR)(ULONG,BOOLEAN,PULONG);
-	String err;
-	HMODULE ntDll = GetModuleHandle("NTDLL.DLL");
-	if (ntDll) {
-	    NTSTR ntSTR = (NTSTR)GetProcAddress(ntDll,"NtSetTimerResolution");
-	    if (ntSTR) {
-		ULONG res = 0;
-		unsigned int ntstatus = ntSTR(10000*winTimerRes,true,&res);
-		if (ntstatus)
-		    err << "NTSTATUS " << ntstatus;
-	    }
-	    else
-		err = "NtSetTimerResolution not found";
-	}
-	else
-	    err = "NTDLL not found (Windows 9x or ME?)";
-	if (err)
-	    Debug(DebugWarn,"Timer resolution not set: %s",err.c_str());
-    }
-#endif
     Thread::idleMsec(s_cfg.getIntValue("general","idlemsec",(clientMode() ? 2 * Thread::idleMsec() : 0)));
     SysUsage::init();
 
@@ -1797,13 +1620,11 @@ int Engine::engineInit()
     s_params.addParam("clientmode",String::boolText(clientMode()));
     s_params.addParam("supervised",String::boolText(s_super_handle >= 0));
     s_params.addParam("runattempt",String(s_run_attempt));
-#ifndef _WINDOWS
     s_params.addParam("lastsignal",String(s_childsig));
     if (s_childpid != -1)
 	s_params.addParam("childpid",String(s_childpid));
     if (s_superpid != -1)
 	s_params.addParam("superpid",String(s_superpid));
-#endif
     s_params.addParam("minworkers",String(s_minworkers));
     s_params.addParam("maxworkers",String(s_maxworkers));
     s_params.addParam("addworkers",String(s_addworkers));
@@ -1827,14 +1648,7 @@ int Engine::engineInit()
     }
     if (track)
 	s_params.addParam("trackparam",track);
-#ifdef _WINDOWS
-    {
-	char buf[PATH_MAX];
-	DWORD ret = ::GetCurrentDirectoryA(PATH_MAX,buf);
-	if (ret && (ret < PATH_MAX))
-	    s_params.addParam("workpath",buf);
-    }
-#elif defined (HAVE_GETCWD)
+#if defined (HAVE_GETCWD)
     {
 	char buf[PATH_MAX];
 	if (::getcwd(buf,PATH_MAX))
@@ -1949,13 +1763,11 @@ int Engine::engineInit()
     s_started = true;
     internalStatisticsStart();
     setStatus(SERVICE_RUNNING);
-#ifndef _WINDOWS
     ::signal(SIGHUP,sighandler);
     ::signal(SIGQUIT,sighandler);
     ::signal(SIGCHLD,sighandler);
     ::signal(SIGUSR1,sighandler);
     ::signal(SIGUSR2,sighandler);
-#endif
     if (s_startMsg) {
 	Message* m = new Message("module.update");
 	m->addParam("fulltext",s_startMsg);
@@ -2172,10 +1984,8 @@ int Engine::engineCleanup()
     checkPoint();
     m_dispatcher.dequeue();
     ::signal(SIGTERM,SIG_DFL);
-#ifndef _WINDOWS
     ::signal(SIGHUP,SIG_DFL);
     ::signal(SIGQUIT,SIG_DFL);
-#endif
     delete this;
     int mux = Mutex::locks();
     if (mux < 0)
@@ -2191,9 +2001,6 @@ int Engine::engineCleanup()
 	if (str)
 	    Debug(DebugNote,"Exiting with %d allocated objects: %s",obj,str.c_str());
     }
-#ifdef _WINDOWS
-    ::WSACleanup();
-#endif
     setStatus(SERVICE_STOPPED);
     return s_haltcode;
 }
@@ -2361,18 +2168,6 @@ bool Engine::loadPluginDir(const String& relPath)
     }
     if (path.endsWith(PATH_SEP))
 	path = path.substr(0,path.length()-1);
-#ifdef _WINDOWS
-    WIN32_FIND_DATA entry;
-    HANDLE hf = ::FindFirstFile(path + PATH_SEP "*",&entry);
-    if (hf == INVALID_HANDLE_VALUE) {
-	Debug(DebugWarn,"Engine::loadPlugins() failed directory '%s'",path.safe());
-	return false;
-    }
-    do {
-	tryPluginFile(entry.cFileName,path,defload);
-    } while (::FindNextFile(hf,&entry) && !exiting());
-    ::FindClose(hf);
-#else
     DIR *dir = ::opendir(path);
     if (!dir) {
 	Debug(DebugWarn,"Engine::loadPlugins() failed directory '%s'",path.safe());
@@ -2382,7 +2177,6 @@ bool Engine::loadPluginDir(const String& relPath)
     while (((entry = ::readdir(dir)) != 0) && !exiting())
 	tryPluginFile(entry->d_name,path,defload);
     ::closedir(dir);
-#endif
     return true;
 }
 
@@ -2830,16 +2624,10 @@ static void usage(bool client, FILE* f)
 "     z            Timestamp debugging in local timezone YYYYMMDDhhmmss.uuuuuu\n"
 "     Z            Timestamp debugging in local timezone YYYY-MM-DD_hh:mm:ss.uuuuuu\n"
     ,client ? "" :
-#ifdef _WINDOWS
-"   --service      Run as Windows service\n"
-"   --install      Install the Windows service\n"
-"   --remove       Remove the Windows service\n"
-#else
 "   -d             Daemonify, suppress output unless logged\n"
 "   -s[=msec]      Supervised, restart if crashes or locks up, optionally sleeps initially\n"
 "   -r             Enable rotation of log file (needs -s and -l)\n"
 "   -S sanity      Set size of supervised sanity points pool\n"
-#endif
     ,s_cfgfile.safe()
     ,s_usrpath.safe());
 }
@@ -2866,12 +2654,8 @@ static void version()
 
 int Engine::main(int argc, const char** argv, const char** env, RunMode mode, EngineLoop loop, bool fail)
 {
-#ifdef _WINDOWS
-    int service = 0;
-#else
     bool daemonic = false;
     int supervised = 0;
-#endif
     bool client = (mode == Client);
     Debugger::Formatting tstamp = Debugger::TextLSep;
     bool colorize = false;
@@ -2926,23 +2710,6 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 			    version();
 			    return 0;
 			}
-#ifdef _WINDOWS
-			else if (!(client ||::strcmp(pc,"service"))) {
-			    service |= YSERV_RUN;
-			    pc = 0;
-			    continue;
-			}
-			else if (!(client || ::strcmp(pc,"install"))) {
-			    service |= YSERV_INS;
-			    pc = 0;
-			    continue;
-			}
-			else if (!(client || ::strcmp(pc,"remove"))) {
-			    service |= YSERV_DEL;
-			    pc = 0;
-			    continue;
-			}
-#endif
 			initUsrPath(s_usrpath);
 			badopt(client,0,argv[i]);
 			return EINVAL;
@@ -2958,7 +2725,6 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 		    case 'q':
 			debug_level--;
 			break;
-#ifndef _WINDOWS
 		    case 'd':
 			daemonic = true;
 			break;
@@ -2986,7 +2752,6 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 			else if (s_max_sanity > INIT_SANITY)
 			    s_max_sanity = INIT_SANITY;
 			break;
-#endif
 		    case 't':
 			s_logtruncate = true;
 			break;
@@ -3159,67 +2924,6 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
     if (s_engineCheck && !s_engineCheck->check(s_cmds))
 	return s_haltcode;
 
-#ifdef _WINDOWS
-    if ((mode == Server) && !service)
-	service = YSERV_RUN;
-
-    if (service & YSERV_DEL) {
-	if (service & (YSERV_RUN|YSERV_INS)) {
-	    ::fprintf(stderr,"Option --remove prohibits --install and --service\n");
-	    return EINVAL;
-	}
-	SC_HANDLE sc = OpenSCManager(0,0,SC_MANAGER_ALL_ACCESS);
-	if (!sc) {
-	    ::fprintf(stderr,"Could not open Service Manager, code %u\n",::GetLastError());
-	    return EPERM;
-	}
-	SC_HANDLE sv = OpenService(sc,"yate",DELETE|SERVICE_STOP);
-	if (sv) {
-	    ControlService(sv,SERVICE_CONTROL_STOP,0);
-	    if (!DeleteService(sv)) {
-		DWORD err = ::GetLastError();
-		if (err != ERROR_SERVICE_MARKED_FOR_DELETE)
-		    ::fprintf(stderr,"Could not delete Service, code %u\n",err);
-	    }
-	    CloseServiceHandle(sv);
-	}
-	else {
-	    DWORD err = ::GetLastError();
-	    if (err != ERROR_SERVICE_DOES_NOT_EXIST)
-		::fprintf(stderr,"Could not open Service, code %u\n",err);
-	}
-	CloseServiceHandle(sc);
-	return 0;
-    }
-    if (service & YSERV_INS) {
-	char buf[1024];
-	if (!GetModuleFileName(0,buf,sizeof(buf))) {
-	    ::fprintf(stderr,"Could not find my own executable file, code %u\n",::GetLastError());
-	    return EINVAL;
-	}
-	String s(buf);
-	if (mode != Server)
-	    s << " --service";
-	if (workdir)
-	    s << " -w \"" << workdir << "\"";
-
-	SC_HANDLE sc = OpenSCManager(0,0,SC_MANAGER_ALL_ACCESS);
-	if (!sc) {
-	    ::fprintf(stderr,"Could not open Service Manager, code %u\n",::GetLastError());
-	    return EPERM;
-	}
-	SC_HANDLE sv = CreateService(sc,"yate","Yet Another Telephony Engine",GENERIC_EXECUTE,
-	    SERVICE_WIN32_OWN_PROCESS,SERVICE_DEMAND_START,SERVICE_ERROR_NORMAL,
-	    s.c_str(),0,0,0,0,0);
-	if (sv)
-	    CloseServiceHandle(sv);
-	else
-	    ::fprintf(stderr,"Could not create Service, code %u\n",::GetLastError());
-	CloseServiceHandle(sc);
-	if (!(service & YSERV_RUN))
-	    return 0;
-    }
-#else
     if (client && (daemonic || supervised)) {
 	::fprintf(stderr,"Options -d and -s not supported in client mode\n");
 	return EINVAL;
@@ -3244,7 +2948,6 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 	}
 	s_interactive = false;
     }
-#endif
 
     if (pidfile) {
 	int fd = ::open(pidfile,O_WRONLY|O_CREAT,0644);
@@ -3256,9 +2959,6 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 	}
     }
 
-#ifdef _WINDOWS
-    if (!service)
-#endif
 	logFileOpen();
 
     debugLevel(debug_level);
@@ -3313,24 +3013,15 @@ int Engine::main(int argc, const char** argv, const char** env, RunMode mode, En
 	}
     }
     int retcode = -1;
-#ifndef _WINDOWS
     if (supervised)
 	retcode = supervise(supervised);
     else
 	s_childpid = ::getpid();
     if (retcode >= 0)
 	return retcode;
-#endif
 
     Debugger::setFormatting(tstamp);
 
-#ifdef _WINDOWS
-    if (service) {
-	s_interactive = false;
-	retcode = ::StartServiceCtrlDispatcher(dispatchTable) ? 0 : ::GetLastError();
-    }
-    else
-#endif
 	retcode = engineRun(loop);
 
     return retcode;

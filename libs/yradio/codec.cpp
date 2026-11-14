@@ -438,7 +438,8 @@ static inline unsigned int setMCCMNC(XmlElement* in, uint8_t*& out, unsigned int
 {
     if (!(in && out && len >= 3))
 	return GSML3Codec::ParserErr;
-    XmlElement* xml = findChild ? in->findFirstChild(&YSTRING("PLMNidentity")) : in;
+    // Перегрузка по ссылке работает и при отключённых статических строках.
+    XmlElement* xml = findChild ? in->findFirstChild(YSTRING("PLMNidentity")) : in;
     if (!xml) {
 	*out = *(out+1) = *(out+2) =0xff;
 	if (advance) {
@@ -951,20 +952,20 @@ static unsigned int encodeEPSMobileIdent(const GSML3Codec* codec,  uint8_t proto
 	    if (setMCCMNC(xml,buf,len))
 		return CONDITIONAL_ERROR(param,IncorrectOptionalIE,IncorrectMandatoryIE);
 	    // MMEGroupID
-	    XmlElement* child = xml->findFirstChild(&YSTRING("MMEGroupID"));
+	    XmlElement* child = xml->findFirstChild(YSTRING("MMEGroupID"));
 	    unsigned int val = (unsigned int)-1;
 	    if (!(child && ((val = child->getText().toInteger(val)) <= 0xffff)))
 		return CONDITIONAL_ERROR(param,IncorrectOptionalIE,IncorrectMandatoryIE);
 	    setUINT16(val,buf,len,true);
 	    // MME Code
-	    child = xml->findFirstChild(&YSTRING("MMECode"));
+	    child = xml->findFirstChild(YSTRING("MMECode"));
 	    if (!(child && ((val = child->getText().toInteger(-1)) <= 0xff)))
 		return CONDITIONAL_ERROR(param,IncorrectOptionalIE,IncorrectMandatoryIE);
 	    *buf++ = (uint8_t) val;
 	    out.append(d);
 	    // M-TMSI
 	    d.clear();
-	    child = xml->findFirstChild(&YSTRING("M_TMSI"));
+	    child = xml->findFirstChild(YSTRING("M_TMSI"));
 	    if (!(child && d.unHexify(child->getText()) && d.length() == 4))
 		return CONDITIONAL_ERROR(param,IncorrectOptionalIE,IncorrectMandatoryIE);
 	    out.append(d);

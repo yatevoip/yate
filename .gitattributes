@@ -1,0 +1,6 @@
+# Shell-скрипты должны запускаться в Linux/WSL после Windows checkout.
+*.sh text eol=lf
+/run.in text eol=lf
+/cmake/run.in text eol=lf
+/cmake/yate-config.in text eol=lf
+/libs/ysig/run-ss7test text eol=lf

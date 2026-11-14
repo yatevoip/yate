@@ -24,17 +24,6 @@
 #include <yateclass.h>
 #include <yatemime.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYSIP_EXPORTS
-#define YSIP_API __declspec(dllexport)
-#else
-#ifndef LIBYSIP_STATIC
-#define YSIP_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YSIP_API
 #define YSIP_API

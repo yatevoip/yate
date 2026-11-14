@@ -7,7 +7,6 @@
 ;logs_dir=
 
 ; public_read: bool: Make the log files publically readable
-; This setting does not apply to Windows
 ;public_read=false
 
 

@@ -23,17 +23,6 @@
 
 #include <yateclass.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYRTP_EXPORTS
-#define YRTP_API __declspec(dllexport)
-#else
-#ifndef LIBYRTP_STATIC
-#define YRTP_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YRTP_API
 #define YRTP_API

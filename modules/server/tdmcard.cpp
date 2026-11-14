@@ -22,9 +22,6 @@
 #include <yatephone.h>
 #include <yatesig.h>
 
-#ifdef _WINDOWS
-#error This module is not for Windows
-#else
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -1433,6 +1430,5 @@ bool TdmModule::commandComplete(Message& msg, const String& partLine,
 
 }; // anonymous namespace
 
-#endif /* _WINDOWS */
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

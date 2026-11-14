@@ -21,17 +21,6 @@
 
 #include <yatephone.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYPBX_EXPORTS
-#define YPBX_API __declspec(dllexport)
-#else
-#ifndef LIBYPBX_STATIC
-#define YPBX_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YPBX_API
 #define YPBX_API

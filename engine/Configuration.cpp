@@ -1199,11 +1199,7 @@ void ConfigPriv::processInclude(NamedList* sect, ObjList& stack, bool& ok)
 #ifdef CONFIGURATION_DBG_IO
 #define ConfigDebugIO Debug
 #else
-#ifdef _WINDOWS
-#define ConfigDebugIO do { break; } while
-#else
 #define ConfigDebugIO(arg...)
-#endif
 #endif
 bool ConfigPrivFile::readLine(String& line, bool& ok)
 {

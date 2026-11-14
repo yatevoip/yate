@@ -13,12 +13,6 @@ YATE_REVISION:= @PACKAGE_REVISION@
 
 CC  := @CC@ -Wall
 CXX := @CXX@ -Wall
-MOC := @QT4_MOC@
-QT4_INC := @QT4_INC@
-QT4_LIB := @QT4_LIB@
-QT4_INC_NET := @QT4_INC_NET@
-QT4_LIB_NET := @QT4_LIB_NET@
-QT4_STATIC_MODULES :=
 HAVE_PGSQL := @HAVE_PGSQL@
 PGSQL_INC := @PGSQL_INC@
 PGSQL_LIB := @PGSQL_LIB@
@@ -98,7 +92,7 @@ PROGS := cdrbuild.yate cdrcombine.yate cdrfile.yate regexroute.yate \
 	server/hep3_capture.yate
 
 LIBS :=
-DIRS := client server jabber qt4 sip sig radio
+DIRS := client server jabber sip sig radio
 
 ifneq ($(HAVE_PGSQL),no)
 PROGS := $(PROGS) server/pgsqldb.yate
@@ -128,13 +122,6 @@ ifneq (@HAVE_COREAUDIO@,no)
 PROGS := $(PROGS) client/coreaudio.yate
 endif
 
-ifneq (@HAVE_QT4@,no)
-ifeq (@QT4_STATIC_MODULES@,no)
-PROGS := $(PROGS) qt4/updater.yate qt4/customtable.yate qt4/customtext.yate \
-	qt4/customtree.yate qt4/widgetlist.yate qt4/clientarchive.yate
-endif
-endif
-
 ifneq (@HAVE_ZAP@,no)
 PROGS := $(PROGS) server/zapcard.yate
 endif
@@ -156,10 +143,6 @@ endif
 
 ifneq ($(HAVE_SPANDSP),no)
 PROGS := $(PROGS) faxchan.yate
-endif
-
-ifneq (@HAVE_H323@,no)
-PROGS := $(PROGS) h323chan.yate
 endif
 
 ifneq (@HAVE_GSM@,no)
@@ -248,7 +231,7 @@ strip: all do-strip
 
 .PHONY: clean
 clean: do-clean
-	@-$(RM) $(PROGS) $(LIBS) *.o qt4/*.o qt4/*.moc core 2>/dev/null
+	@-$(RM) $(PROGS) $(LIBS) *.o core 2>/dev/null
 	@-for i in $(PROGS) ; do \
 	    $(RM) -rf $$i.dSYM 2>/dev/null; \
 	done;
@@ -277,10 +260,6 @@ uninstall: do-uninstall
 subdirs:
 	@mkdir -p $(DIRS)
 
-qt4/%.o: @srcdir@/qt4/%.cpp $(MKDEPS) $(INCFILES)
-	$(MAKE) $(patsubst %.o,%.moc,$@)
-	$(COMPILE) -c -o $@ $(QT4_INC) -I@top_srcdir@/clients/qt4 -I@srcdir@/qt4 $<
-
 %.o: @srcdir@/%.cpp $(MKDEPS) $(INCFILES)
 	$(COMPILE) -c $<
 
@@ -305,13 +284,6 @@ server/%.yate: @srcdir@/server/%.cpp $(MKDEPS) $(INCFILES)
 
 client/%.yate: @srcdir@/client/%.cpp $(MKDEPS) $(INCFILES)
 	mkdir -p client && $(MODCOMP) -o $@ $(LOCALFLAGS) $(EXTERNFLAGS) $< $(LOCALLIBS) $(YATELIBS) $(EXTERNLIBS)
-
-qt4/%.yate: @srcdir@/qt4/%.cpp ../libyateqt4.so $(MKDEPS) $(INCFILES)
-	$(MAKE) $(patsubst %.yate,%.moc,$@)
-	$(MODCOMP) -o $@ $(LOCALFLAGS) $(QT4_INC) $(EXTERNFLAGS) -I@top_srcdir@/clients/qt4 -Iqt4 $< $(LOCALLIBS) ../libyateqt4.so $(YATELIBS) $(QT4_LIB) $(EXTERNLIBS)
-
-qt4/%.moc: @srcdir@/qt4/%.h $(MKDEPS) $(INCFILES)
-	mkdir -p qt4 && $(MOC) $(DEFS) $(INCLUDES) $(QT4_INC) -I@top_srcdir@/clients/qt4 -I@srcdir@/qt4 -o $@ $<
 
 sig/%.yate: @srcdir@/sig/%.cpp $(MKDEPS) $(INCFILES)
 	mkdir -p sig && $(MODCOMP) -o $@ $(LOCALFLAGS) $(EXTERNFLAGS) $< $(LOCALLIBS) $(YATELIBS) $(EXTERNLIBS)
@@ -340,9 +312,6 @@ sig/camel_map.yate: LOCALLIBS = -lyatesig -lyateasn
 server/analogdetect.yate: ../libs/ymodem/libyatemodem.a
 server/analogdetect.yate: LOCALFLAGS = -I@top_srcdir@/libs/ymodem
 server/analogdetect.yate: LOCALLIBS = -L../libs/ymodem -lyatemodem
-
-h323chan.yate: EXTERNFLAGS = @H323_INC@
-h323chan.yate: EXTERNLIBS = @H323_LIB@
 
 server/pgsqldb.yate: EXTERNFLAGS = $(PGSQL_INC)
 server/pgsqldb.yate: EXTERNLIBS = $(PGSQL_LIB)
@@ -424,9 +393,6 @@ rmanager.yate: EXTERNLIBS = $(COREDUMP_LIB)
 
 msgsniff.yate: $(INCMATCHING)
 
-qt4/updater.yate: EXTERNFLAGS = $(QT4_INC_NET)
-qt4/updater.yate: EXTERNLIBS = $(QT4_LIB_NET)
-
 javascript.yate: ../libyatescript.so ../libs/ypbx/libyatepbx.a $(INCMATCHING) $(INCMIME)
 javascript.yate: LOCALFLAGS = -I@top_srcdir@/libs/yscript -I@top_srcdir@/libs/ypbx
 javascript.yate: LOCALLIBS = -lyatescript -L../libs/ypbx -lyatepbx
@@ -479,9 +445,6 @@ radio/ybladerf.yate: EXTERNLIBS = $(LIBUSB_LIB)
 
 ../libs/ypbx/libyatepbx.a: @top_srcdir@/libs/ypbx/yatepbx.h
 	$(MAKE) -C ../libs/ypbx
-
-../libyateqt4.so: @top_srcdir@/clients/qt4/qt4client.h
-	$(MAKE) -C ../clients/qt4
 
 ../libyateasn.so ../libs/yasn/libyasn.a: @top_srcdir@/libs/yasn/yateasn.h
 	$(MAKE) -C ../libs/yasn

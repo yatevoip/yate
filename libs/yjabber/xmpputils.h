@@ -24,17 +24,6 @@
 #include <yateclass.h>
 #include <yatexml.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYJABBER_EXPORTS
-#define YJABBER_API __declspec(dllexport)
-#else
-#ifndef LIBYJABBER_STATIC
-#define YJABBER_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YJABBER_API
 #define YJABBER_API

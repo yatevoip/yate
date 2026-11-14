@@ -74,8 +74,6 @@ do_start()
 		log_failure_msg "Group \"$YATE_GROUP\" not found."
 		exit 1
 	fi
-
-	export PWLIB_ASSERT_ACTION=C
 	start-stop-daemon --start --quiet --pidfile $PIDFILE \
 		--exec $DAEMON --test >>/dev/null \
 		|| return 1

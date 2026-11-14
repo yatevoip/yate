@@ -9805,9 +9805,6 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 	    return true;
 	}
 	if (cmd.endsWith("/")
-#ifdef _WINDOWS
-	    || cmd.endsWith("\\")
-#endif
 	) {
 	    retVal << "Missing file name. Cannot load directory '" << cmd <<"'\n\r";
 	    return true;
@@ -9815,10 +9812,6 @@ bool JsModule::commandExecute(String& retVal, const String& line)
 
 	int extPos = cmd.rfind('.');
 	int sepPos = cmd.rfind('/');
-#ifdef _WINDOWS
-	int backPos = cmd.rfind('\\');
-	sepPos = sepPos > backPos ? sepPos : backPos;
-#endif
 	if (extPos < 0 || sepPos > extPos) { // for "dir.name/filename" cases
 	    extPos = cmd.length();
 	    cmd += ".js";

@@ -21,15 +21,6 @@
 
 #include <string.h>
 
-#ifdef _WINDOWS
-#include <process.h>
-typedef unsigned long HTHREAD;
-
-#define EINVAL_ERR  ERROR_INVALID_PARAMETER
-#define ENOTSUP_ERR ERROR_NOT_SUPPORTED
-#define EINVALTHR_ERR ERROR_INVALID_HANDLE
-
-#else
 
 #if defined(THREAD_AFFINITY) || defined(SCHED_AFFINITY)
 #ifndef _GNU_SOURCE
@@ -49,7 +40,6 @@ typedef pthread_t HTHREAD;
 #ifndef PTHREAD_EXPLICIT_SCHED
 #define PTHREAD_EXPLICIT_SCHED 0
 static int pthread_attr_setinheritsched(pthread_attr_t *,int) { return 0; }
-#endif
 #endif
 
 #ifdef HAVE_PRCTL
@@ -89,7 +79,7 @@ public:
     static int getAffinity(ThreadPrivate* t, DataBlock& outMask);
     Thread* m_thread;
     HTHREAD thread;
-#if !defined(_WINDOWS) && defined(SCHED_AFFINITY)
+#if defined(SCHED_AFFINITY)
     pid_t m_tid;
 #endif
     NamedCounter* m_counter;
@@ -98,12 +88,7 @@ public:
     bool m_updest;
     bool m_cancel;
     const char* m_name;
-#ifdef _WINDOWS
-    static void startFunc(void* arg);
-    DWORD_PTR m_affinityMask;
-#else
     static void* startFunc(void* arg);
-#endif
     static void cleanupFunc(void* arg);
     static void destroyFunc(void* arg);
 };
@@ -116,27 +101,6 @@ using namespace TelEngine;
 #define HARD_KILLS 5
 #define KILL_WAIT 32
 
-#ifdef _WINDOWS
-#define TLS_MAGIC 0xfeeb1e
-static DWORD tls_index = TLS_MAGIC;
-static DWORD getTls()
-{
-    // this seems unsafe but is not - allocation happens once before
-    //  any Thread is actually created
-    if (tls_index == TLS_MAGIC)
-	tls_index = ::TlsAlloc();
-    if (tls_index == (DWORD)-1)
-	// if it happened is REALLY BAD so better die quick and clean!
-	abort();
-    return tls_index;
-}
-
-static inline bool haveAffinity()
-{
-    // TODO handle detection of support on Windows
-    return true;
-}
-#else /* _WINDOWS */
 static pthread_key_t current_key = PTHREAD_KEYS_MAX; // this signifies invalid key
 
 class ThreadPrivateKeyAlloc
@@ -160,7 +124,6 @@ static inline bool haveAffinity()
 }
 
 static ThreadPrivateKeyAlloc keyAllocator;
-#endif /* _WINDOWS */
 
 static TokenDict s_prio[] = {
     { "lowest", Thread::Lowest },
@@ -180,7 +143,6 @@ ThreadPrivate* ThreadPrivate::create(Thread* t,const char* name,Thread::Priority
 {
     ThreadPrivate *p = new ThreadPrivate(t,name);
     int e = 0;
-#ifndef _WINDOWS
     // Set a decent (256K) stack size that won't eat all virtual memory
     pthread_attr_t attr;
     ::pthread_attr_init(&attr);
@@ -220,35 +182,8 @@ ThreadPrivate* ThreadPrivate::create(Thread* t,const char* name,Thread::Priority
 	    Debug(DebugInfo,"Successfully set high thread priority %d",prio);
 #endif
     }
-#endif /* _WINDOWS */
 
     for (int i=0; i<5; i++) {
-#ifdef _WINDOWS
-	HTHREAD t = ::_beginthread(startFunc,16*PTHREAD_STACK_MIN,p);
-	e = (t == (HTHREAD)-1) ? errno : 0;
-	if (!e) {
-	    p->thread = t;
-	    int pr = THREAD_PRIORITY_NORMAL;
-	    switch (prio) {
-		case Thread::Lowest:
-		    pr = THREAD_PRIORITY_LOWEST;
-		    break;
-		case Thread::Low:
-		    pr = THREAD_PRIORITY_BELOW_NORMAL;
-		    break;
-		case Thread::High:
-		    pr = THREAD_PRIORITY_ABOVE_NORMAL;
-		    break;
-		case Thread::Highest:
-		    pr = THREAD_PRIORITY_HIGHEST;
-		    break;
-		default:
-		    break;
-	    }
-	    if (pr != THREAD_PRIORITY_NORMAL)
-		::SetThreadPriority(reinterpret_cast<HANDLE>(t),pr);
-	}
-#else /* _WINDOWS */
 	e = ::pthread_create(&p->thread,&attr,startFunc,p);
 #ifdef PTHREAD_INHERIT_SCHED
 	if ((0 == i) && (EPERM == e) && (prio > Thread::Normal)) {
@@ -257,14 +192,11 @@ ThreadPrivate* ThreadPrivate::create(Thread* t,const char* name,Thread::Priority
 	    e = EAGAIN;
 	}
 #endif
-#endif /* _WINDOWS */
 	if (e != EAGAIN)
 	    break;
 	Thread::usleep(20);
     }
-#ifndef _WINDOWS
     ::pthread_attr_destroy(&attr);
-#endif
     if (e) {
 	Alarm("engine","system",DebugCrit,"Error %d while creating pthread in '%s' [%p]",e,name,p);
 	p->m_thread = 0;
@@ -282,20 +214,7 @@ ThreadPrivate::ThreadPrivate(Thread* t,const char* name)
 #ifdef DEBUG
     Debugger debug("ThreadPrivate::ThreadPrivate","(%p,\"%s\") [%p]",t,name,this);
 #endif
-#if defined(_WINDOWS)
-    m_affinityMask = 0;
-    DWORD_PTR sysAffin = 0;
-    if (!::GetProcessAffinityMask(::GetCurrentProcess(),&m_affinityMask,&sysAffin)) {
-	int err = ::GetLastError();
-	Debug(DebugNote,"ThreadPrivate::ThreadPrivate(%p,\"%s\") - "
-		"Failed to get process affinity, err=%d [%p]",t,name,err,this);
-    }
-#ifdef DEBUG
-    else
-	Debug(DebugAll,"ThreadPrivate::ThreadPrivate(%p,\"%s\") - Process affinity = %lx,"
-		" system affinity = %lx [%p]",t,name,m_affinityMask,sysAffin,this);
-#endif
-#elif defined(SCHED_AFFINITY)
+#if defined(SCHED_AFFINITY)
     m_tid = -1;
 #endif
     // Inherit object counter of creating thread
@@ -361,39 +280,17 @@ void ThreadPrivate::pubdestroy()
 void ThreadPrivate::run()
 {
     DDebug(DebugAll,"ThreadPrivate::run() '%s' [%p]",m_name,this);
-#ifdef _WINDOWS
-    ::TlsSetValue(getTls(),this);
-#else
     ::pthread_setspecific(current_key,this);
     pthread_cleanup_push(cleanupFunc,this);
 #ifdef PTHREAD_CANCEL_ASYNCHRONOUS
     ::pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS,0);
 #endif
     ::pthread_detach(::pthread_self());
-#endif /* _WINDOWS */
 
 #ifdef HAVE_PRCTL
 #ifdef PR_SET_NAME
     if (m_name)
 	prctl(PR_SET_NAME,(unsigned long)m_name,0,0,0);
-#endif
-#endif
-#ifdef _WINDOWS
-#ifndef NDEBUG
-    if (m_name) {
-	struct {
-	    DWORD dwType;
-	    LPCSTR szName;
-	    DWORD dwThreadID;
-	    DWORD dwFlags;
-	} threadInfo;
-	threadInfo.dwType = 0x1000;
-	threadInfo.szName = m_name;
-	threadInfo.dwThreadID = (DWORD)-1;
-	threadInfo.dwFlags = 0;
-	__try { RaiseException(0x406D1388, 0, sizeof(threadInfo)/sizeof(DWORD), (DWORD*)&threadInfo); }
-	__except (EXCEPTION_CONTINUE_EXECUTION) { }
-    }
 #endif
 #endif
 
@@ -403,9 +300,7 @@ void ThreadPrivate::run()
     if (m_thread)
 	m_thread->run();
 
-#ifndef _WINDOWS
     pthread_cleanup_pop(1);
-#endif
 }
 
 bool ThreadPrivate::cancel(bool hard)
@@ -427,11 +322,6 @@ bool ThreadPrivate::cancel(bool hard)
 		}
 	    }
 	    m_running = false;
-#ifdef _WINDOWS
-	    Debug(DebugCrit,"ThreadPrivate '%s' terminating win32 thread %lu [%p]",
-		m_name,thread,this);
-	    ret = ::TerminateThread(reinterpret_cast<HANDLE>(thread),0) != 0;
-#else
 #ifdef PTHREAD_CANCEL_ASYNCHRONOUS
 	    Debug(critical ? DebugInfo : DebugWarn,"ThreadPrivate '%s' terminating pthread %p [%p]",
 		m_name,&thread,this);
@@ -440,7 +330,6 @@ bool ThreadPrivate::cancel(bool hard)
 	    Debug(DebugCrit,"ThreadPrivate '%s' cannot terminate %p on this platform [%p]",
 		m_name,&thread,this);
 #endif
-#endif /* _WINDOWS */
 	    if (ret) {
 		// hard cancel succeeded - object is unsafe to touch any more
 		Thread::msleep(1);
@@ -473,11 +362,7 @@ void ThreadPrivate::cleanup()
 
 ThreadPrivate* ThreadPrivate::current()
 {
-#ifdef _WINDOWS
-    return reinterpret_cast<ThreadPrivate *>(::TlsGetValue(getTls()));
-#else
     return reinterpret_cast<ThreadPrivate *>(::pthread_getspecific(current_key));
-#endif
 }
 
 int ThreadPrivate::setAffinity(ThreadPrivate* t, const DataBlock& cpuMask)
@@ -493,21 +378,7 @@ int ThreadPrivate::setAffinity(ThreadPrivate* t, const DataBlock& cpuMask)
     if (!cpuMask.length())
 	return EINVAL_ERR;
 
-#ifdef _WINDOWS
-
-    DWORD_PTR mask = 0;
-    if (sizeof(mask) < cpuMask.length())
-	Debug(DebugNote,"CPU affinity mask is '%u' long, permitted length is '%u', ignoring exceeding bits",
-	      cpuMask.length() * 8, sizeof(DWORD_PTR) * 8);
-    for (unsigned int i = 0; i < sizeof(mask) && i < cpuMask.length(); i++)
-	mask |= (cpuMask.at(i) << (i << 3));
-    if (!(mask = ::SetThreadAffinityMask(t ?reinterpret_cast<HANDLE>(t->thread) : ::GetCurrentThread(),mask)))
-	return ::GetLastError();
-    if (t)
-	t->m_affinityMask = mask;
-    return 0;
-
-#elif defined(THREAD_AFFINITY) || defined(SCHED_AFFINITY)
+#if defined(THREAD_AFFINITY) || defined(SCHED_AFFINITY)
 
     cpu_set_t cpuSet;
     CPU_ZERO(&cpuSet);
@@ -541,7 +412,7 @@ int ThreadPrivate::setAffinity(ThreadPrivate* t, const DataBlock& cpuMask)
     return sched_setaffinity(tid,sizeof(cpuSet),&cpuSet) ? errno : 0;
 #endif
 
-#endif /* _WINDOWS */
+#endif // THREAD_AFFINITY || SCHED_AFFINITY
     return ENOTSUP_ERR;
 }
 
@@ -550,39 +421,7 @@ int ThreadPrivate::getAffinity(ThreadPrivate* t, DataBlock& outMask)
     if (!haveAffinity())
 	return ENOTSUP_ERR;
 
-#ifdef _WINDOWS
-
-    HANDLE thr = t ? reinterpret_cast<HANDLE>(t->thread) : ::GetCurrentThread();
-    DWORD_PTR setMask = 0;
-    if (t) {
-	setMask = t->m_affinityMask;
-    }
-    else {
-	DWORD_PTR sysAffin = 0;
-	if (!::GetProcessAffinityMask(::GetCurrentProcess(),&setMask,&sysAffin)) {
-	    int err = ::GetLastError();
-	    Debug(DebugNote,"ThreadPrivate::getAffinity(t=%p) - "
-		    "Failed to get process affinity, err=%d [%p]",t,err);
-	}
-    }
-    DWORD_PTR mask = ::SetThreadAffinityMask(thr,setMask);
-    if (!mask)
-	return ::GetLastError();
-    if (mask != setMask) {// maybe mask was changed by something external, restore it
-	if (!(::SetThreadAffinityMask(thr,mask))) {
-	    Debug(DebugNote,"Failed to restore thread CPU affinity to '%lx', "
-		    "now set to '%lx' [%p] for thread '%s' [%p]",mask,setMask,t ? t->m_name : "self",t);
-	    return ::GetLastError();
-	}
-    }
-    outMask.resize(sizeof(mask));
-    uint8_t* bytes = (uint8_t*)outMask.data();
-    for (unsigned int i = 0; i < sizeof(mask) ; i++) {
-	*bytes++ = (uint8_t)(mask >> (i << 3)) & 0xff;
-    }
-    return 0;
-
-#elif defined(THREAD_AFFINITY) || defined(SCHED_AFFINITY)
+#if defined(THREAD_AFFINITY) || defined(SCHED_AFFINITY)
 
     cpu_set_t cpuSet;
     CPU_ZERO(&cpuSet);
@@ -625,7 +464,7 @@ int ThreadPrivate::getAffinity(ThreadPrivate* t, DataBlock& outMask)
     }
 
     return ret;
-#endif /* _WINDOWS */
+#endif // THREAD_AFFINITY || SCHED_AFFINITY
     return ENOTSUP_ERR;
 }
 
@@ -690,18 +529,9 @@ void ThreadPrivate::killall()
 	    c = 1;
 	else {
 	    if (ok) {
-#ifdef _WINDOWS
-		Debug(DebugWarn,"Could not kill %p but seems OK to delete it (library bug?)",t);
-		s_tmutex.unlock();
-		t->destroy();
-		s_tmutex.lock();
-		if (t != l->get())
-		    c = 1;
-#else
 		Debug(DebugCrit,"Could not kill cancelled %p so we'll abandon it (library bug?)",t);
 		l->remove(t,false);
 		c = 1;
-#endif
 		continue;
 	    }
 	    Thread::msleep(1);
@@ -745,27 +575,17 @@ void ThreadPrivate::cleanupFunc(void* arg)
 	t->cleanup();
 }
 
-#ifdef _WINDOWS
-void ThreadPrivate::startFunc(void* arg)
-#else
 void* ThreadPrivate::startFunc(void* arg)
-#endif
 {
     DDebug(DebugAll,"ThreadPrivate::startFunc(%p)",arg);
     ThreadPrivate *t = reinterpret_cast<ThreadPrivate *>(arg);
-#if !defined(_WINDOWS) && defined(SCHED_AFFINITY) && defined(SYS_gettid)
+#if defined(SCHED_AFFINITY) && defined(SYS_gettid)
     // get TID as early as possible if needed
     t->m_tid = (pid_t)syscall(SYS_gettid);
     DDebug(DebugAll,"Thread '%s' (%p) has TID:'%d'",t->m_name,t,t->m_tid);
 #endif
     t->run();
-#ifdef _WINDOWS
-    t->m_running = false;
-    if (t->m_updest)
-	t->destroy();
-#else
     return 0;
-#endif
 }
 
 Runnable::~Runnable()
@@ -1018,15 +838,7 @@ void Thread::exit()
     if (t && t->m_thread && t->m_thread->locked())
 	Alarm("engine","bug",DebugFail,"Thread::exit() in '%s' with mutex locks (%d held) [%p]",
 	    t->m_name,t->m_thread->locks(),t->m_thread);
-#ifdef _WINDOWS
-    if (t) {
-	t->m_running = false;
-	t->destroy();
-    }
-    ::_endthread();
-#else
     ::pthread_exit(0);
-#endif
 }
 
 bool Thread::check(bool exitNow)
@@ -1048,13 +860,7 @@ void Thread::cancel(bool hard)
 
 void Thread::yield(bool exitCheck)
 {
-#ifdef _WINDOWS
-    // zero sleep is bad if we have high priority threads, they
-    //  won't relinquish the timeslice for lower priority ones
-    ::Sleep(1);
-#else
     ::usleep(0);
-#endif
     if (exitCheck)
 	check();
 }
@@ -1072,38 +878,21 @@ void Thread::idle(bool exitCheck)
 
 void Thread::sleep(unsigned int sec, bool exitCheck)
 {
-#ifdef _WINDOWS
-    ::Sleep(sec*1000);
-#else
     ::sleep(sec);
-#endif
     if (exitCheck)
 	check();
 }
 
 void Thread::msleep(unsigned long msec, bool exitCheck)
 {
-#ifdef _WINDOWS
-    ::Sleep(msec);
-#else
     ::usleep(msec*1000L);
-#endif
     if (exitCheck)
 	check();
 }
 
 void Thread::usleep(unsigned long usec, bool exitCheck)
 {
-#ifdef _WINDOWS
-    if (usec) {
-	usec = (usec + 500) / 1000;
-	if (!usec)
-	    usec = 1;
-    }
-    ::Sleep(usec);
-#else
     ::usleep(usec);
-#endif
     if (exitCheck)
 	check();
 }
@@ -1149,29 +938,13 @@ void Thread::preExec()
 // Get the last thread error
 int Thread::lastError()
 {
-#ifdef _WINDOWS
-    return ::GetLastError();
-#else
     return errno;
-#endif
 }
 
 // Get an error string from system.
 bool Thread::errorString(String& buffer, int code)
 {
-#ifdef _WINDOWS
-    LPTSTR buf = 0;
-    DWORD res = FormatMessageA(
-	FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-	NULL,code,0,(LPTSTR)&buf,0,0);
-    if (buf) {
-	if (res > 0)
-	    buffer.assign(buf,res);
-	::LocalFree(buf);
-    }
-#else
     buffer = ::strerror(code);
-#endif
     if (buffer)
 	return true;
     buffer << "Unknown error (code=" << code << ")";

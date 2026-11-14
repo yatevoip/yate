@@ -7,9 +7,7 @@
 # to disable all PSTN card drivers run rpmbuild --define 'nopstn 1'
 # to disable USB support run rpmbuild --define 'nousb 1'
 # to disable SCTP support run rpmbuild --define 'nosctp 1'
-# to disable H.323 support run rpmbuild --define 'noh323 1'
 # to disable AMR codecs run rpmbuild --define 'noamr 1'
-# to disable the GUI clients run rpmbuild --define 'nogui 1'
 # to disable only Zaptel support run rpmbuild --define 'nozap 1'
 # to disable only TDMV support run rpmbuild --define 'notdm 1'
 
@@ -26,9 +24,7 @@
 %{?nopstn:%define no_pstn 1}
 %{?nousb:%define no_usb 1}
 %{?nosctp:%define no_sctp 1}
-%{?noh323:%define no_h323 1}
 %{?noamr:%define no_amr 1}
-%{?nogui:%define no_gui 1}
 %{?nozap:%define no_zaptel 1}
 %{?notdm:%define no_tdmapi 1}
 
@@ -103,6 +99,11 @@ for small to large scale projects.
 %doc %{_defaultdocdir}/yate-%{version}/WebRTC-LICENSE_THIRD_PARTY
 %doc %{_defaultdocdir}/yate-%{version}/WebRTC-PATENTS
 %{_libdir}/libyate.so.*
+%dir %{_datadir}/yate/sounds
+%{_datadir}/yate/sounds/*
+%dir %{_datadir}/yate/help
+%{_datadir}/yate/help/*
+%config(noreplace) %{_sysconfdir}/yate/providers.conf
 %{_libdir}/libyatescript.so.*
 %{_libdir}/libyatejabber.so.*
 %{_libdir}/libyatesig.so.*
@@ -332,24 +333,6 @@ compress voice at bitrates ranging from 2 to 44 kbps.
 %{_libdir}/yate/speexcodec.yate
 
 
-%if "%{no_h323}" != "1"
-
-%package h323
-Summary:	H.323 protocol driver for Yate
-Group:		Applications/Communication
-Requires:	%{name} = %{version}-%{release}
-
-%description h323
-Yate driver for the ITU-T H.323 VoIP protocol based on the OpenH323 library.
-
-%files h323
-%{_libdir}/yate/h323chan.yate
-%config(noreplace) %{_sysconfdir}/yate/h323chan.conf
-
-%define conf_h323 %{nil}
-%else
-%define conf_h323 --without-pwlib
-%endif
 
 
 %if "%{no_pstn}" != "1"
@@ -488,58 +471,6 @@ that support database access will be able to use SQLite.
 %config(noreplace) %{_sysconfdir}/yate/sqlitedb.conf
 
 
-%if "%{no_gui}" != "1"
-
-%package client-common
-Summary:	Common files for all Yate clients
-Group:		Applications/Communication
-Requires:	%{name} = %{version}-%{release}
-
-%description client-common
-This package includes the common files needed to use Yate as a VoIP client.
-
-%files client-common
-%defattr(-, root, root)
-%{_datadir}/pixmaps/null_team-*.png
-%dir %{_datadir}/yate/skins
-%{_datadir}/yate/skins/*
-%dir %{_datadir}/yate/sounds
-%{_datadir}/yate/sounds/*
-%dir %{_datadir}/yate/help
-%{_datadir}/yate/help/*
-%config(noreplace) %{_sysconfdir}/yate/providers.conf
-
-
-%package qt4
-Summary:	Qt-4 client package for Yate
-Group:		Applications/Communication
-Provides:	%{name}-client
-Requires:	%{name} = %{version}-%{release}
-Requires:	%{name}-client-common = %{version}-%{release}
-
-%description qt4
-The yate-qt4 package includes the files needed to use Yate as a VoIP client
-with a Qt version 4 graphical interface.
-
-%files qt4
-%defattr(-, root, root)
-%{_bindir}/yate-qt4
-%{_libdir}/libyateqt4.so.*
-%{_libdir}/yate/qt4/*.yate
-%{_menudir}/yate-qt4.menu
-%{_datadir}/applications/yate-qt4.desktop
-%config(noreplace) %{_sysconfdir}/yate/yate-qt4.conf
-
-%post qt4
-test -x /usr/bin/update-menus && /usr/bin/update-menus || /bin/true
-
-%postun qt4
-test -x /usr/bin/update-menus && /usr/bin/update-menus || /bin/true
-
-%define conf_gui %{nil}
-%else
-%define conf_gui --without-libqt4
-%endif
 
 
 %if "%{no_usb}" != "1"
@@ -606,9 +537,6 @@ Requires:	%{name}-alsa = %{version}-%{release}
 %endif
 Requires:	%{name}-gsm = %{version}-%{release}
 Requires:	%{name}-speex = %{version}-%{release}
-%if "%{no_h323}" != "1"
-Requires:	%{name}-h323 = %{version}-%{release}
-%endif
 %if "%{no_pstn}" != "1"
 Requires:	%{name}-isdn = %{version}-%{release}
 %endif
@@ -619,9 +547,6 @@ Requires:	%{name}-openssl = %{version}-%{release}
 Requires:	%{name}-zlib = %{version}-%{release}
 Requires:	%{name}-mysql = %{version}-%{release}
 Requires:	%{name}-pgsql = %{version}-%{release}
-%if "%{no_gui}" != "1"
-Requires:	%{name}-qt4 = %{version}-%{release}
-%endif
 Requires:	%{name}-scripts = %{version}-%{release}
 
 %description all
@@ -643,13 +568,7 @@ The devel package must still be installed separately.
 %if "%{no_tdmapi}" == "1"
 %define _unpackaged_files_terminate_build 0
 %endif
-%if "%{no_h323}" == "1"
-%define _unpackaged_files_terminate_build 0
-%endif
 %if "%{no_amr}" == "1"
-%define _unpackaged_files_terminate_build 0
-%endif
-%if "%{no_gui}" == "1"
 %define _unpackaged_files_terminate_build 0
 %endif
 %ifnos Linux
@@ -661,10 +580,10 @@ The devel package must still be installed separately.
 
 # older rpmbuild uses these macro basic regexps
 %define _provides_exceptions pear(libyate\\|devel(libyate
-%define _requires_exceptions pear(libyate\\|devel(libyate\\|devel(libQt
+%define _requires_exceptions pear(libyate\\|devel(libyate
 # newer rpmbuild needs these global extended regexps
 %global __provides_exclude pear\\(libyate|devel\\(libyate
-%global __requires_exclude pear\\(libyate|devel\\(libyate|devel\\(libQt
+%global __requires_exclude pear\\(libyate|devel\\(libyate
 #
 %if "%{no_auto_deps}" == "1"
 %define local_find_requires %{_builddir}/%{name}/local-find-requires
@@ -694,7 +613,7 @@ chmod +x %{local_find_requires} %{local_find_provides}
 	--datadir=%{_datadir} --includedir=%{_includedir} \
 	--libdir=%{_libdir} --mandir=%{_mandir} --with-archlib=%{_lib} \
 	--without-spandsp --without-coredumper \
-	%{conf_sctp} %{conf_h323} %{conf_amr} %{conf_pstn} %{conf_usb} %{conf_gui} \
+	%{conf_sctp} %{conf_amr} %{conf_pstn} %{conf_usb} \
 	%{?extra_conf}
 make %{stripped} %{?extra_make}
 %{?extra_step}

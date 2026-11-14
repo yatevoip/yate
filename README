@@ -18,49 +18,63 @@
 Building YATE Software
 ----------------------
 
-YATE have been tested on Linux and Windows and was ported to FreeBSD.
+This fork targets Unix systems, primarily Linux and FreeBSD.
+Windows, the Qt4 graphical client and H.323/OpenH323 support have been removed.
 Please report bugs at bugs@voip.null.ro
 
-To build Yate the quick way is:
-  ./configure
-  make
-  make install
+Основная система сборки — CMake 3.16 или новее. Нужны компиляторы C/C++,
+поддерживающие C++11 и GNU-совместимые параметры, и POSIX threads.
 
-If you are lacking both doxygen and kdoc you will need to install without the
-API documentation:
-  make install-noapi
+Подробная инструкция для разработчиков: docs/CMAKE_MIGRATION.md
 
-1. Building the engine
+Сборка, проверка и установка:
+  cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  cmake --build build --parallel
+  (cd build && ctest --output-on-failure)
+  cmake --install build
 
-You have just to run 'make engine' in the main directory.
+Префикс и каталоги задаются при настройке:
+  cmake -S . -B build -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_SYSCONFDIR=/etc -DCMAKE_INSTALL_LIBDIR=lib64
 
-2. Building the modules.
+Существующие конфигурационные файлы при установке сохраняются. Для упаковки
+можно использовать DESTDIR. Новая сборка не требует запуска autogen.sh или
+configure и поддерживает пути с пробелами. Старые Makefile.in и Autoconf
+пока сохранены для сравнения и совместимости существующих пакетных сценариев.
 
-Run 'make modules' in the main directory or 'make' in the modules directory.
+Необязательные библиотеки определяются автоматически. YATE_WITH_<ИМЯ> принимает
+AUTO, ON или OFF: ON требует доступную совместимую библиотеку, OFF отключает
+компонент. Поддерживаются OPENSSL, ZLIB, SQLITE, MYSQL, POSTGRESQL, GSM, SPEEX,
+AMRNB, SPANDSP, LIBUSB, SCTP, RESOLVER, OSS, ALSA, COREAUDIO, DAHDI, ZAPTEL,
+WANPIPE, WANPIPE_HWEC, COREDUMPER и встроенные ILBC, ILBC_WEBRTC, ISAC, G722_WEBRTC.
 
-3. Building the test modules.
+Примеры отдельных вариантов сборки:
+  cmake -S . -B build-core -DYATE_BUILD_MODULES=OFF
+  cmake -S . -B build-sip \
+    '-DYATE_MODULES=ysipchan;yrtpchan;regexroute;tonegen' -DYATE_WITH_OPENSSL=OFF
+  cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug \
+    -DYATE_INTERNAL_REGEX=ON -DYATE_ATOMICS=OFF -DYATE_POLL=OFF
 
-Run 'make test' in the main directory or 'make' in the test directory.
+Для разных наборов модулей используйте отдельные каталоги сборки: старые
+скомпилированные плагины после изменения опций автоматически не удаляются.
+Дополнительные параметры: YATE_RTTI=AUTO/ON/OFF, YATE_FDSIZE=8192 (0 отключает
+изменение размера fd_set), YATE_STATIC_STRINGS=ON/OFF, YATE_SSE2=ON/OFF,
+YATE_ISAC_FIXED=ON/OFF, YATE_BUILD_TEST_MODULES=ON/OFF и BUILD_TESTING=ON/OFF.
 
-After you have create the test modules use 'mktestlinks' in the modules
-directory to make links from test modules into modules directory.
+CTest проверяет ядро, загрузку собранных плагинов и, при наличии нужных модулей
+и Python 3.6+, локальный SIP-звонок с передачей RTP. Утилита SS7 не требует
+аппаратной платы. Тесты не заменяют проверку реального оборудования и внешних БД.
 
-4. Building the classes API documentation
-
-Run 'make apidocs' in the main directory. You will need to have kdoc or
-doxygen installed.
-
-
-Alternatively you can just 'make everything' in the main directory which will
-build them all.
+Для API-документации нужны Doxygen и -DYATE_BUILD_DOCUMENTATION=ON.
+Для внешних CMake-модулей доступны find_package(Yate CONFIG REQUIRED) и цель
+Yate::yate; также устанавливаются pkg-config-файл yate.pc и yate-config.
 
 
 Running YATE
 ------------
 
-You can run YATE directly from the build directory - just use 'run' script
-from the main directory.
-  ./run -vvv
+Можно запускать YATE без установки через скрипт из каталога сборки:
+  ./build/run -vvv
 
 You can also install YATE - then you can run it from anywhere.
   yate -vvv

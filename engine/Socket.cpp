@@ -41,7 +41,6 @@
 
 #undef HAS_AF_UNIX
 
-#ifndef _WINDOWS
 
 #include <net/if.h>
 #include <dirent.h>
@@ -56,7 +55,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <utime.h>
-#endif
 
 #ifndef SHUT_RD
 #define SHUT_RD 0
@@ -110,33 +108,6 @@ static const TokenDict s_tosValues[] = {
     { 0, 0 }
 };
 
-#ifdef _WINDOWS
-
-// The number of seconds from January 1, 1601 (Windows FILETIME)
-//  to EPOCH January 1, 1970
-#define FILETIME_EPOCH_SEC 11644473600
-
-// Convert from FILETIME (100 nsec units since January 1, 1601)
-//  to time_t (seconds since January 1, 1970)
-static inline unsigned int ftToEpoch(FILETIME& ft)
-{
-    // FILETIME in seconds
-    u_int64_t rval = ((ULARGE_INTEGER*)&ft)->QuadPart / 10000000;
-    // EPOCH time in seconds
-    rval -= FILETIME_EPOCH_SEC;
-    return (unsigned int)rval;
-}
-
-// Convert from time_t (seconds since January 1, 1970)
-//  to FILETIME (100 nsec units since January 1, 1601)
-static void epochToFt(unsigned int secEpoch, FILETIME& ft)
-{
-    u_int64_t time = (secEpoch + FILETIME_EPOCH_SEC) * 10000000;
-    ft.dwLowDateTime = (DWORD)time;
-    ft.dwHighDateTime = (DWORD)(time >> 32);
-}
-
-#endif
 
 
 //
@@ -484,11 +455,7 @@ bool SocketAddr::host(const String& name)
 		if (!host(tmp))
 		    break;
 		if (ifc && iface(ifc,true)) {
-#ifndef _WINDOWS
 		    scopeId(if_nametoindex(m_iface));
-#else
-		    scopeId(m_iface.toInteger(0,0,0));
-#endif
 		}
 		else
 		    m_iface.clear();
@@ -930,11 +897,7 @@ bool Stream::supportsPipes()
 
 bool Stream::supportsPairs()
 {
-#ifdef _WINDOWS
-    return false;
-#else
     return true;
-#endif
 }
 
 
@@ -1033,11 +996,7 @@ bool File::terminate()
     if (tmp != invalidHandle()) {
 	DDebug(DebugAll,"File::terminate() handle=%d [%p]",(int)m_handle,this);
 	m_handle = invalidHandle();
-#ifdef _WINDOWS
-	ret = CloseHandle(tmp) != 0;
-#else
 	ret = !::close(tmp);
-#endif
     }
     if (ret)
 	clearError();
@@ -1070,20 +1029,12 @@ HANDLE File::detach()
 
 HANDLE File::invalidHandle()
 {
-#ifdef _WINDOWS
-    return INVALID_HANDLE_VALUE;
-#else
     return -1;
-#endif
 }
 
 void File::copyError()
 {
-#ifdef _WINDOWS
-    m_error = (int)GetLastError();
-#else
     m_error = errno;
-#endif
 }
 
 bool File::canRetry() const
@@ -1093,17 +1044,12 @@ bool File::canRetry() const
     if (!m_error)
 	return true;
     return (m_error == EAGAIN) || (m_error == EINTR)
-#ifndef _WINDOWS
 	|| (m_error == EWOULDBLOCK)
-#endif
 	;
 }
 
 bool File::setBlocking(bool block)
 {
-#ifdef _WINDOWS
-    return false;
-#else
     unsigned long flags = 1;
     flags = ::fcntl(m_handle,F_GETFL);
     if ((signed long)flags < 0) {
@@ -1120,7 +1066,6 @@ bool File::setBlocking(bool block)
     }
     clearError();
     return true;
-#endif
 }
 
 bool File::openPath(const char* name, bool canWrite, bool canRead,
@@ -1130,34 +1075,6 @@ bool File::openPath(const char* name, bool canWrite, bool canRead,
 	return false;
     if (null(name) || !(canWrite || canRead))
 	return false;
-#ifdef _WINDOWS
-    DWORD access = 0;
-    if (canWrite)
-	access |= GENERIC_WRITE;
-    if (canRead)
-	access |= GENERIC_READ;
-    DWORD createMode;
-    if (create)
-	createMode = (!canRead && !append) ? CREATE_ALWAYS : OPEN_ALWAYS;
-    else
-	createMode = OPEN_EXISTING;
-    DWORD share = 0;
-    if (!canWrite && canRead)
-	share |= FILE_SHARE_READ;
-    HANDLE h = CreateFile(name,access,share,NULL,createMode,FILE_ATTRIBUTE_NORMAL,NULL);
-    if (h == invalidHandle()) {
-	copyError();
-	return false;
-    }
-    // Move file pointer if append. Result might be the same as the error code
-    if (append &&
-	::SetFilePointer(h,0,NULL,FILE_END) == INVALID_SET_FILE_POINTER &&
-	::GetLastError() != NO_ERROR) {
-	copyError();
-	::CloseHandle(h);
-	return false;
-    }
-#else
     int flags = O_LARGEFILE;
     if (canWrite)
 	flags |= canRead ? O_RDWR : O_WRONLY;
@@ -1181,7 +1098,6 @@ bool File::openPath(const char* name, bool canWrite, bool canRead,
 	copyError();
 	return false;
     }
-#endif
     attach(h);
     clearError();
     return true;
@@ -1191,15 +1107,6 @@ int64_t File::length()
 {
     if (!valid())
 	return 0;
-#ifdef _WINDOWS
-    LARGE_INTEGER li;
-    li.LowPart = ::GetFileSize(m_handle,(LPDWORD)(&li.HighPart));
-    if (li.LowPart == INVALID_FILE_SIZE && ::GetLastError() != NO_ERROR) {
-	copyError();
-	return -1;
-    }
-    return li.QuadPart;
-#else
     int64_t pos = seek(SeekCurrent);
     if (pos < 0) {
 	copyError();
@@ -1208,7 +1115,6 @@ int64_t File::length()
     int64_t len = seek(SeekEnd);
     seek(SeekBegin,pos);
     return len;
-#endif
 }
 
 // Set the file read/write pointer
@@ -1216,19 +1122,6 @@ int64_t File::seek(SeekPos pos, int64_t offset)
 {
     if (!valid())
 	return -1;
-#ifdef _WINDOWS
-    int whence = (pos == SeekBegin) ? FILE_BEGIN : ((pos == SeekEnd) ? FILE_END : FILE_CURRENT);
-    LARGE_INTEGER li;
-    li.QuadPart = offset;
-    li.LowPart = ::SetFilePointer(m_handle,li.LowPart,&li.HighPart,whence);
-    // Check low 32bit value and the last error
-    // It might have the same as the error code
-    if (li.LowPart == INVALID_SET_FILE_POINTER && ::GetLastError() != NO_ERROR) {
-	copyError();
-	return -1;
-    }
-    return li.QuadPart;
-#else
     int whence = (pos == SeekBegin) ? SEEK_SET : ((pos == SeekEnd) ? SEEK_END : SEEK_CUR);
     off_t p = ::lseek(m_handle,(off_t)offset,whence);
     if (p == (off_t)-1) {
@@ -1236,99 +1129,52 @@ int64_t File::seek(SeekPos pos, int64_t offset)
 	return -1;
     }
     return (int64_t)p;
-#endif
 }
 
 int File::writeData(const void* buffer, int length)
 {
     if (!buffer)
 	length = 0;
-#ifdef _WINDOWS
-    DWORD nbytes = 0;
-    if (WriteFile(m_handle,buffer,length,&nbytes,0)) {
-	clearError();
-	return nbytes;
-    }
-    copyError();
-    return -1;
-#else
     int res = ::write(m_handle,buffer,length);
     if (res >= 0)
 	clearError();
     else
 	copyError();
     return res;
-#endif
 }
 
 int File::readData(void* buffer, int length)
 {
     if (!buffer)
 	length = 0;
-#ifdef _WINDOWS
-    DWORD nbytes = 0;
-    if (ReadFile(m_handle,buffer,length,&nbytes,0)) {
-	clearError();
-	return nbytes;
-    }
-    else if (::GetLastError() == ERROR_HANDLE_EOF) {
-	clearError();
-	return 0;
-    }
-    copyError();
-    return -1;
-#else
     int res = ::read(m_handle,buffer,length);
     if (res >= 0)
 	clearError();
     else
 	copyError();
     return res;
-#endif
 }
 
 bool File::createPipe(File& reader, File& writer)
 {
-#ifdef _WINDOWS
-    HANDLE rd, wr;
-    SECURITY_ATTRIBUTES sa;
-    sa.nLength = sizeof(sa);
-    sa.lpSecurityDescriptor = NULL;
-    sa.bInheritHandle = TRUE;
-    if (::CreatePipe(&rd,&wr,&sa,0)) {
-	reader.attach(rd);
-	writer.attach(wr);
-	return true;
-    }
-#else
     HANDLE fifo[2];
     if (!::pipe(fifo)) {
 	reader.attach(fifo[0]);
 	writer.attach(fifo[1]);
 	return true;
     }
-#endif
     return false;
 }
 
 // Retrieve the file's modification time (the file must be already opened)
 bool File::getFileTime(unsigned int& secEpoch)
 {
-#ifdef _WINDOWS
-    FILETIME ftWrite;
-    if (::GetFileTime(handle(),NULL,NULL,&ftWrite)) {
-	clearError();
-	secEpoch = ftToEpoch(ftWrite);
-	return true;
-    }
-#else
     struct stat st;
     if (0 == ::fstat(handle(),&st)) {
 	clearError();
 	secEpoch = st.st_mtime;
 	return true;
     }
-#endif
     copyError();
     return false;
 }
@@ -1382,11 +1228,7 @@ static inline bool fileNameOk(const char* name, int* error)
     if (!null(name))
 	return true;
     if (error)
-#ifdef _WINDOWS
-	*error = ERROR_INVALID_PARAMETER;
-#else
 	*error = EINVAL;
-#endif
     return false;
 }
 
@@ -1395,18 +1237,6 @@ bool File::setFileTime(const char* name, unsigned int secEpoch, int* error)
 {
     if (!fileNameOk(name,error))
 	return false;
-#ifdef _WINDOWS
-    File f;
-    if (f.openPath(name,true)) {
-	FILETIME ftWrite;
-	epochToFt(secEpoch,ftWrite);
-	bool ok = (0 != ::SetFileTime(f.handle(),NULL,NULL,&ftWrite));
-	if (!ok && error)
-	    *error = ::GetLastError();
-	f.terminate();
-	return ok;
-    }
-#else
     struct stat st;
     if (0 == ::stat(name,&st)) {
 	struct utimbuf tb;
@@ -1415,7 +1245,6 @@ bool File::setFileTime(const char* name, unsigned int secEpoch, int* error)
 	if (0 == ::utime(name,&tb))
 	    return true;
     }
-#endif
     return getLastError(error);
 }
 
@@ -1424,19 +1253,11 @@ bool File::getFileTime(const char* name, unsigned int& secEpoch, int* error)
 {
     if (!fileNameOk(name,error))
 	return false;
-#ifdef _WINDOWS
-    WIN32_FILE_ATTRIBUTE_DATA fa;
-    if (::GetFileAttributesExA(name,GetFileExInfoStandard,&fa)) {
-	secEpoch = ftToEpoch(fa.ftLastWriteTime);
-	return true;
-    }
-#else
     struct stat st;
     if (0 == ::stat(name,&st)) {
 	secEpoch = st.st_mtime;
 	return true;
     }
-#endif
     return getLastError(error);
 }
 
@@ -1445,17 +1266,8 @@ bool File::exists(const char* name, int* error)
 {
     if (!fileNameOk(name,error))
 	return false;
-#ifdef _WINDOWS
-    WIN32_FIND_DATA d;
-    HANDLE h = ::FindFirstFile(name,&d);
-    if (h != invalidHandle()) {
-	::FindClose(h);
-	return true;
-    }
-#else
     if (0 == ::access(name,F_OK))
 	return true;
-#endif
     return getLastError(error);
 }
 
@@ -1464,16 +1276,8 @@ bool File::rename(const char* oldFile, const char* newFile, int* error)
 {
     if (!(fileNameOk(oldFile,error) && fileNameOk(newFile,error)))
 	return false;
-#ifdef _WINDOWS
-    DWORD flags = MOVEFILE_COPY_ALLOWED |  // Allow moving file on another volume
-	MOVEFILE_REPLACE_EXISTING |        // Replace existing
-	MOVEFILE_WRITE_THROUGH;            // Don't return until copy/delete is performed
-    if (::MoveFileExA(oldFile,newFile,flags))
-	return true;
-#else
     if (0 == ::rename(oldFile,newFile))
 	return true;
-#endif
     return getLastError(error);
 }
 
@@ -1481,13 +1285,8 @@ bool File::remove(const char* name, int* error)
 {
     if (!fileNameOk(name,error))
 	return false;
-#ifdef _WINDOWS
-    if (::DeleteFileA(name))
-	return true;
-#else
     if (0 == ::unlink(name))
 	return true;
-#endif
     return getLastError(error);
 }
 
@@ -1509,13 +1308,8 @@ bool File::mkDir(const char* path, int* error, int mode)
 {
     if (!fileNameOk(path,error))
 	return false;
-#ifdef _WINDOWS
-    if (::CreateDirectoryA(path,NULL))
-	return true;
-#else
     if (0 == ::mkdir(path,(mode_t)mode))
 	return true;
-#endif
     return getLastError(error);
 }
 
@@ -1524,13 +1318,8 @@ bool File::rmDir(const char* path, int* error)
 {
     if (!fileNameOk(path,error))
 	return false;
-#ifdef _WINDOWS
-    if (::RemoveDirectoryA(path))
-	return true;
-#else
     if (0 == ::rmdir(path))
 	return true;
-#endif
     return getLastError(error);
 }
 
@@ -1548,40 +1337,6 @@ bool File::listDirectory(const char* path, ObjList* dirs, ObjList* files, int* e
     if (!fileNameOk(path,error))
 	return false;
     bool ok = false;
-#ifdef _WINDOWS
-    String name(path);
-    if (!name.endsWith("\\"))
-	name << "\\";
-    name << "*";
-    // Init find
-    WIN32_FIND_DATAA d;
-    HANDLE hFind = ::FindFirstFileA(name,&d);
-    if (hFind == INVALID_HANDLE_VALUE) {
-	if (::GetLastError() == ERROR_NO_MORE_FILES)
-	    return true;
-	return getLastError(error);
-    }
-    // Enumerate content
-    ::SetLastError(0);
-    do {
-        if (d.dwFileAttributes & FILE_ATTRIBUTE_DEVICE ||
-	    skipSpecial(d.cFileName))
-	    continue;
-        if (d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-	    if (dirs)
-		dirs->append(new String(d.cFileName));
-	}
-	else if (files)
-	    files->append(new String(d.cFileName));
-    }
-    while (::FindNextFileA(hFind,&d));
-    int code = ::GetLastError();
-    ok = !code || code == ERROR_NO_MORE_FILES;
-    // Get error before closing the handle to avoid having a wrong one
-    if (!ok && error)
-	*error = code;
-    ::FindClose(hFind);
-#else
     errno = 0;
     DIR* dir = ::opendir(path);
     if (!dir) {
@@ -1619,7 +1374,6 @@ bool File::listDirectory(const char* path, ObjList* dirs, ObjList* files, int* e
     if (!ok && error)
 	*error = errno;
     ::closedir(dir);
-#endif // _WINDOWS
     return ok;
 }
 
@@ -1634,7 +1388,7 @@ unsigned int Socket::s_features = 0
 #ifdef SO_BINDTODEVICE
     | FBindToIface
 #endif
-#if defined(_WINDOWS) || defined(HAVE_POLL)
+#if defined(HAVE_POLL)
     | FEfficientSelect
 #endif
 #ifdef SO_EXCLUSIVEADDRUSE
@@ -1700,11 +1454,7 @@ bool Socket::terminate()
     if (tmp != invalidHandle()) {
 	DDebug(DebugAll,"Socket::terminate() handle=%d [%p]",m_handle,this);
 	m_handle = invalidHandle();
-#ifdef _WINDOWS
-	ret = !::closesocket(tmp);
-#else
 	ret = !::close(tmp);
-#endif
     }
     if (ret)
 	clearError();
@@ -1737,11 +1487,7 @@ SOCKET Socket::detach()
 
 SOCKET Socket::invalidHandle()
 {
-#ifdef _WINDOWS
-    return INVALID_SOCKET;
-#else
     return -1;
-#endif
 }
 
 const TokenDict* Socket::tosValues()
@@ -1751,20 +1497,12 @@ const TokenDict* Socket::tosValues()
 
 int Socket::socketError()
 {
-#ifdef _WINDOWS
-    return SOCKET_ERROR;
-#else
     return -1;
-#endif
 }
 
 void Socket::copyError()
 {
-#ifdef _WINDOWS
-    m_error = WSAGetLastError();
-#else
     m_error = errno;
-#endif
 }
 
 bool Socket::checkError(int retcode, bool strict)
@@ -1788,11 +1526,7 @@ bool Socket::canRetry() const
     if (!m_error)
 	return true;
     return (m_error == EAGAIN) || (m_error == EINTR) ||
-#ifdef _WINDOWS
-	(m_error == WSAEWOULDBLOCK);
-#else
 	(m_error == EWOULDBLOCK);
-#endif
 }
 
 // Check if the last error code indicates a non blocking operation in progress
@@ -1800,11 +1534,7 @@ bool Socket::inProgress() const
 {
     if (!valid())
 	return false;
-#ifdef _WINDOWS
-    return m_error == WSAEWOULDBLOCK;
-#else
     return m_error == EINPROGRESS;
-#endif
 }
 
 bool Socket::canSelect() const
@@ -2019,16 +1749,12 @@ int Socket::send(const void* buffer, int length, int flags)
 
 int Socket::writeData(const void* buffer, int length)
 {
-#ifdef _WINDOWS
-    return send(buffer,length);
-#else
     if (!buffer)
 	length = 0;
     int res = ::write(m_handle,buffer,length);
     checkError(res,true);
     applyFilters(buffer,res,0,0,0,false);
     return res;
-#endif
 }
 
 int Socket::recvFrom(void* buffer, int length, struct sockaddr* addr, socklen_t* adrlen, int flags)
@@ -2069,21 +1795,17 @@ int Socket::recv(void* buffer, int length, int flags)
 
 int Socket::readData(void* buffer, int length)
 {
-#ifdef _WINDOWS
-    return recv(buffer,length);
-#else
     if (!buffer)
 	length = 0;
     int res = ::read(m_handle,buffer,length);
     checkError(res,true);
     applyFilters(buffer,res,0);
     return res;
-#endif
 }
 
 bool Socket::efficientSelect()
 {
-#if defined(_WINDOWS) || defined(HAVE_POLL)
+#if defined(HAVE_POLL)
     return true;
 #else
     return false;
@@ -2095,11 +1817,9 @@ bool Socket::canSelect(SOCKET handle)
     if (handle == invalidHandle())
 	return false;
 #ifdef FD_SETSIZE
-#ifndef _WINDOWS
 #ifndef HAVE_POLL
     if (handle >= (SOCKET)FD_SETSIZE)
 	return false;
-#endif
 #endif
 #endif
     return true;
@@ -2135,10 +1855,9 @@ bool Socket::select(bool* readok, bool* writeok, bool* except, struct timeval* t
 	return true;
     }
 
-#else // HAVE_POLL
+#else
 
 #ifdef FD_SETSIZE
-#ifndef _WINDOWS
     static bool localFail = true;
     if (tmp >= (SOCKET)FD_SETSIZE) {
 	if (localFail) {
@@ -2148,7 +1867,6 @@ bool Socket::select(bool* readok, bool* writeok, bool* except, struct timeval* t
 	}
 	return false;
     }
-#endif
 #endif
     fd_set readfd,writefd,exceptfd;
     fd_set *rfds = 0;
@@ -2256,11 +1974,6 @@ int Socket::getTOS()
 bool Socket::setBlocking(bool block)
 {
     unsigned long flags = 1;
-#ifdef _WINDOWS
-    if (block)
-	flags = 0;
-    return checkError(::ioctlsocket(m_handle,FIONBIO,(unsigned long *) &flags));
-#else
     flags = ::fcntl(m_handle,F_GETFL);
     if ((signed long)flags < 0) {
 	copyError();
@@ -2271,7 +1984,6 @@ bool Socket::setBlocking(bool block)
     else
 	flags |= O_NONBLOCK;
     return checkError(::fcntl(m_handle,F_SETFL,flags));
-#endif
 }
 
 bool Socket::setReuse(bool reuse, bool exclusive, bool setPort)
@@ -2321,14 +2033,12 @@ bool Socket::setLinger(int seconds)
 
 bool Socket::createPair(Socket& sock1, Socket& sock2, int domain)
 {
-#ifndef _WINDOWS
     SOCKET pair[2];
     if (!::socketpair(domain,SOCK_STREAM,0,pair)) {
 	sock1.attach(pair[0]);
 	sock2.attach(pair[1]);
 	return true;
     }
-#endif
     return false;
 }
 

@@ -25,12 +25,6 @@
 
 extern "C"  {
 #include <speex/speex.h>
-#ifdef _WINDOWS
-/* For some reason the DLL does not export the mode variables */
-#define speex_nb_mode (*speex_lib_get_mode(SPEEX_MODEID_NB))
-#define speex_wb_mode (*speex_lib_get_mode(SPEEX_MODEID_WB))
-#define speex_uwb_mode (*speex_lib_get_mode(SPEEX_MODEID_UWB))
-#endif
 }
 
 using namespace TelEngine;

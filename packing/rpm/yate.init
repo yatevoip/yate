@@ -40,7 +40,6 @@ start() {
 	    force="--force"
 	    ;;
     esac
-    export PWLIB_ASSERT_ACTION=C
     daemon $force yate -d -p /var/run/yate.pid $OPTS
     RETVAL=$?
     echo

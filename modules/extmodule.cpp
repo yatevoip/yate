@@ -22,16 +22,10 @@
 
 #include <yatephone.h>
 
-#ifdef _WINDOWS
-
-#include <process.h>
-
-#else
 #include <yatepaths.h>
 
 #include <sys/stat.h>
 #include <sys/wait.h>
-#endif
 
 #include <string.h>
 #include <stdio.h>
@@ -405,14 +399,6 @@ static bool runProgram(const char *script, const char *args)
 {
     String info;
     fillScriptInfo(info,script,args);
-#ifdef _WINDOWS
-    int pid = ::_spawnl(_P_DETACH,script,args,NULL);
-    if (pid < 0) {
-	Debug(&__plugin,DebugWarn,"Failed to _spawnl() program %s: %d %s",
-	    info.c_str(),errno,strerror(errno));
-	return false;
-    }
-#else
     int pid = ::fork();
     if (pid < 0) {
 	Debug(&__plugin,DebugWarn,"Failed to fork() program %s: %d %s",
@@ -439,7 +425,6 @@ static bool runProgram(const char *script, const char *args)
 	// Shit happened. Die as quick and brutal as possible
 	::_exit(1);
     }
-#endif
     Debug(&__plugin,DebugAll,"Launched external program %s",info.c_str());
     return true;
 }
@@ -1011,10 +996,8 @@ void ExtModReceiver::die(bool clearChan)
     closeIn();
     // Release relays and messages since no confirmation can be received anymore
     flush();
-#ifndef _WINDOWS
     if (m_pid > 1)
 	::kill(m_pid,SIGTERM);
-#endif
     if (chan && clearChan)
 	chan->disconnect(m_reason);
     if (m_restart && !Engine::exiting()) {
@@ -1094,9 +1077,6 @@ bool ExtModReceiver::received(Message &msg, int id)
 
 bool ExtModReceiver::create(const char *script, const char *args)
 {
-#ifdef _WINDOWS
-    return false;
-#else
     String info;
     fillScriptInfo(info,script,args);
     String tmp(script);
@@ -1173,7 +1153,6 @@ bool ExtModReceiver::create(const char *script, const char *args)
     m_scripted = true;
     m_pid = pid;
     return true;
-#endif
 }
 
 void ExtModReceiver::cleanup()
@@ -1181,7 +1160,6 @@ void ExtModReceiver::cleanup()
 #ifdef DEBUG
     Debugger debug(DebugAll,"ExtModReceiver::cleanup()"," [%p]",this);
 #endif
-#ifndef _WINDOWS
     // We must call waitpid from here - same thread we started the child
     if (m_pid > 1) {
 	// No thread switching if possible
@@ -1211,7 +1189,6 @@ void ExtModReceiver::cleanup()
     }
     if (m_pid > 0)
 	m_pid = 0;
-#endif
     unuse();
 }
 

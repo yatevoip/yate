@@ -1,0 +1,132 @@
+install(EXPORT YateTargets FILE YateTargets.cmake NAMESPACE Yate::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Yate")
+configure_package_config_file("${PROJECT_SOURCE_DIR}/cmake/YateConfig.cmake.in"
+    "${PROJECT_BINARY_DIR}/YateConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Yate")
+write_basic_package_version_file("${PROJECT_BINARY_DIR}/YateConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}" COMPATIBILITY SameMajorVersion)
+install(FILES "${PROJECT_BINARY_DIR}/YateConfig.cmake" "${PROJECT_BINARY_DIR}/YateConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/Yate")
+install(FILES yateclass.h yatengine.h yatephone.h yatemime.h yatecbase.h
+    yatexml.h yatemath.h yatewiresniff.h yatematchingitem.h "${PROJECT_BINARY_DIR}/yateversn.h"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/yate")
+foreach(_lib yasn ysip yrtp ysdp yiax yjabber yscript ymgcp ymodem ypbx ysig ysnmp yradio)
+    file(GLOB _headers "${PROJECT_SOURCE_DIR}/libs/${_lib}/*.h")
+    install(FILES ${_headers} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/yate")
+endforeach()
+
+set(prefix "${CMAKE_INSTALL_PREFIX}")
+set(exec_prefix "\${prefix}")
+foreach(_dir lib include data sysconf)
+    if(_dir STREQUAL "include")
+        set(_cmake_dir "${CMAKE_INSTALL_INCLUDEDIR}")
+    elseif(_dir STREQUAL "lib")
+        set(_cmake_dir "${CMAKE_INSTALL_LIBDIR}")
+    elseif(_dir STREQUAL "data")
+        set(_cmake_dir "${CMAKE_INSTALL_DATADIR}")
+    else()
+        set(_cmake_dir "${CMAKE_INSTALL_SYSCONFDIR}")
+    endif()
+    if(IS_ABSOLUTE "${_cmake_dir}")
+        set(${_dir}dir "${_cmake_dir}")
+    else()
+        set(${_dir}dir "\${prefix}/${_cmake_dir}")
+    endif()
+endforeach()
+set(datarootdir "${datadir}")
+set(MODULE_CPPFLAGS "-fno-exceptions -fPIC")
+foreach(_definition IN LISTS YATE_PUBLIC_DEFINITIONS)
+    string(APPEND MODULE_CPPFLAGS " -D${_definition}")
+endforeach()
+if(YATE_RTTI STREQUAL "ON")
+    string(APPEND MODULE_CPPFLAGS " -frtti")
+elseif(YATE_RTTI STREQUAL "OFF")
+    string(APPEND MODULE_CPPFLAGS " -fno-rtti")
+endif()
+set(MODULE_LDFLAGS "-shared")
+if(APPLE)
+    set(MODULE_LDFLAGS "-bundle -Wl,-undefined,dynamic_lookup")
+endif()
+set(MODULE_SYMBOLS "")
+configure_file("${PROJECT_SOURCE_DIR}/cmake/yate.pc.in" "${PROJECT_BINARY_DIR}/yate.pc" @ONLY)
+install(FILES "${PROJECT_BINARY_DIR}/yate.pc" DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+yate_absolute_install_path(YATE_FULL_LIBDIR "${CMAKE_INSTALL_LIBDIR}")
+yate_absolute_install_path(YATE_FULL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}")
+get_filename_component(ARCHLIB "${CMAKE_INSTALL_LIBDIR}" NAME)
+# Сохраняем распространённые запросы --param старого yate-config.
+set(YATE_CONFIG_PARAMETERS "")
+foreach(_feature OPENSSL ZLIB SQLITE MYSQL LIBUSB GSM SPEEX AMRNB SPANDSP ALSA COREAUDIO WANPIPE COREDUMPER)
+    if(YATE_HAVE_${_feature})
+        set(_value yes)
+    else()
+        set(_value no)
+    endif()
+    string(APPEND YATE_CONFIG_PARAMETERS "        --param=HAVE_${_feature}) printf '%s\\n' '${_value}' ;;\n")
+endforeach()
+foreach(_pair "PGSQL|POSTGRESQL" "SOUNDCARD|OSS" "RESOLV|RESOLVER" "ILBC|ILBC"
+              "ILBCWR|ILBC_WEBRTC" "ISAC|ISAC" "G722WR|G722_WEBRTC" "ZAP|ZAP" "SCTP_NETINET|SCTP")
+    string(REPLACE "|" ";" _parts "${_pair}")
+    list(GET _parts 0 _legacy)
+    list(GET _parts 1 _feature)
+    if(YATE_HAVE_${_feature})
+        set(_value yes)
+    else()
+        set(_value no)
+    endif()
+    string(APPEND YATE_CONFIG_PARAMETERS "        --param=HAVE_${_legacy}) printf '%s\\n' '${_value}' ;;\n")
+endforeach()
+configure_file("${PROJECT_SOURCE_DIR}/cmake/yate-config.in" "${PROJECT_BINARY_DIR}/yate-config" @ONLY)
+configure_file("${PROJECT_SOURCE_DIR}/cmake/run.in" "${PROJECT_BINARY_DIR}/run" @ONLY)
+execute_process(COMMAND chmod +x "${PROJECT_BINARY_DIR}/run" "${PROJECT_BINARY_DIR}/yate-config"
+    RESULT_VARIABLE _chmod_result)
+if(NOT _chmod_result EQUAL 0)
+    message(FATAL_ERROR "Unable to make generated helper scripts executable")
+endif()
+install(PROGRAMS "${PROJECT_BINARY_DIR}/yate-config" DESTINATION "${CMAKE_INSTALL_BINDIR}")
+
+# При установке сохраняем конфигурацию, которую уже настроил администратор.
+file(GLOB YATE_CONFIG_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/conf.d/*.sample" "${PROJECT_SOURCE_DIR}/conf.d/*.default")
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/conf.d")
+foreach(_config IN LISTS YATE_CONFIG_FILES)
+    get_filename_component(_name "${_config}" NAME)
+    string(REGEX REPLACE "\\.(sample|default)$" "" _name "${_name}")
+    if(NOT EXISTS "${PROJECT_BINARY_DIR}/conf.d/${_name}")
+        configure_file("${_config}" "${PROJECT_BINARY_DIR}/conf.d/${_name}" COPYONLY)
+    endif()
+endforeach()
+configure_file("${PROJECT_SOURCE_DIR}/cmake/InstallConfigs.cmake.in"
+    "${PROJECT_BINARY_DIR}/InstallConfigs.cmake" @ONLY)
+install(SCRIPT "${PROJECT_BINARY_DIR}/InstallConfigs.cmake")
+
+install(PROGRAMS share/scripts/leavemail.php share/scripts/voicemail.php
+    share/scripts/route.php share/scripts/queue_in.php share/scripts/queue_out.php
+    share/scripts/banbrutes.php share/scripts/echo.sh share/scripts/tts.sh
+    DESTINATION "${YATE_INSTALL_SHAREDIR}/scripts")
+install(FILES share/scripts/libyate.php share/scripts/libyateivr.php share/scripts/libyatechan.php
+    share/scripts/libvoicemail.php share/scripts/libeliza.js share/scripts/libchatbot.js share/scripts/eliza.js
+    share/scripts/libyate.py share/scripts/Yate.pm DESTINATION "${YATE_INSTALL_SHAREDIR}/scripts")
+install(FILES share/data/snmp_mib.conf share/data/NULL-TEAM-MIB.txt share/data/YATE-MIB.txt
+    DESTINATION "${YATE_INSTALL_SHAREDIR}/data")
+if(YATE_HAVE_LIBUSB)
+    install(FILES share/data/hostedx115.rbf share/data/hostedx40.rbf DESTINATION "${YATE_INSTALL_SHAREDIR}/data")
+endif()
+install(FILES share/sounds/ring.au share/sounds/ring.wav share/sounds/tone.wav
+    DESTINATION "${YATE_INSTALL_SHAREDIR}/sounds")
+file(GLOB _help "${PROJECT_SOURCE_DIR}/share/help/*.yhlp")
+install(FILES ${_help} DESTINATION "${YATE_INSTALL_SHAREDIR}/help")
+install(FILES docs/man/yate.8 docs/man/yate-config.8 DESTINATION "${CMAKE_INSTALL_MANDIR}/man8")
+install(FILES README COPYING ChangeLog DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+install(FILES libs/ilbc/LICENSE.txt DESTINATION "${CMAKE_INSTALL_DOCDIR}" RENAME iLBC-LICENSE.txt)
+foreach(_license LICENSE LICENSE_THIRD_PARTY PATENTS)
+    install(FILES "libs/miniwebrtc/${_license}" DESTINATION "${CMAKE_INSTALL_DOCDIR}" RENAME "WebRTC-${_license}")
+endforeach()
+
+option(YATE_BUILD_DOCUMENTATION "Generate Doxygen API documentation" OFF)
+if(YATE_BUILD_DOCUMENTATION)
+    find_package(Doxygen REQUIRED)
+    set(DOXYGEN_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/docs")
+    doxygen_add_docs(apidocs ALL "${PROJECT_SOURCE_DIR}/yateclass.h" "${PROJECT_SOURCE_DIR}/yatengine.h"
+        "${PROJECT_SOURCE_DIR}/yatephone.h" "${PROJECT_SOURCE_DIR}/yatecbase.h"
+        "${PROJECT_SOURCE_DIR}/yatemime.h" "${PROJECT_SOURCE_DIR}/yatexml.h")
+    install(DIRECTORY "${PROJECT_BINARY_DIR}/docs/html/" DESTINATION "${CMAKE_INSTALL_DOCDIR}/api")
+endif()

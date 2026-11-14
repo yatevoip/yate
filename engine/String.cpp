@@ -1445,21 +1445,8 @@ static char* string_printf(unsigned int& length, const char* format, va_list& va
     //  - returns -1 on error or buffer length is less than number of bytes to write
     //  - returned value doesn't include the terminating NULL char (even if it was written to output)
     buf[length] = 0;
-#ifdef _WINDOWS
-    errno = 0;
-    int len = ::vsnprintf(buf,length,format,va);
-#else
     int len = ::vsnprintf(buf,length + 1,format,va);
-#endif
     if (len < 0) {
-#ifdef _WINDOWS
-	if (errno == ERANGE) {
-	    XDebug("String",DebugCrit,"string_printf() incomplete write");
-	    buf[length] = 0;
-	    length = 0;
-	    return buf;
-	}
-#endif
 	::free(buf);
 	Debug("String",DebugCrit,"string_printf(): vsnprintf() failed!");
 	return 0;

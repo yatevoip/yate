@@ -1,9 +1,0 @@
-core*
-*.o
-*.a
-*.so
-*.moc
-*.yate
-*.orig
-*~
-.*.swp

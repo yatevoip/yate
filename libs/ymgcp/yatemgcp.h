@@ -24,17 +24,6 @@
 #include <yateclass.h>
 #include <yatemime.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYMGCP_EXPORTS
-#define YMGCP_API __declspec(dllexport)
-#else
-#ifndef LIBYMGCP_STATIC
-#define YMGCP_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YMGCP_API
 #define YMGCP_API

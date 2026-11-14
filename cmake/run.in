@@ -1,0 +1,4 @@
+#!/bin/sh
+# Запускаем настроенную сборку без установки в систему.
+exec "@PROJECT_BINARY_DIR@/yate" -c "@PROJECT_BINARY_DIR@/conf.d" \
+    -m "@PROJECT_BINARY_DIR@/modules" -e "@PROJECT_SOURCE_DIR@/share" "$@"

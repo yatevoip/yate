@@ -23,17 +23,6 @@
 
 #include <yateclass.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYIAX_EXPORTS
-#define YIAX_API __declspec(dllexport)
-#else
-#ifndef LIBYIAX_STATIC
-#define YIAX_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YIAX_API
 #define YIAX_API

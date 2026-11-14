@@ -1,0 +1,32 @@
+name: CMake
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        configuration: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3 libssl-dev zlib1g-dev \
+            libpq-dev libmariadb-dev libsqlite3-dev libasound2-dev libsctp-dev \
+            libusb-1.0-0-dev libspeex-dev libgsm1-dev libspandsp-dev
+      - name: Configure
+        # В Debug проверяем также альтернативные реализации платформенных функций.
+        run: |
+          extra=()
+          if [ '${{ matrix.configuration }}' = Debug ]; then
+            extra=(-DYATE_INTERNAL_REGEX=ON -DYATE_ATOMICS=OFF -DYATE_POLL=OFF -DYATE_SSE2=ON -DYATE_ISAC_FIXED=ON)
+          fi
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} \
+            -DYATE_WITH_OPENSSL=ON -DYATE_WITH_SQLITE=ON -DYATE_WITH_MYSQL=ON \
+            -DYATE_WITH_POSTGRESQL=ON -DYATE_WITH_SCTP=ON "${extra[@]}"
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Stage install
+        run: DESTDIR="$PWD/stage" cmake --install build

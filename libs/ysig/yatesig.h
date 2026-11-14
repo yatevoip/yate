@@ -24,17 +24,6 @@
 
 #include <yateclass.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYSIG_EXPORTS
-#define YSIG_API __declspec(dllexport)
-#else
-#ifndef LIBYSIG_STATIC
-#define YSIG_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YSIG_API
 #define YSIG_API

@@ -83,11 +83,6 @@
 ;  If not set the platform default is doubled only in client mode
 ;idlemsec=
 
-; wintimer: int: Requested timer resolution in milliseconds (Windows only, does
-;  not work on 9x and ME). The default resolution depends on hardware, Windows
-;  version and currently running programs
-;wintimer=0
-
 ; trackparam: string: Name of the parameter used to track message through handlers
 ;  If empty or boolean true the default "handlers" will be used instead
 ;  Set to boolean false to disable tracking only if you are sure what you want
@@ -170,13 +165,8 @@
 [localsym]
 ; This section is used to force some modules to be loaded without their
 ;  symbols being globally available - if the operating system supports.
-; Windows will ignore this section completely.
 ; Each line has to be of the form:
 ;   modulename.yate=boolean
-
-; pwlib does not clean up properly on Linux so we must disable global symbols
-;  unfortunately preventing all pwlib plugins from loading
-h323chan.yate=yes
 
 
 [nounload]
@@ -191,8 +181,7 @@ h323chan.yate=yes
 ;  before any Yate module
 ; Each line has to be of the form:
 ;   /path/to/the/library.so=boolean
-; You should specify the full path to the library. Extension is operating
-;  system specific - usually .so for *NIX systems and .dll for Windows
+; You should specify the full path to the shared library (usually .so).
 
 
 [postload]
@@ -200,8 +189,7 @@ h323chan.yate=yes
 ;  after all Yate modules
 ; Each line has to be of the form:
 ;   /path/to/the/library.so=boolean
-; You should specify the full path to the library. Extension is operating
-;  system specific - usually .so for *NIX systems and .dll for Windows
+; You should specify the full path to the shared library (usually .so).
 
 
 [debug]
@@ -212,7 +200,6 @@ h323chan.yate=yes
 ;  modulename=parameters to debug
 ; Examples:
 ;  tone=off
-;  h323=level 9
 ;  sip=level 8
 ;  sip=filter 127.0.0.1
 

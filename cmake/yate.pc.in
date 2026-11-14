@@ -1,0 +1,18 @@
+prefix=@prefix@
+exec_prefix=${prefix}
+libdir=@libdir@
+includedir=@includedir@
+share=@YATE_FULL_SHAREDIR@
+config=@YATE_FULL_CONFIGDIR@
+modules=@YATE_FULL_MODULEDIR@
+scripts=${share}/scripts
+helpdir=${share}/help
+yate=yate
+yate_config=yate-config
+
+Name: Yate
+Description: Yet Another Telephony Engine
+URL: https://yate.ro/
+Version: @PROJECT_VERSION@
+Libs: -L"${libdir}" -lyate
+Cflags: -I"${includedir}/yate" @MODULE_CPPFLAGS@

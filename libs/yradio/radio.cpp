@@ -66,11 +66,7 @@
 #ifdef DEBUG_RADIO_READ
 #define DebugRadioRead(args...) Debug(this,DebugAll,args)
 #else
-#ifdef _WINDOWS
-#define DebugRadioRead do { break; } while
-#else
 #define DebugRadioRead(arg...)
-#endif
 #endif // DEBUG_RADIO_READ
 
 

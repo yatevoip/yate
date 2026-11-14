@@ -2224,10 +2224,10 @@ NamedList* TrunkInfo::parseTrunkInfo(String& info, const String& trunk, NamedLis
 bool AccountsInfo::load()
 {
     DDebug(&__plugin,DebugAll,"AccountsInfo::load() [%p] - loading data",this);
-    String modules[] = {"sip","h323","iax","jabberclient"};
+    String modules[] = {"sip","iax","jabberclient"};
 
-    int i = 0;
-    while (i < 4) {
+    unsigned int i = 0;
+    while (i < sizeof(modules) / sizeof(modules[0])) {
 	Message m("engine.status");
 	m.setParam("module",modules[i] + " accounts");
 	Engine::dispatch(m);

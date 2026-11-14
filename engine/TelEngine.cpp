@@ -26,58 +26,7 @@
 #include <time.h>
 
 
-#ifdef _WINDOWS
-
-#ifndef HAVE_GMTIME_S
-#include <errno.h>
-
-static int _gmtime_s(struct tm* _tm, const time_t* time)
-{
-    static TelEngine::Mutex m(false,"_gmtime_s");
-    struct tm* tmp;
-    if (!_tm)
-	return EINVAL;
-    _tm->tm_isdst = _tm->tm_yday = _tm->tm_wday = _tm->tm_year = _tm->tm_mon = _tm->tm_mday =
-	_tm->tm_hour = _tm->tm_min = _tm->tm_sec = -1;
-    if (!time)
-	return EINVAL;
-    m.lock();
-    tmp = gmtime(time);
-    if (!tmp) {
-	m.unlock();
-	return EINVAL;
-    }
-    *_tm = *tmp;
-    m.unlock();
-    return 0;
-}
-
-static int _localtime_s(struct tm* _tm, const time_t* time)
-{
-    static TelEngine::Mutex m(false,"_localtime_s");
-    struct tm* tmp;
-    if (!_tm)
-	return EINVAL;
-    _tm->tm_isdst = _tm->tm_yday = _tm->tm_wday = _tm->tm_year = _tm->tm_mon = _tm->tm_mday =
-	_tm->tm_hour = _tm->tm_min = _tm->tm_sec = -1;
-    if (!time)
-	return EINVAL;
-    m.lock();
-    tmp = localtime(time);
-    if (!tmp) {
-	m.unlock();
-	return EINVAL;
-    }
-    *_tm = *tmp;
-    m.unlock();
-    return 0;
-}
-
-#endif
-
-#else // !_WINDOWS
 #include <sys/resource.h>
-#endif
 
 namespace { // anonymous
 
@@ -877,17 +826,9 @@ unsigned int Debugger::formatTime(char* buf, Formatting format)
 		    time_t sec = (time_t)s;
 		    struct tm tmp;
 		    if (TextLocal == format || TextLSep == format)
-#ifdef _WINDOWS
-			_localtime_s(&tmp,&sec);
-#else
 			localtime_r(&sec,&tmp);
-#endif
 		    else
-#ifdef _WINDOWS
-			_gmtime_s(&tmp,&sec);
-#else
 			gmtime_r(&sec,&tmp);
-#endif
 		    if (Textual == format || TextLocal == format)
 			::sprintf(buf,"%04d%02d%02d%02d%02d%02d.%06u ",
 			    tmp.tm_year+1900,tmp.tm_mon+1,tmp.tm_mday,
@@ -944,18 +885,8 @@ bool Debugger::outputTimestamp()
 
 u_int64_t Time::now()
 {
-#ifdef _WINDOWS
-    FILETIME ft;
-    GetSystemTimeAsFileTime(&ft);
-    // Convert from FILETIME (100 nsec units since January 1, 1601)
-    //  to extended time_t (1 usec units since January 1, 1970)
-    u_int64_t rval = ((ULARGE_INTEGER*)&ft)->QuadPart / 10;
-    rval -= 11644473600000000;
-    return rval;
-#else
     struct timeval tv;
     return ::gettimeofday(&tv,0) ? 0 : fromTimeval(&tv);
-#endif
 }
 
 u_int64_t Time::msecNow()
@@ -965,12 +896,8 @@ u_int64_t Time::msecNow()
 
 u_int32_t Time::secNow()
 {
-#ifdef _WINDOWS
-    return (u_int32_t)(now() / 1000000);
-#else
     struct timeval tv;
     return ::gettimeofday(&tv,0) ? 0 : tv.tv_sec;
-#endif
 }
 
 u_int64_t Time::fromTimeval(const struct timeval* tv)
@@ -1038,26 +965,6 @@ bool Time::toDateTime(unsigned int epochTimeSec, int& year, unsigned int& month,
     unsigned int& day, unsigned int& hour, unsigned int& minute, unsigned int& sec,
     unsigned int* wDay)
 {
-#ifdef _WINDOWS
-    FILETIME ft;
-    SYSTEMTIME st;
-    // 11644473600: the number of seconds from 1601, January 1st (FILETIME)
-    //  to EPOCH (1970, January 1st)
-    // Remember: FILETIME keeps the number of 100 nsec units
-    u_int64_t time = (11644473600 + epochTimeSec) * 10000000;
-    ft.dwLowDateTime = (DWORD)time;
-    ft.dwHighDateTime = (DWORD)(time >> 32);
-    if (!FileTimeToSystemTime(&ft,&st))
-	return false;
-    year = st.wYear;
-    month = st.wMonth;
-    day = st.wDay;
-    hour = st.wHour;
-    minute = st.wMinute;
-    sec = st.wSecond;
-    if (wDay)
-	*wDay = st.wDayOfWeek;
-#else
     struct tm t;
     time_t time = (time_t)epochTimeSec;
     if (!gmtime_r(&time,&t))
@@ -1070,7 +977,6 @@ bool Time::toDateTime(unsigned int epochTimeSec, int& year, unsigned int& month,
     sec = t.tm_sec;
     if (wDay)
 	*wDay = t.tm_wday;
-#endif
     DDebug(DebugAll,"Time::toDateTime(%u,%d,%u,%u,%u,%u,%u)",
 	epochTimeSec,year,month,day,hour,minute,sec);
     return true;
@@ -1214,14 +1120,6 @@ uint64_t Time::toEpoch(const char* buf, unsigned int len, int frac)
 
 int Time::timeZone(u_int32_t when)
 {
-#ifdef _WINDOWS
-    struct tm t;
-    time_t time = (time_t)when;
-    _localtime_s(&t,&time);
-    if (t.tm_isdst)
-	return -(_timezone + _dstbias);
-    return -_timezone;
-#else
 #ifdef HAVE_GMTOFF
     struct tm t;
     time_t time = (time_t)when;
@@ -1232,7 +1130,6 @@ int Time::timeZone(u_int32_t when)
     return -timezone;
 #else
     return 0;
-#endif
 #endif
 }
 
@@ -1360,15 +1257,9 @@ void RefObject::destruct()
 bool RefObject::ref()
 {
 #ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-    if (InterlockedIncrement((LONG*)&m_refcount) > 1)
-	return true;
-    InterlockedDecrement((LONG*)&m_refcount);
-#else
     if (__sync_add_and_fetch(&m_refcount,1) > 1)
 	return true;
     __sync_sub_and_fetch(&m_refcount,1);
-#endif
 #else
     Lock lock(m_mutex);
     if (m_refcount > 0) {
@@ -1382,15 +1273,9 @@ bool RefObject::ref()
 bool RefObject::deref()
 {
 #ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-    int i = InterlockedDecrement((LONG*)&m_refcount) + 1;
-    if (i <= 0)
-	InterlockedIncrement((LONG*)&m_refcount);
-#else
     int i = __sync_fetch_and_sub(&m_refcount,1);
     if (i <= 0)
 	__sync_fetch_and_add(&m_refcount,1);
-#endif
 #else
     m_mutex->lock();
     int i = m_refcount;
@@ -1414,17 +1299,10 @@ void RefObject::zeroRefs()
 bool RefObject::resurrect()
 {
 #ifdef ATOMIC_OPS
-#ifdef _WINDOWS
-    if (InterlockedIncrement((LONG*)&m_refcount) == 1)
-	return true;
-    InterlockedDecrement((LONG*)&m_refcount);
-    return false;
-#else
     if (__sync_add_and_fetch(&m_refcount,1) == 1)
 	return true;
     __sync_sub_and_fetch(&m_refcount,1);
     return false;
-#endif
 #else
     m_mutex->lock();
     bool ret = (0 == m_refcount);
@@ -1479,34 +1357,18 @@ u_int64_t SysUsage::usecRunTime(Type type)
 	    return Time::now() - startTime();
 	case UserTime:
 	    {
-#ifdef _WINDOWS
-		FILETIME dummy,ft;
-		if (GetProcessTimes(GetCurrentProcess(),&dummy,&dummy,&dummy,&ft)) {
-		    u_int64_t t = ft.dwLowDateTime | (((u_int64_t)ft.dwHighDateTime) << 32);
-		    return t / 10;
-		}
-#else
 		struct rusage usage;
 		// FIXME: this is broken, may not sum all threads
 		if (!::getrusage(RUSAGE_SELF,&usage))
 		    return Time::fromTimeval(usage.ru_utime);
-#endif
 	    }
 	    break;
 	case KernelTime:
 	    {
-#ifdef _WINDOWS
-		FILETIME dummy,ft;
-		if (GetProcessTimes(GetCurrentProcess(),&dummy,&dummy,&ft,&dummy)) {
-		    u_int64_t t = ft.dwLowDateTime | (((u_int64_t)ft.dwHighDateTime) << 32);
-		    return t / 10;
-		}
-#else
 		struct rusage usage;
 		// FIXME: this is broken, may not sum all threads
 		if (!::getrusage(RUSAGE_SELF,&usage))
 		    return Time::fromTimeval(usage.ru_stime);
-#endif
 	    }
 	    break;
     }
@@ -1525,12 +1387,7 @@ u_int32_t SysUsage::secRunTime(Type type)
 
 double SysUsage::runTime(Type type)
 {
-#ifdef _WINDOWS
-    // VC++ 6 does not implement conversion from UINT64 to double!
-    return 0.000001 * (int64_t)usecRunTime(type);
-#else
     return 0.000001 * usecRunTime(type);
-#endif
 }
 
 

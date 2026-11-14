@@ -29,17 +29,6 @@
 #include <yatemime.h>
 #include <yatephone.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYSDP_EXPORTS
-#define YSDP_API __declspec(dllexport)
-#else
-#ifndef LIBYSDP_STATIC
-#define YSDP_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YSDP_API
 #define YSDP_API

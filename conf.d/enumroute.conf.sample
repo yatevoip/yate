@@ -56,9 +56,6 @@
 ; iax: bool: Enable the IAX2 protocol (E2U+IAX2)
 ;iax=yes
 
-; h323: bool: Enable the H.323 protocol (E2U+H323)
-;h323=yes
-
 ; jingle: bool Enable the Jingle protocol (E2U+XMPP)
 ;jingle=yes
 

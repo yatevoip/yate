@@ -43,91 +43,7 @@
 #endif
 #endif
 
-#ifndef _WINDOWS
-#if defined(WIN32) || defined(_WIN32)
-#define _WINDOWS
-#endif
-#endif
 
-#ifdef _WINDOWS
-
-#include <windows.h>
-#include <io.h>
-#include <direct.h>
-
-/**
- * Windows definitions for commonly used types
- */
-typedef signed __int8 int8_t;
-typedef unsigned __int8 u_int8_t;
-typedef unsigned __int8 uint8_t;
-typedef signed __int16 int16_t;
-typedef unsigned __int16 u_int16_t;
-typedef unsigned __int16 uint16_t;
-typedef signed __int32 int32_t;
-typedef unsigned __int32 u_int32_t;
-typedef unsigned __int32 uint32_t;
-typedef signed __int64 int64_t;
-typedef unsigned __int64 u_int64_t;
-typedef unsigned __int64 uint64_t;
-
-typedef int pid_t;
-typedef int socklen_t;
-typedef unsigned long in_addr_t;
-
-#ifndef strcasecmp
-#define strcasecmp _stricmp
-#endif
-
-#ifndef strncasecmp
-#define strncasecmp _strnicmp
-#endif
-
-#define vsnprintf _vsnprintf
-#define snprintf _snprintf
-#define strdup _strdup
-#define strtoll _strtoi64
-#define strtoull _strtoui64
-#define open _open
-#define dup2 _dup2
-#define read _read
-#define write _write
-#define close _close
-#define getpid _getpid
-#define chdir _chdir
-#define mkdir(p,m) _mkdir(p)
-#define unlink _unlink
-#define llabs _abs64
-
-#define O_RDWR   _O_RDWR
-#define O_RDONLY _O_RDONLY
-#define O_WRONLY _O_WRONLY
-#define O_APPEND _O_APPEND
-#define O_BINARY _O_BINARY
-#define O_EXCL   _O_EXCL
-#define O_CREAT  _O_CREAT
-#define O_TRUNC  _O_TRUNC
-#define O_NOCTTY 0
-
-#define S_IRUSR _S_IREAD
-#define S_IWUSR _S_IWRITE
-#define S_IXUSR 0
-#define S_IRWXU (_S_IREAD|_S_IWRITE)
-
-#ifdef LIBYATE_EXPORTS
-#define YATE_API __declspec(dllexport)
-#else
-#ifndef LIBYATE_STATIC
-#define YATE_API __declspec(dllimport)
-#endif
-#endif
-
-#define FMT64 "%I64d"
-#define FMT64U "%I64u"
-#define FMT64x "%I64x"
-#define FMT64X "%I64X"
-
-#else /* _WINDOWS */
 
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -143,7 +59,7 @@ typedef unsigned long in_addr_t;
 #include <netdb.h>
 
 /**
- * Non-Windows definitions for commonly used types
+ * POSIX definitions for commonly used types
  */
 #ifndef SOCKET
 typedef int SOCKET;
@@ -168,7 +84,6 @@ typedef int HANDLE;
 #define FMT64X "%llX"
 #endif
 
-#endif /* ! _WINDOWS */
 
 #ifndef LLONG_MAX
 #ifdef _I64_MAX
@@ -214,10 +129,6 @@ typedef int HANDLE;
 #define YATE_API
 #endif
 
-#ifdef _WINDOWS
-#undef RAND_MAX
-#define RAND_MAX 2147483647
-#endif
 
 /**
  * Holds all Telephony Engine related classes.
@@ -502,31 +413,19 @@ void NDebug(const DebugEnabler* local, int level, const char* format, ...);
 #ifdef DEBUG
 #define DDebug Debug
 #else
-#ifdef _WINDOWS
-#define DDebug do { break; } while
-#else
 #define DDebug(arg...)
-#endif
 #endif
 
 #ifdef XDEBUG
 #define XDebug Debug
 #else
-#ifdef _WINDOWS
-#define XDebug do { break; } while
-#else
 #define XDebug(arg...)
-#endif
 #endif
 
 #ifndef NDEBUG
 #define NDebug Debug
 #else
-#ifdef _WINDOWS
-#define NDebug do { break; } while
-#else
 #define NDebug(arg...)
-#endif
 #endif
 
 /**
@@ -1218,10 +1117,8 @@ template <class Obj> void yateSortVal(Obj* buf, unsigned int len, bool asc)
 #undef YATOMIC_BUILTIN
 #define YATOMIC_LOCK
 #ifdef ATOMIC_OPS
-    #ifndef _WINDOWS
 	#define YATOMIC_BUILTIN
 	#undef YATOMIC_LOCK
-    #endif
 #endif
 #ifdef YATOMIC_LOCK
     #define YATOMIC_OP_LOCK_WRITE WLock lck(m_lock)
@@ -10667,8 +10564,7 @@ public:
 
     /**
      * Get the last thread error
-     * @return The value returned by GetLastError() (on Windows) or
-     *  the value of C library 'errno' variable otherwise
+     * @return The value of the C library 'errno' variable
      */
     static int lastError();
 
@@ -10683,8 +10579,7 @@ public:
 
     /**
      * Get an error string from system.
-     * On Windows the code parameter must be a code returned by GetLastError().
-     * Otherwise, the error code should be a valid value for the C library 'errno'
+     * The error code should be a valid value for the C library 'errno'
      *  variable
      * @param buffer The destination string
      * @param code The error code

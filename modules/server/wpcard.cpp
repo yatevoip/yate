@@ -22,9 +22,6 @@
 #include <yatephone.h>
 #include <yatesig.h>
 
-#ifdef _WINDOWS
-#error This module is not for Windows
-#else
 
 extern "C" {
 
@@ -1921,6 +1918,5 @@ void WpModule::initialize()
 
 }; // anonymous namespace
 
-#endif /* _WINDOWS */
 
 /* vi: set ts=8 sw=4 sts=4 noet: */

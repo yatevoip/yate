@@ -24,17 +24,6 @@
 
 #include <yateclass.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYASN_EXPORTS
-#define YASN_API __declspec(dllexport)
-#else
-#ifndef LIBYASN_STATIC
-#define YASN_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YASN_API
 #define YASN_API

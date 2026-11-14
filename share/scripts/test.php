@@ -45,8 +45,8 @@ Yate::GetLocal("engine.nosuch");
 Yate::SetLocal("engine.nodename","error because is readonly");
 Yate::GetLocal("config.nosuch");
 Yate::GetLocal("config.localsym");
-Yate::GetLocal("config.localsym.h323chan.yate");
-Yate::SetLocal("config.localsym.h323chan.yate","r/o error too");
+Yate::GetLocal("config.general.maxworkers");
+Yate::SetLocal("config.general.maxworkers","r/o error too");
 
 /* The main loop. We pick events and handle them */
 for (;;) {

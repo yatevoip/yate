@@ -23,17 +23,6 @@
 
 #include <yateclass.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYSCRIPT_EXPORTS
-#define YSCRIPT_API __declspec(dllexport)
-#else
-#ifndef LIBYSCRIPT_STATIC
-#define YSCRIPT_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YSCRIPT_API
 #define YSCRIPT_API

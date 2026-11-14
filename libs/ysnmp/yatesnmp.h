@@ -5,17 +5,6 @@
 
 #include <yateasn.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYSNMP_EXPORTS
-#define YSNMP_API __declspec(dllexport)
-#else
-#ifndef LIBYSNMP_STATIC
-#define YSNMP_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YSNMP_API
 #define YSNMP_API

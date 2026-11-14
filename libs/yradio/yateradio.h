@@ -25,17 +25,6 @@
 #include <yateclass.h>
 #include <yatexml.h>
 
-#ifdef _WINDOWS
-
-#ifdef LIBYRADIO_EXPORTS
-#define YRADIO_API __declspec(dllexport)
-#else
-#ifndef LIBYRADIO_STATIC
-#define YRADIO_API __declspec(dllimport)
-#endif
-#endif
-
-#endif /* _WINDOWS */
 
 #ifndef YRADIO_API
 #define YRADIO_API

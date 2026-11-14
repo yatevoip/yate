@@ -129,6 +129,12 @@ int main()
 	delete iam;
     }
     Thread::msleep(500);
+    // Останавливаем обработчик и разрываем связи до удаления компонентов.
+    engine->stop();
+    router->detach(isup);
+    network->detach(fl2);
+    network->detach(link);
+    router->detach(network);
     delete engine;
     Output("SS7 library test stopped");
     return 0;

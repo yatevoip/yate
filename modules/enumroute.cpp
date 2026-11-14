@@ -55,7 +55,6 @@ static bool s_redirect;
 static bool s_autoFork;
 static bool s_sipUsed;
 static bool s_iaxUsed;
-static bool s_h323Used;
 static bool s_xmppUsed;
 static bool s_telUsed;
 static bool s_voiceUsed;
@@ -162,13 +161,6 @@ bool EnumHandler::resolve(Message& msg,bool canRedirect,const ObjList* domains)
 	    }
 	    if (s_iaxUsed && (serv == "E2U+IAX2") && ptr->replace(callto)) {
 		addRoute(msg.retValue(),"iax/" + callto);
-		rval = true;
-		if (autoFork)
-		    continue;
-		break;
-	    }
-	    if (s_h323Used && (serv == "E2U+H323") && ptr->replace(callto)) {
-		addRoute(msg.retValue(),"h323/" + callto);
 		rval = true;
 		if (autoFork)
 		    continue;
@@ -321,7 +313,6 @@ void EnumModule::initialize()
     s_autoFork = cfg.getBoolValue("general","autofork");
     s_sipUsed  = cfg.getBoolValue("protocols","sip",true);
     s_iaxUsed  = cfg.getBoolValue("protocols","iax",true);
-    s_h323Used = cfg.getBoolValue("protocols","h323",true);
     s_xmppUsed = cfg.getBoolValue("protocols","jingle",true);
     s_voidUsed = cfg.getBoolValue("protocols","void",true);
     // by default don't support the number rerouting
