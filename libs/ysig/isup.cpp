@@ -2808,11 +2808,13 @@ bool SS7ISUPCall::copyParamIAM(SS7MsgISUP* msg, bool outgoing, SignallingMessage
 	param(dest,src,"CallingPartyNumber.complete","complete","true");
 	m_format = src.getValue(YSTRING("format"),isup()->format());
 	dest.setParam("UserServiceInformation",m_format);
+	param(dest,src,"UserServiceInformation.transfercap","transfer-cap","");
 	return true;
     }
     // Incoming call
     m_format = dest.getValue(YSTRING("UserServiceInformation"),isup()->format());
     dest.setParam("format",m_format);
+    dest.setParam("transfer-cap",dest.getValue(YSTRING("UserServiceInformation.transfercap")));
     dest.setParam("caller",dest.getValue(YSTRING("CallingPartyNumber")));
     //dest.setParam("callername",dest.getValue(""));
     dest.setParam("callernumtype",dest.getValue(YSTRING("CallingPartyNumber.nature")));
