@@ -4,6 +4,7 @@ jobs:
   linux:
     runs-on: ubuntu-22.04
     strategy:
+      fail-fast: false
       matrix:
         configuration: [Release, Debug]
     steps:
@@ -23,7 +24,9 @@ jobs:
           fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.configuration }} \
             -DYATE_WITH_OPENSSL=ON -DYATE_WITH_SQLITE=ON -DYATE_WITH_MYSQL=ON \
-            -DYATE_WITH_POSTGRESQL=ON -DYATE_WITH_SCTP=ON "${extra[@]}"
+            -DYATE_WITH_POSTGRESQL=ON -DYATE_WITH_SCTP=ON -DYATE_WITH_ALSA=ON \
+            -DYATE_WITH_SPANDSP=ON -DYATE_WITH_LIBUSB=ON -DYATE_WITH_GSM=ON \
+            -DYATE_WITH_SPEEX=ON "${extra[@]}"
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test

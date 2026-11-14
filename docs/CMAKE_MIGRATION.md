@@ -807,7 +807,7 @@ rg --files -g 'YateLocal*'
 
 ### 15.1 Что уже сделано
 
-CMake самостоятельно конфигурирует, собирает и устанавливает проект, экспортирует SDK и поддерживает staging. Linux workflow описывает Release/Debug, CTest и staged install. На момент подготовки руководства удалённый GitHub Actions для этой рабочей ветки ещё не запускался.
+CMake самостоятельно конфигурирует, собирает и устанавливает проект, экспортирует SDK и поддерживает staging. Linux workflow описывает Release/Debug, CTest и staged install. После публикации ветки актуальные результаты доступны в [GitHub Actions](https://github.com/miamaster/yate/actions/workflows/cmake.yml?query=branch%3Acodex%2Fcmake-migration). Обе конфигурации проверяются независимо; установленные в CI дополнительные зависимости, включая SpanDSP, требуются явно.
 
 ### 15.2 Что ещё требуется пакетным сценариям
 
